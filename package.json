@@ -1,0 +1,35 @@
+{
+  "name": "unified-assessment-platform",
+  "version": "1.0.0",
+  "description": "Unified Assessment Platform - Scalable Full-Stack Assessment & Grading System",
+  "private": true,
+  "workspaces": [
+    "frontend",
+    "backend"
+  ],
+  "scripts": {
+    "install:all": "npm install && npm --prefix backend install && npm --prefix frontend install",
+    "dev": "concurrently -n \"BACKEND,FRONTEND\" -c \"blue.bold,magenta.bold\" \"npm --prefix backend run dev\" \"npm --prefix frontend run dev\"",
+    "dev:backend": "npm --prefix backend run dev",
+    "dev:frontend": "npm --prefix frontend run dev",
+    "build": "npm --prefix frontend run build",
+    "start": "npm --prefix backend start",
+    "seed": "npm --prefix backend run seed",
+    "test:e2e": "npx playwright test --config=tests/playwright.config.js"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.62.1",
+    "concurrently": "^9.1.2"
+  },
+  "keywords": [
+    "assessment",
+    "education",
+    "grading",
+    "lms",
+    "react",
+    "express",
+    "postgresql"
+  ],
+  "author": "Unified Assessment Platform Team",
+  "license": "MIT"
+}
