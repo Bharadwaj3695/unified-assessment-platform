@@ -13,6 +13,10 @@ const evaluationRoutes = require('./routes/evaluation.routes');
 const userRoutes = require('./routes/user.routes');
 const adminRoutes = require('./routes/admin.routes');
 const notificationRoutes = require('./routes/notification.routes');
+const proctoringRoutes = require('./routes/proctoring.routes');
+const analyticsRoutes = require('./routes/analytics.routes');
+const questionBankRoutes = require('./routes/questionBank.routes');
+const questionImportRoutes = require('./routes/questionImport.routes');
 const { apiRateLimiter, authRateLimiter } = require('./middleware/rateLimit.middleware');
 
 const app = express();
@@ -24,8 +28,23 @@ app.set('trust proxy', 1);
 app.use(helmet({
   crossOriginResourcePolicy: { policy: "cross-origin" }
 }));
+const allowedOrigins = (process.env.CLIENT_URL || 'http://localhost:5173')
+  .split(',')
+  .map((origin) => origin.trim().replace(/\/+$/, ''))
+  .filter(Boolean);
+
 app.use(cors({
-  origin: process.env.CLIENT_URL || 'http://localhost:5173',
+  origin: (origin, callback) => {
+    if (!origin) return callback(null, true);
+    const normalizedOrigin = origin.replace(/\/+$/, '');
+    if (allowedOrigins.includes(normalizedOrigin)) {
+      return callback(null, true);
+    }
+    if (process.env.NODE_ENV !== 'production' && normalizedOrigin.includes('localhost')) {
+      return callback(null, true);
+    }
+    return callback(new Error(`CORS blocked for origin: ${origin}`));
+  },
   credentials: true,
 }));
 app.use(express.json({ limit: '10mb' }));
@@ -41,14 +60,39 @@ if (process.env.NODE_ENV !== 'test') {
 // Static folder for file uploads
 app.use('/uploads', express.static(path.resolve(__dirname, '../uploads')));
 
-// Health Check
-app.get('/api/health', (req, res) => {
+// Root landing
+app.get('/', (req, res) => {
+  res.status(200).json({
+    status: 'online',
+    message: 'Unified Assessment Platform Backend API is running.',
+    frontendUrl: process.env.CLIENT_URL || 'http://localhost:5173',
+    healthCheck: '/api/health',
+    endpoints: {
+      auth: '/api/auth',
+      assessments: '/api/assessments',
+      submissions: '/api/submissions',
+      evaluations: '/api/evaluations',
+      users: '/api/users',
+      admin: '/api/admin',
+      analytics: '/api/analytics',
+      questionBank: '/api/question-bank',
+      questionImport: '/api/question-import',
+      notifications: '/api/notifications',
+      proctoring: '/api/proctoring',
+    },
+  });
+});
+
+// Health Check (supports both /api/health and /health for deployment health checks)
+const handleHealthCheck = (req, res) => {
   res.status(200).json({
     status: 'healthy',
     timestamp: new Date().toISOString(),
     service: 'Unified Assessment Platform API',
   });
-});
+};
+app.get('/api/health', handleHealthCheck);
+app.get('/health', handleHealthCheck);
 
 // API Routes
 app.use('/api/auth', authRateLimiter, authRoutes);
@@ -58,6 +102,10 @@ app.use('/api/evaluations', evaluationRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/notifications', notificationRoutes);
+app.use('/api/proctoring', proctoringRoutes);
+app.use('/api/analytics', analyticsRoutes);
+app.use('/api/question-bank', questionBankRoutes);
+app.use('/api/question-import', questionImportRoutes);
 
 // Centralized Error Handling
 app.use(errorHandler);

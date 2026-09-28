@@ -1,8 +1,10 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { toast } from 'react-toastify';
 import { useAuth } from '../../hooks/useAuth';
+import { getTimeBasedGreeting } from '../../utils/greeting';
 import adminService from '../../services/admin.service';
+import analyticsService from '../../services/analytics.service';
 import Card from '../../components/ui/Card';
 import Badge from '../../components/ui/Badge';
 import Button from '../../components/ui/Button';
@@ -15,6 +17,7 @@ import ErrorState from '../../components/ui/ErrorState';
 import StatCard from '../../components/common/StatCard';
 import ActivityBarChart from '../../components/charts/ActivityBarChart';
 import { AdminHeroIllustration } from '../../components/illustrations';
+import TwoFactorAuthSection from '../../components/auth/TwoFactorAuthSection';
 import {
   Table,
   TableHead,
@@ -78,6 +81,7 @@ const AdminDashboard = () => {
 
   // Data states
   const [stats, setStats] = useState(null);
+  const [platformAnalytics, setPlatformAnalytics] = useState(null);
   const [users, setUsers] = useState([]);
   const [pendingUsers, setPendingUsers] = useState([]);
   const [assessments, setAssessments] = useState([]);
@@ -127,13 +131,14 @@ const AdminDashboard = () => {
     setIsLoading(true);
     setError(null);
     try {
-      const [statsData, pendingData, assessmentsRes, logsRes, alertsRes, settingsRes] = await Promise.all([
+      const [statsData, pendingData, assessmentsRes, logsRes, alertsRes, settingsRes, analyticsRes] = await Promise.all([
         adminService.getStats(),
         adminService.getPendingUsers(),
         adminService.getAssessments({ limit: 50 }),
         adminService.getLogs({ limit: 50 }),
         adminService.getAlerts().catch(() => ({ alerts: [], summary: {} })),
         adminService.getSettings().catch(() => null),
+        analyticsService.getAdminOverview().catch(() => null),
       ]);
 
       setStats(statsData);
@@ -141,6 +146,7 @@ const AdminDashboard = () => {
       setAssessments(assessmentsRes.data || assessmentsRes.assessments || []);
       setLogs(logsRes.data || logsRes.logs || []);
       if (alertsRes) setAlertsData(alertsRes);
+      if (analyticsRes) setPlatformAnalytics(analyticsRes);
       if (settingsRes) {
         setSettings(settingsRes);
         setSettingsForm({
@@ -223,6 +229,17 @@ const AdminDashboard = () => {
       loadLogsList();
     }
   }, [activeTab, loadLogsList]);
+
+  const activityChartData = useMemo(() => {
+    if (platformAnalytics?.activityTrend && platformAnalytics.activityTrend.length > 0) {
+      return platformAnalytics.activityTrend.map((item) => ({
+        name: item.date,
+        submissions: item.submissions,
+        passes: item.passed,
+      }));
+    }
+    return undefined;
+  }, [platformAnalytics]);
 
   // Inspect user full details
   const handleOpenDetails = async (targetUser) => {
@@ -381,26 +398,26 @@ const AdminDashboard = () => {
   };
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4 sm:space-y-5 lg:space-y-6">
       {/* Header Banner */}
-      <div className="rounded-2xl border border-[#EBE3D8] dark:border-[#2D3748] bg-gradient-to-r from-[#FFF4ED] via-[#FFFDFB] to-[#F3F7FB] dark:from-[#341C16] dark:via-[#1A202C] dark:to-[#12161F] p-6 sm:p-7 shadow-warm-xs relative overflow-hidden">
-        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-6 relative z-10">
+      <div className="rounded-2xl border border-[#EBE3D8] dark:border-[#2D3748] bg-gradient-to-r from-[#FFF4ED] via-[#FFFDFB] to-[#F3F7FB] dark:from-[#341C16] dark:via-[#1A202C] dark:to-[#12161F] p-5 sm:p-6 lg:py-5 lg:px-7 shadow-warm-xs relative overflow-hidden">
+        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-5 sm:gap-6 relative z-10">
           <div className="max-w-xl">
-            <div className="flex items-center space-x-2 mb-2">
+            <div className="flex items-center space-x-2 mb-1.5 sm:mb-2">
               <Badge variant="terracotta" size="sm" dot>System Governance</Badge>
               <span className="text-xs text-[#64748B] dark:text-[#94A3B8]">· Institutional Master Console</span>
             </div>
             <h1 className="text-2xl sm:text-3xl font-display font-bold tracking-tight text-[#1F2937] dark:text-[#F9FAFB]">
-              Welcome, {user?.name || 'Administrator'}
+              {getTimeBasedGreeting(user?.name)}
             </h1>
-            <p className="mt-2 text-sm text-[#64748B] dark:text-[#94A3B8] leading-relaxed">
-              Platform telemetry, applicant verification queue, assessment oversight, audit trails, and system governance.
+            <p className="mt-1.5 sm:mt-2 text-sm text-[#64748B] dark:text-[#94A3B8] leading-relaxed">
+              Welcome back. Here's your platform administration overview.
             </p>
           </div>
 
           <div className="flex items-center space-x-4">
             <div className="hidden md:flex flex-shrink-0 items-center justify-center">
-              <AdminHeroIllustration className="w-52 h-36 object-contain drop-shadow-sm" />
+              <AdminHeroIllustration className="w-36 h-24 sm:w-44 sm:h-28 lg:w-48 lg:h-32 object-contain drop-shadow-sm" />
             </div>
             <Button
               variant="outline"
@@ -419,7 +436,7 @@ const AdminDashboard = () => {
         </div>
 
         {/* Tab Navigation Bar */}
-        <div className="mt-6 flex flex-wrap gap-2 border-t border-[#EBE3D8] dark:border-[#2D3748] pt-4">
+        <div className="mt-4 sm:mt-5 flex flex-wrap gap-2 border-t border-[#EBE3D8] dark:border-[#2D3748] pt-3 sm:pt-3.5">
           <button
             type="button"
             onClick={() => handleTabChange('overview', '/admin/dashboard')}
@@ -495,9 +512,9 @@ const AdminDashboard = () => {
       {/* Overview Stat Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <StatCard
-          title="Total Users"
-          value={stats?.totalUsers ?? '—'}
-          subtitle={`${stats?.activeUsersCount ?? 0} active, ${stats?.revokedUsersCount ?? 0} revoked`}
+          title="Active Students"
+          value={platformAnalytics?.totalActiveStudents ?? stats?.activeUsersCount ?? '—'}
+          subtitle={`${stats?.totalUsers ?? 0} total registered · ${stats?.revokedUsersCount ?? 0} revoked`}
           icon={Users}
           color="primary"
         />
@@ -510,15 +527,21 @@ const AdminDashboard = () => {
         />
         <StatCard
           title="Faculty Instructors"
-          value={stats?.totalInstructors ?? '—'}
-          subtitle="Course creators"
+          value={platformAnalytics?.totalInstructors ?? stats?.totalInstructors ?? '—'}
+          subtitle={`${platformAnalytics?.publishedAssessments ?? 0} published · ${platformAnalytics?.totalAssessments ?? assessments.length} total exams`}
           icon={ShieldCheck}
           color="sage"
         />
         <StatCard
-          title="Submissions Pass Rate"
-          value={stats?.passRate !== undefined ? `${stats.passRate}%` : '—'}
-          subtitle={`Avg Score: ${stats?.averageScore ?? 0}% · ${stats?.passedSubmissions ?? 0}/${stats?.totalSubmissions ?? 0} passed`}
+          title="Platform Pass Rate"
+          value={
+            platformAnalytics?.overallPassRate !== undefined
+              ? `${platformAnalytics.overallPassRate}%`
+              : stats?.passRate !== undefined
+              ? `${stats.passRate}%`
+              : '—'
+          }
+          subtitle={`Avg Score: ${platformAnalytics?.overallAverageScore ?? stats?.averageScore ?? 0}% · ${platformAnalytics?.completedSubmissions ?? stats?.passedSubmissions ?? 0} completed`}
           icon={Award}
           color="secondary"
         />
@@ -677,18 +700,48 @@ const AdminDashboard = () => {
                 subtitle="Platform submission activity"
               >
                 <ActivityBarChart
+                  data={activityChartData}
                   barKey="submissions"
                   barLabel="Total Attempts"
                   barColor="#E05D38"
                   height={220}
                 />
                 <div className="mt-4 pt-3 border-t border-surface-light-border dark:border-surface-dark-border flex items-center justify-between text-xs text-slate-500 dark:text-slate-400">
-                  <span>MongoDB Atlas Storage: <strong>Optimal</strong></span>
-                  <span>Evaluations: <strong>{stats?.totalSubmissions || 0} Total</strong></span>
+                  <span>Completed: <strong>{platformAnalytics?.completedSubmissions ?? stats?.totalSubmissions ?? 0}</strong></span>
+                  <span>Evaluations: <strong>{platformAnalytics?.evaluatedSubmissions ?? 0} Total</strong></span>
                 </div>
               </Card>
             </div>
           </div>
+
+          {/* Platform Category Distribution */}
+          {platformAnalytics?.categories && platformAnalytics.categories.length > 0 && (
+            <Card
+              title="Curriculum & Category Distribution"
+              subtitle="Breakdown of assessment examinations across institutional categories"
+            >
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3.5">
+                {platformAnalytics.categories.map((cat) => (
+                  <div
+                    key={cat.category}
+                    className="p-4 rounded-xl border border-surface-light-border dark:border-surface-dark-border bg-white dark:bg-surface-dark flex items-center justify-between"
+                  >
+                    <div>
+                      <span className="font-bold text-slate-900 dark:text-slate-100 block text-xs">
+                        {cat.category}
+                      </span>
+                      <span className="text-[11px] text-slate-500">
+                        {cat.published} of {cat.totalAssessments} published
+                      </span>
+                    </div>
+                    <Badge variant={cat.published > 0 ? 'success' : 'neutral'} size="sm">
+                      {cat.totalAssessments} Exam{cat.totalAssessments !== 1 ? 's' : ''}
+                    </Badge>
+                  </div>
+                ))}
+              </div>
+            </Card>
+          )}
         </div>
       )}
 
@@ -1207,10 +1260,11 @@ const AdminDashboard = () => {
 
       {/* TAB 5: SYSTEM & PLATFORM SETTINGS */}
       {activeTab === 'settings' && (
-        <Card
-          title="Platform & System Settings"
-          subtitle="Configure institutional rules, registration availability, maintenance status, and default exam parameters"
-        >
+        <div className="space-y-6">
+          <Card
+            title="Platform & System Settings"
+            subtitle="Configure institutional rules, registration availability, maintenance status, and default exam parameters"
+          >
           <form onSubmit={handleSaveSettings} className="space-y-6">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               {/* Platform Name */}
@@ -1380,6 +1434,10 @@ const AdminDashboard = () => {
             </div>
           </form>
         </Card>
+
+        {/* Administrator Two-Factor Authentication */}
+        <TwoFactorAuthSection profile={user} onProfileUpdate={() => {}} />
+      </div>
       )}
 
       {/* MODAL 1: USER DETAILS INSPECTION MODAL */}

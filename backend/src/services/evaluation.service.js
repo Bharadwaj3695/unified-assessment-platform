@@ -39,7 +39,7 @@ class EvaluationService {
 
     const rows = await Submission.find(submissionQuery)
       .populate('assessmentId', 'title category totalPoints passingScore')
-      .populate('studentId', 'name email avatar')
+      .populate('studentId', 'name email avatar studentId department')
       .populate('evaluation')
       .sort({ createdAt: -1 })
       .skip(skip)
@@ -90,7 +90,7 @@ class EvaluationService {
     const questions = await Question.find({ assessmentId: assessment._id });
     const questionMap = new Map(questions.map((q) => [q._id.toString(), q]));
     const subjectiveQuestions = questions.filter(
-      (q) => q.type === 'short_answer' || q.type === 'long_answer'
+      (q) => q.type === 'short_answer' || q.type === 'long_answer' || q.type === 'file_upload'
     );
 
     let calculatedManualScore = 0;
@@ -130,7 +130,7 @@ class EvaluationService {
         comment: fb.comment ? String(fb.comment).trim() : '',
       };
 
-      if (q.type === 'short_answer' || q.type === 'long_answer') {
+      if (q.type === 'short_answer' || q.type === 'long_answer' || q.type === 'file_upload') {
         calculatedManualScore += pts;
       }
     }
@@ -217,9 +217,118 @@ class EvaluationService {
       }
     }
 
+    if (generalFeedback || Object.keys(sanitizedFeedback).length > 0) {
+      // Notify Student that faculty added comments/feedback
+      await Notification.create({
+        userId: submission.studentId,
+        title: 'New Faculty Feedback',
+        message: `Your faculty has added feedback to "${assessment.title}".`,
+        type: 'info',
+        link: `/student/submissions/${submission._id}`,
+      });
+    }
+
     return {
       submission,
       evaluation,
+    };
+  }
+
+  async sendStudentEmail(instructorId, submissionId, { subject, message }) {
+    if (!subject || !subject.trim()) {
+      const err = new Error('Email subject is required');
+      err.statusCode = 400;
+      throw err;
+    }
+
+    if (!message || !message.trim()) {
+      const err = new Error('Email message body is required');
+      err.statusCode = 400;
+      throw err;
+    }
+
+    const submission = await Submission.findById(submissionId)
+      .populate('assessmentId')
+      .populate('studentId');
+
+    if (!submission) {
+      const err = new Error('Submission not found');
+      err.statusCode = 404;
+      throw err;
+    }
+
+    const assessment = submission.assessmentId;
+    const student = submission.studentId;
+
+    if (!student || !student.email) {
+      const err = new Error('Student email address not found on record');
+      err.statusCode = 404;
+      throw err;
+    }
+
+    // Resource-level authorization: instructor must own the assessment
+    const ownerId = (assessment.instructorId?._id || assessment.instructorId)?.toString();
+    const instructor = await User.findById(instructorId);
+    const isOwner = ownerId === instructorId.toString();
+    const isAdmin = instructor?.role === 'admin';
+
+    if (!isOwner && !isAdmin) {
+      const err = new Error('Access denied. You do not own the assessment for this submission.');
+      err.statusCode = 403;
+      throw err;
+    }
+
+    // Build email template using platform design system
+    const html = emailService.buildHtmlTemplate({
+      title: `Academic Communication: ${assessment.title}`,
+      recipientName: student.name,
+      messageHtml: `
+        <p>Your instructor <strong>${instructor?.name || 'Faculty Member'}</strong> has sent you a direct message regarding your assessment submission for <strong>${assessment.title}</strong>:</p>
+        <div style="padding: 16px; background-color: #f8fafc; border-left: 4px solid #E05D38; margin: 16px 0; border-radius: 8px; font-size: 14px; line-height: 1.6; color: #1e293b;">
+          ${message.trim().replace(/\n/g, '<br/>')}
+        </div>
+        <p style="font-size: 12px; color: #64748b;">You can review your submission and faculty comments anytime in the student portal.</p>
+      `,
+      actionUrl: `/student/submissions`,
+      actionText: 'View Assessment Feedback',
+    });
+
+    await emailService.sendMail({
+      to: student.email,
+      subject: subject.trim(),
+      html,
+    });
+
+    // Record in AuditLog
+    const { AuditLog } = require('../models');
+    await AuditLog.create({
+      userId: instructorId,
+      action: 'FACULTY_SENT_STUDENT_EMAIL',
+      entityType: 'Submission',
+      entityId: submissionId.toString(),
+      details: {
+        recipientStudentId: student._id.toString(),
+        recipientEmail: student.email,
+        assessmentId: assessment._id.toString(),
+        assessmentTitle: assessment.title,
+        subject: subject.trim(),
+      },
+    });
+
+    // Create In-App Notification for Student
+    await Notification.create({
+      userId: student._id,
+      title: `Message from Faculty: ${instructor?.name || 'Instructor'}`,
+      message: `Regarding "${assessment.title}": ${subject.trim()}`,
+      type: 'info',
+      link: `/student/submissions`,
+    });
+
+    return {
+      success: true,
+      message: `Email successfully sent to ${student.email}`,
+      recipientEmail: student.email,
+      subject: subject.trim(),
     };
   }
 }

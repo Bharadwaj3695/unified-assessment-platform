@@ -32,7 +32,13 @@ export const AuthProvider = ({ children }) => {
     setIsLoading(true);
     try {
       const data = await authService.login(credentials);
+      if (data.mfaRequired) {
+        return data;
+      }
       storage.setToken(data.accessToken);
+      if (data.refreshToken) {
+        storage.setRefreshToken(data.refreshToken);
+      }
       storage.setUser(data.user);
       setToken(data.accessToken);
       setUser(data.user);
@@ -48,6 +54,9 @@ export const AuthProvider = ({ children }) => {
       const data = await authService.register(userData);
       if (data.accessToken && data.user) {
         storage.setToken(data.accessToken);
+        if (data.refreshToken) {
+          storage.setRefreshToken(data.refreshToken);
+        }
         storage.setUser(data.user);
         setToken(data.accessToken);
         setUser(data.user);
@@ -55,6 +64,52 @@ export const AuthProvider = ({ children }) => {
       return data;
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  const loginWithGoogle = async (payload) => {
+    setIsLoading(true);
+    try {
+      const data = await authService.loginWithGoogle(payload);
+      if (data.mfaRequired) {
+        return data;
+      }
+      if (data.accessToken && data.user) {
+        storage.setToken(data.accessToken);
+        if (data.refreshToken) {
+          storage.setRefreshToken(data.refreshToken);
+        }
+        storage.setUser(data.user);
+        setToken(data.accessToken);
+        setUser(data.user);
+      }
+      return data;
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const completeMfaLogin = (authData) => {
+    if (authData.accessToken && authData.user) {
+      storage.setToken(authData.accessToken);
+      if (authData.refreshToken) {
+        storage.setRefreshToken(authData.refreshToken);
+      }
+      storage.setUser(authData.user);
+      setToken(authData.accessToken);
+      setUser(authData.user);
+    }
+    return authData.user;
+  };
+
+  const refreshProfile = async () => {
+    try {
+      const profile = await authService.getProfile();
+      setUser(profile);
+      storage.setUser(profile);
+      return profile;
+    } catch (err) {
+      console.warn('Failed to refresh profile', err);
     }
   };
 
@@ -72,6 +127,9 @@ export const AuthProvider = ({ children }) => {
     isLoading,
     login,
     register,
+    loginWithGoogle,
+    completeMfaLogin,
+    refreshProfile,
     logout,
   };
 

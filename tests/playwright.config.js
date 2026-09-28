@@ -37,12 +37,14 @@ module.exports = defineConfig({
   webServer: [
     {
       command: 'npm --prefix backend start',
+      cwd: '..',
       url: 'http://localhost:5000/api/health',
       reuseExistingServer: true,
       timeout: 30000,
     },
     {
       command: 'npm --prefix frontend run dev -- --host 0.0.0.0 --port 5173',
+      cwd: '..',
       url: 'http://localhost:5173',
       reuseExistingServer: true,
       timeout: 30000,

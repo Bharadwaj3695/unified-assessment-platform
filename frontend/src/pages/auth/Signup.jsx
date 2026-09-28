@@ -69,71 +69,72 @@ const Signup = () => {
   return (
     <div className="w-full max-w-5xl mx-auto rounded-3xl border border-surface-light-border dark:border-surface-dark-border bg-white dark:bg-surface-dark shadow-warm-lg overflow-hidden grid grid-cols-1 lg:grid-cols-12">
       {/* Left Column: Brand & Editorial Illustration */}
-      <div className="hidden lg:flex lg:col-span-5 flex-col justify-between bg-gradient-to-br from-[#FFF4EB] via-[#FFF9F2] to-[#EEF6F4] dark:from-[#241712] dark:via-surface-dark dark:to-[#132822] p-8 border-r border-surface-light-border dark:border-surface-dark-border">
+      <div className="hidden lg:flex lg:col-span-5 flex-col justify-between bg-gradient-to-br from-[#FFF4EB] via-[#FFF9F2] to-[#EEF6F4] dark:from-[#241712] dark:via-surface-dark dark:to-[#132822] p-5 sm:p-6 lg:p-6 xl:p-7 border-r border-surface-light-border dark:border-surface-dark-border">
         <div>
-          <div className="flex items-center space-x-3 mb-6">
-            <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-brand-terracotta to-brand-peach flex items-center justify-center text-white font-extrabold text-lg shadow-warm-xs">
+          <div className="flex items-center space-x-3 mb-4 sm:mb-5">
+            <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-xl sm:rounded-2xl bg-gradient-to-br from-brand-terracotta to-brand-peach flex items-center justify-center text-white font-extrabold text-base shadow-warm-xs">
               U
             </div>
             <div>
-              <span className="font-bold text-lg tracking-tight text-slate-900 dark:text-slate-100 block leading-tight">
+              <span className="font-bold text-base sm:text-lg tracking-tight text-slate-900 dark:text-slate-100 block leading-tight">
                 Unified Assessment
               </span>
-              <span className="text-[10px] font-semibold text-slate-400 dark:text-slate-500 uppercase tracking-wider">
+              <span className="text-[9px] sm:text-[10px] font-semibold text-slate-400 dark:text-slate-500 uppercase tracking-wider">
                 EdTech Academic Suite
               </span>
             </div>
           </div>
 
-          <Badge variant="terracotta" dot className="mb-3">New Registration</Badge>
+          <Badge variant="terracotta" dot className="mb-2">New Registration</Badge>
 
-          <h2 className="text-2xl font-bold font-display text-slate-900 dark:text-slate-100 leading-snug mb-2">
+          <h2 className="text-xl lg:text-2xl font-bold font-display text-slate-900 dark:text-slate-100 leading-snug mb-1.5">
             Join the Next Generation Evaluation Suite
           </h2>
-          <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed mb-6">
+          <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed mb-3 sm:mb-4">
             Establish your institutional identity to access curated coursework, take timed exams, 
             or manage academic assessments with verified integrity.
           </p>
 
-          <div className="p-4 rounded-2xl bg-white/80 dark:bg-slate-800/60 border border-surface-light-border dark:border-surface-dark-border text-xs space-y-2 shadow-warm-xs">
+          <div className="p-3 rounded-xl bg-white/80 dark:bg-slate-800/60 border border-surface-light-border dark:border-surface-dark-border text-xs space-y-1 shadow-warm-xs">
             <div className="flex items-center space-x-2 text-slate-700 dark:text-slate-200">
               <ShieldCheck className="w-4 h-4 text-brand-primary flex-shrink-0" />
               <span className="font-semibold">Strict Role-Based Authorization</span>
             </div>
-            <p className="text-[11px] text-slate-500 dark:text-slate-400 pl-6">
+            <p className="text-[10px] sm:text-[11px] text-slate-500 dark:text-slate-400 pl-6">
               Administrative registration requires verification of institutional credentials.
             </p>
           </div>
         </div>
 
-        <div className="my-2">
+        <div className="my-1">
           <AuthIllustration role="student" />
         </div>
 
-        <p className="text-[11px] text-slate-400 dark:text-slate-500 text-center">
+        <p className="text-[10px] text-slate-400 dark:text-slate-500 text-center">
           © {new Date().getFullYear()} Unified Assessment Platform
         </p>
       </div>
+
       {/* Right Column: Registration Form or Pending Confirmation */}
-      <div className="lg:col-span-7 p-6 sm:p-10 flex flex-col justify-center bg-white dark:bg-surface-dark">
+      <div className="lg:col-span-7 p-5 sm:p-6 lg:py-5 lg:px-8 xl:py-6 xl:px-9 flex flex-col justify-center bg-white dark:bg-surface-dark">
         <div className="max-w-md w-full mx-auto">
           {registrationSubmitted ? (
-            <div className="text-center py-4 space-y-5 animate-in fade-in duration-300">
-              <div className="w-16 h-16 bg-amber-100 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400 rounded-2xl mx-auto flex items-center justify-center shadow-inner">
-                <ShieldCheck className="w-8 h-8" />
+            <div className="text-center py-2 sm:py-3 space-y-3 sm:space-y-4 animate-in fade-in duration-300">
+              <div className="w-14 h-14 bg-amber-100 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400 rounded-2xl mx-auto flex items-center justify-center shadow-inner">
+                <ShieldCheck className="w-7 h-7" />
               </div>
 
               <div>
-                <Badge variant="warning" dot className="mb-2">Pending Administrator Review</Badge>
-                <h2 className="text-2xl font-bold tracking-tight text-slate-900 dark:text-slate-100">
+                <Badge variant="warning" dot className="mb-1.5">Pending Administrator Review</Badge>
+                <h2 className="text-xl sm:text-2xl font-bold tracking-tight text-slate-900 dark:text-slate-100">
                   Application Submitted
                 </h2>
-                <p className="text-xs text-slate-500 dark:text-slate-400 mt-2 leading-relaxed">
+                <p className="text-xs text-slate-500 dark:text-slate-400 mt-1.5 leading-relaxed">
                   Thank you, <span className="font-semibold text-slate-700 dark:text-slate-200">{registrationSubmitted.name}</span>. Your institutional registration is currently pending administrative verification.
                 </p>
               </div>
 
-              <div className="p-4 rounded-xl bg-slate-50 dark:bg-surface-dark-muted border border-surface-light-border dark:border-surface-dark-border text-left text-xs space-y-2.5">
+              <div className="p-3 sm:p-4 rounded-xl bg-slate-50 dark:bg-surface-dark-muted border border-surface-light-border dark:border-surface-dark-border text-left text-xs space-y-2">
                 <div className="flex justify-between">
                   <span className="text-slate-500 dark:text-slate-400">Institutional Email:</span>
                   <span className="font-medium text-slate-800 dark:text-slate-200">{registrationSubmitted.email}</span>
@@ -164,23 +165,24 @@ const Signup = () => {
                 onClick={() => navigate('/auth/login')}
                 icon={ArrowRight}
                 iconPosition="right"
+                className="h-10 sm:h-[42px]"
               >
                 Return to Sign In
               </Button>
             </div>
           ) : (
             <>
-              <div className="mb-6">
-                <h1 className="text-2xl font-bold tracking-tight text-slate-900 dark:text-slate-100">
+              <div className="mb-3.5 sm:mb-4">
+                <h1 className="text-xl sm:text-2xl lg:text-[1.65rem] font-bold font-display tracking-tight text-slate-900 dark:text-slate-100 leading-snug">
                   Create an Account
                 </h1>
-                <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
+                <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
                   Submit your details for institutional verification and account provisioning.
                 </p>
               </div>
 
               {authError && (
-                <Alert type="error" className="mb-5">
+                <Alert type="error" className="mb-3 py-2.5 px-3 text-xs">
                   {authError}
                 </Alert>
               )}
@@ -197,59 +199,63 @@ const Signup = () => {
                 onSubmit={handleSignupSubmit}
               >
                 {({ values, errors, touched, handleChange, handleBlur, isSubmitting }) => (
-                  <Form className="space-y-3.5">
-                    <Input
-                      label="Full Name"
-                      id="name"
-                      name="name"
-                      placeholder="e.g. Eleanor Vance"
-                      icon={User}
-                      value={values.name}
-                      onChange={handleChange}
-                      onBlur={handleBlur}
-                      error={touched.name && errors.name}
-                      required
-                    />
+                  <Form className="space-y-3">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 items-start">
+                      <Input
+                        label="Full Name"
+                        id="name"
+                        name="name"
+                        placeholder="e.g. Eleanor Vance"
+                        icon={User}
+                        value={values.name}
+                        onChange={handleChange}
+                        onBlur={handleBlur}
+                        error={touched.name && errors.name}
+                        required
+                      />
 
-                    <Input
-                      label="Institutional Email"
-                      id="email"
-                      name="email"
-                      type="email"
-                      placeholder="name@university.edu"
-                      icon={Mail}
-                      value={values.email}
-                      onChange={handleChange}
-                      onBlur={handleBlur}
-                      error={touched.email && errors.email}
-                      required
-                    />
+                      <Input
+                        label="Institutional Email"
+                        id="email"
+                        name="email"
+                        type="email"
+                        placeholder="name@university.edu"
+                        icon={Mail}
+                        value={values.email}
+                        onChange={handleChange}
+                        onBlur={handleBlur}
+                        error={touched.email && errors.email}
+                        required
+                      />
+                    </div>
 
-                    <Input
-                      label="Password"
-                      id="password"
-                      name="password"
-                      type="password"
-                      placeholder="Minimum 6 characters"
-                      icon={Lock}
-                      value={values.password}
-                      onChange={handleChange}
-                      onBlur={handleBlur}
-                      error={touched.password && errors.password}
-                      required
-                    />
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 items-start">
+                      <Input
+                        label="Password"
+                        id="password"
+                        name="password"
+                        type="password"
+                        placeholder="Minimum 6 characters"
+                        icon={Lock}
+                        value={values.password}
+                        onChange={handleChange}
+                        onBlur={handleBlur}
+                        error={touched.password && errors.password}
+                        required
+                      />
 
-                    <Select
-                      label="Account Type"
-                      id="role"
-                      name="role"
-                      options={roleOptions}
-                      value={values.role}
-                      onChange={handleChange}
-                      onBlur={handleBlur}
-                      error={touched.role && errors.role}
-                      required
-                    />
+                      <Select
+                        label="Account Type"
+                        id="role"
+                        name="role"
+                        options={roleOptions}
+                        value={values.role}
+                        onChange={handleChange}
+                        onBlur={handleBlur}
+                        error={touched.role && errors.role}
+                        required
+                      />
+                    </div>
 
                     <Input
                       label="Institute / Campus Code"
@@ -272,7 +278,7 @@ const Signup = () => {
                       isLoading={isSubmitting}
                       icon={ArrowRight}
                       iconPosition="right"
-                      className="mt-4"
+                      className="mt-3.5 h-10 sm:h-[42px]"
                     >
                       Submit for Approval
                     </Button>
@@ -280,7 +286,7 @@ const Signup = () => {
                 )}
               </Formik>
 
-              <div className="mt-6 pt-5 border-t border-surface-light-border dark:border-surface-dark-border text-center text-xs text-slate-500 dark:text-slate-400">
+              <div className="mt-3.5 sm:mt-4 pt-2.5 sm:pt-3 border-t border-surface-light-border dark:border-surface-dark-border text-center text-xs text-slate-500 dark:text-slate-400">
                 Already have an active account?{' '}
                 <Link
                   to="/auth/login"

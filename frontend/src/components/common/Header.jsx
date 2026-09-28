@@ -4,6 +4,7 @@ import { useTheme } from '../../hooks/useTheme';
 import { useAuth } from '../../hooks/useAuth';
 import { Sun, Moon, Menu, LogOut, User as UserIcon } from 'lucide-react';
 import Badge from '../ui/Badge';
+import Button from '../ui/Button';
 import NotificationPopover from './NotificationPopover';
 
 const Header = ({ onMobileMenuToggle }) => {
@@ -46,6 +47,27 @@ const Header = ({ onMobileMenuToggle }) => {
         </div>
       </div>
 
+      {/* Public Navigation Links (when unauthenticated) */}
+      {!isAuthenticated && (
+        <nav className="hidden md:flex items-center space-x-6 text-sm font-medium text-slate-600 dark:text-slate-300">
+          <a href="/#features" className="hover:text-brand-terracotta dark:hover:text-brand-peach transition-colors">
+            Features
+          </a>
+          <a href="/#platform" className="hover:text-brand-terracotta dark:hover:text-brand-peach transition-colors">
+            Platform
+          </a>
+          <a href="/#roles" className="hover:text-brand-terracotta dark:hover:text-brand-peach transition-colors">
+            Roles
+          </a>
+          <a href="/#security" className="hover:text-brand-terracotta dark:hover:text-brand-peach transition-colors">
+            Security
+          </a>
+          <a href="/#about" className="hover:text-brand-terracotta dark:hover:text-brand-peach transition-colors">
+            About
+          </a>
+        </nav>
+      )}
+
       <div className="flex items-center space-x-3">
         {/* Theme Switcher */}
         <button
@@ -67,12 +89,48 @@ const Header = ({ onMobileMenuToggle }) => {
         {isAuthenticated && user ? (
           <div className="flex items-center space-x-3 pl-2 border-l border-surface-light-border dark:border-surface-dark-border">
             <div className="hidden sm:flex flex-col items-end">
-              <span className="text-sm font-semibold text-slate-900 dark:text-slate-100 leading-tight">
+              <span className="text-sm font-semibold text-slate-900 dark:text-slate-100 leading-tight flex items-center">
                 {user.name}
               </span>
-              <Badge variant={roleVariant[user.role] || 'neutral'} size="sm" className="mt-0.5 uppercase tracking-wider text-[10px]">
-                {user.role}
-              </Badge>
+              <div className="flex items-center space-x-1 mt-0.5">
+                {user.studentId && (
+                  <span className="text-[9px] font-mono px-1 py-0.2 rounded bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-400 border border-amber-200 dark:border-amber-800">
+                    {user.studentId} 🔒
+                  </span>
+                )}
+                {user.facultyId && (
+                  <span className="text-[9px] font-mono px-1 py-0.2 rounded bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800">
+                    {user.facultyId} 🔒
+                  </span>
+                )}
+                {user.adminId && (
+                  <span className="text-[9px] font-mono px-1 py-0.2 rounded bg-indigo-50 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-400 border border-indigo-200 dark:border-indigo-800">
+                    {user.adminId} 🔒
+                  </span>
+                )}
+                <Badge variant={roleVariant[user.role] || 'neutral'} size="sm" className="uppercase tracking-wider text-[9px] py-0 px-1.5">
+                  {user.role}
+                </Badge>
+              </div>
+            </div>
+
+            {/* Profile Picture / Avatar Icon */}
+            <div
+              className="cursor-pointer"
+              onClick={() => navigate(`/${user.role}/profile`)}
+              title="View Profile"
+            >
+              {user.avatar ? (
+                <img
+                  src={user.avatar}
+                  alt={user.name}
+                  className="w-8 h-8 rounded-xl object-cover border border-brand-terracotta/30 shadow-warm-xs"
+                />
+              ) : (
+                <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-brand-peach/20 to-brand-terracotta/20 text-brand-terracotta font-bold text-xs flex items-center justify-center border border-brand-peach/40 shadow-warm-xs">
+                  {user.name?.charAt(0) || 'U'}
+                </div>
+              )}
             </div>
 
             <button
@@ -89,8 +147,21 @@ const Header = ({ onMobileMenuToggle }) => {
             </button>
           </div>
         ) : (
-          <div className="flex items-center space-x-2">
-            <Badge variant="neutral" size="sm">Guest</Badge>
+          <div className="flex items-center space-x-2 sm:space-x-3">
+            <button
+              type="button"
+              onClick={() => navigate('/auth/login')}
+              className="px-3 py-1.5 text-xs sm:text-sm font-semibold text-slate-700 dark:text-slate-200 hover:text-brand-terracotta dark:hover:text-brand-peach transition-colors cursor-pointer"
+            >
+              Sign In
+            </button>
+            <Button
+              variant="primary"
+              size="sm"
+              onClick={() => navigate('/auth/signup')}
+            >
+              Get Started
+            </Button>
           </div>
         )}
       </div>

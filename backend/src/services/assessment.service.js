@@ -45,11 +45,20 @@ class AssessmentService {
       assignedStudents = [],
       questions = [],
       status = 'draft',
+      proctoringEnabled = false,
+      cameraRequired = false,
+      randomization = { enabled: false },
     } = assessmentData;
 
     let validatedStudents = [];
     if (accessType === 'restricted') {
       validatedStudents = await this.validateAssignedStudents(assignedStudents);
+    }
+
+    if (scheduledAt && deadlineAt && new Date(deadlineAt) <= new Date(scheduledAt)) {
+      const error = new Error('Assessment deadline must be after scheduled start time');
+      error.statusCode = 400;
+      throw error;
     }
 
     let totalPoints = 0;
@@ -71,6 +80,9 @@ class AssessmentService {
       allowReview: allowReview !== undefined ? allowReview : true,
       accessType: accessType === 'restricted' ? 'restricted' : 'public',
       assignedStudents: validatedStudents,
+      proctoringEnabled: Boolean(proctoringEnabled),
+      cameraRequired: Boolean(cameraRequired),
+      randomization: randomization || { enabled: false },
     });
 
     if (questions && questions.length > 0) {
@@ -83,6 +95,13 @@ class AssessmentService {
         explanation: q.explanation || null,
         points: parseInt(q.points, 10) || 5,
         orderIndex: idx,
+        fileUploadConfig: q.fileUploadConfig || undefined,
+        bankQuestionId: q.bankQuestionId || null,
+        questionBankId: q.questionBankId || null,
+        questionBankVersion: q.questionBankVersion || null,
+        difficulty: q.difficulty || null,
+        bloomLevel: q.bloomLevel || null,
+        tags: Array.isArray(q.tags) ? q.tags : [],
       }));
       await Question.insertMany(questionDocs);
     }
@@ -123,6 +142,15 @@ class AssessmentService {
     }
 
     const { questions, instructorId: ignoredInstructorId, assignedStudents, accessType, ...fields } = updateData;
+    
+    const effectiveScheduled = fields.scheduledAt !== undefined ? fields.scheduledAt : assessment.scheduledAt;
+    const effectiveDeadline = fields.deadlineAt !== undefined ? fields.deadlineAt : assessment.deadlineAt;
+    if (effectiveScheduled && effectiveDeadline && new Date(effectiveDeadline) <= new Date(effectiveScheduled)) {
+      const error = new Error('Assessment deadline must be after scheduled start time');
+      error.statusCode = 400;
+      throw error;
+    }
+
     Object.assign(assessment, fields);
 
     if (accessType !== undefined) {
@@ -153,6 +181,13 @@ class AssessmentService {
           explanation: q.explanation || null,
           points: pts,
           orderIndex: idx,
+          fileUploadConfig: q.fileUploadConfig || undefined,
+          bankQuestionId: q.bankQuestionId || null,
+          questionBankId: q.questionBankId || null,
+          questionBankVersion: q.questionBankVersion || null,
+          difficulty: q.difficulty || null,
+          bloomLevel: q.bloomLevel || null,
+          tags: Array.isArray(q.tags) ? q.tags : [],
         };
       });
 
@@ -183,16 +218,40 @@ class AssessmentService {
     return this.getAssessmentById(assessmentId, { id: instructorId, role: isAdmin ? 'admin' : 'instructor' });
   }
 
-  async getAssessments({ role, userId, status, category, search, page = 1, limit = 10 }) {
+  async getAssessments({ role, userId, status, category, search, dateFilter, page = 1, limit = 10 }) {
     const query = {};
+
+    if (dateFilter) {
+      const now = new Date();
+      let dateThreshold = null;
+      if (dateFilter === 'recent') {
+        dateThreshold = new Date(now.getTime() - 48 * 60 * 60 * 1000);
+      } else if (dateFilter === 'last_week') {
+        dateThreshold = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+      } else if (dateFilter === 'last_month') {
+        dateThreshold = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+      }
+      if (dateThreshold) {
+        query.createdAt = { $gte: dateThreshold };
+      }
+    }
 
     if (role === 'student') {
       query.status = 'published';
-      query.$or = [
+      const userObjId = mongoose.Types.ObjectId.isValid(userId)
+        ? new mongoose.Types.ObjectId(userId)
+        : userId;
+      const accessConditions = [
         { accessType: 'public' },
         { accessType: { $exists: false } },
-        { accessType: 'restricted', assignedStudents: userId },
+        { accessType: 'restricted', assignedStudents: { $in: [userObjId, userId.toString()] } },
       ];
+      const deadlineConditions = [
+        { deadlineAt: null },
+        { deadlineAt: { $exists: false } },
+        { deadlineAt: { $gt: new Date() } },
+      ];
+      query.$and = [{ $or: accessConditions }, { $or: deadlineConditions }];
     } else if (role === 'instructor') {
       query.instructorId = userId;
       if (status) query.status = status;
@@ -200,17 +259,21 @@ class AssessmentService {
       query.status = status;
     }
 
-    if (category) {
-      query.category = category;
+    if (category && category.trim() !== '' && category.trim() !== 'All') {
+      const escapedCategory = category.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      query.category = { $regex: new RegExp(`^\\s*${escapedCategory}\\s*$`, 'i') };
     }
 
-    if (search) {
+    if (search && search.trim() !== '') {
+      const escapedSearch = search.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
       const searchCondition = [
-        { title: { $regex: search, $options: 'i' } },
-        { description: { $regex: search, $options: 'i' } },
-        { category: { $regex: search, $options: 'i' } },
+        { title: { $regex: escapedSearch, $options: 'i' } },
+        { description: { $regex: escapedSearch, $options: 'i' } },
+        { category: { $regex: escapedSearch, $options: 'i' } },
       ];
-      if (query.$or) {
+      if (query.$and) {
+        query.$and.push({ $or: searchCondition });
+      } else if (query.$or) {
         query.$and = [{ $or: query.$or }, { $or: searchCondition }];
         delete query.$or;
       } else {
@@ -218,14 +281,19 @@ class AssessmentService {
       }
     }
 
-    const skip = (page - 1) * limit;
+    const parsedLimit = parseInt(limit, 10);
+    const limitNum = isNaN(parsedLimit) || parsedLimit <= 0 ? 10 : parsedLimit;
+    const parsedPage = parseInt(page, 10);
+    const pageNum = isNaN(parsedPage) || parsedPage <= 0 ? 1 : parsedPage;
+    const skip = (pageNum - 1) * limitNum;
+
     const total = await Assessment.countDocuments(query);
     const assessments = await Assessment.find(query)
       .populate('instructorId', 'name email avatar')
       .populate('questions', 'id points type')
       .sort({ createdAt: -1 })
       .skip(skip)
-      .limit(parseInt(limit, 10));
+      .limit(limitNum);
 
     return { total, assessments };
   }
@@ -276,10 +344,29 @@ class AssessmentService {
     }
 
     // Unconditional sanitization: student callers must NEVER receive correctAnswer or explanation
-    const questionProjection = isStudent ? '-correctAnswer -explanation' : '';
-    const questions = await Question.find({ assessmentId: id })
-      .select(questionProjection)
-      .sort({ orderIndex: 1 });
+    // Furthermore, if assessment is scheduled in the future, do NOT leak questions before exam opens
+    let questions = [];
+    const isFutureScheduled = isStudent && assessment.scheduledAt && new Date(assessment.scheduledAt) > new Date();
+    if (!isFutureScheduled) {
+      const questionProjection = isStudent ? '-correctAnswer -explanation' : '';
+      if (isStudent && requestingUser?.id) {
+        const Submission = mongoose.model('Submission');
+        const sub = await Submission.findOne({ assessmentId: id, studentId: requestingUser.id });
+        if (sub && sub.assignedQuestionIds && sub.assignedQuestionIds.length > 0) {
+          const fetched = await Question.find({ _id: { $in: sub.assignedQuestionIds } }).select(questionProjection);
+          const qMap = new Map(fetched.map((q) => [q._id.toString(), q]));
+          questions = sub.assignedQuestionIds.map((qId) => qMap.get(qId.toString())).filter(Boolean);
+        } else {
+          questions = await Question.find({ assessmentId: id })
+            .select(questionProjection)
+            .sort({ orderIndex: 1 });
+        }
+      } else {
+        questions = await Question.find({ assessmentId: id })
+          .select(questionProjection)
+          .sort({ orderIndex: 1 });
+      }
+    }
 
     const assessmentJson = assessment.toJSON();
     assessmentJson.questions = questions;

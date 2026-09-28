@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { toast } from 'react-toastify';
 import instructorService from '../../services/instructor.service';
+import submissionService from '../../services/submission.service';
 import sanitizeHtml from '../../utils/sanitize';
 import Card from '../../components/ui/Card';
 import Button from '../../components/ui/Button';
@@ -26,7 +27,38 @@ import {
   Check,
   X,
   Sparkles,
+  Shield,
+  Camera,
+  VideoOff,
+  Activity,
+  Mail,
+  Lock,
+  Download,
+  ExternalLink,
 } from 'lucide-react';
+
+const formatProctoringEvent = (evt) => {
+  switch (evt.eventType) {
+    case 'session_started':
+      return { title: 'Session Started', category: 'Lifecycle', badgeVariant: 'neutral' };
+    case 'session_ended':
+      return { title: 'Session Ended', category: 'Lifecycle', badgeVariant: 'neutral' };
+    case 'camera_permission_granted':
+      return { title: 'Camera Granted', category: 'Camera', badgeVariant: 'neutral' };
+    case 'camera_permission_denied':
+      return { title: 'Camera Denied', category: 'Camera', badgeVariant: 'warning' };
+    case 'camera_disconnected':
+      return { title: 'Camera Disconnected', category: 'Camera', badgeVariant: 'warning' };
+    case 'paste_blocked':
+      return { title: 'Paste blocked', category: 'Clipboard Integrity', badgeVariant: 'warning' };
+    case 'copy_blocked':
+      return { title: 'Copy blocked', category: 'Clipboard Integrity', badgeVariant: 'warning' };
+    case 'cut_blocked':
+      return { title: 'Cut blocked', category: 'Clipboard Integrity', badgeVariant: 'warning' };
+    default:
+      return { title: (evt.eventType || '').replace(/_/g, ' '), category: 'Telemetry', badgeVariant: 'neutral' };
+  }
+};
 
 const EvaluationStudio = () => {
   const { id: submissionId } = useParams();
@@ -41,6 +73,35 @@ const EvaluationStudio = () => {
   const [questionFeedback, setQuestionFeedback] = useState({});
   const [generalFeedback, setGeneralFeedback] = useState('');
   const [confirmModal, setConfirmModal] = useState(false);
+
+  // Faculty Student Email State
+  const [emailModal, setEmailModal] = useState(false);
+  const [emailSubject, setEmailSubject] = useState('');
+  const [emailMessage, setEmailMessage] = useState('');
+  const [isSendingEmail, setIsSendingEmail] = useState(false);
+
+  const handleSendEmail = async (e) => {
+    e.preventDefault();
+    if (!emailSubject.trim() || !emailMessage.trim()) {
+      toast.error('Subject and message body are required.');
+      return;
+    }
+    try {
+      setIsSendingEmail(true);
+      await instructorService.sendStudentEmail(submissionId, {
+        subject: emailSubject.trim(),
+        message: emailMessage.trim(),
+      });
+      toast.success(`Email sent to ${submission.student?.email || 'student'}`);
+      setEmailModal(false);
+      setEmailSubject('');
+      setEmailMessage('');
+    } catch (err) {
+      toast.error(err.message || 'Failed to send email to student');
+    } finally {
+      setIsSendingEmail(false);
+    }
+  };
 
   useEffect(() => {
     let mounted = true;
@@ -67,7 +128,7 @@ const EvaluationStudio = () => {
                 pointsAwarded: prev.pointsAwarded !== undefined ? prev.pointsAwarded : '',
                 comment: prev.comment || '',
               };
-            } else if (q.type === 'short_answer' || q.type === 'long_answer') {
+            } else if (q.type === 'short_answer' || q.type === 'long_answer' || q.type === 'file_upload') {
               initialFeedback[qId] = {
                 pointsAwarded: '',
                 comment: '',
@@ -96,7 +157,9 @@ const EvaluationStudio = () => {
 
   const questions = submission?.assessment?.questions || [];
   const subjectiveQuestions = useMemo(() => {
-    return questions.filter((q) => q.type === 'short_answer' || q.type === 'long_answer');
+    return questions.filter(
+      (q) => q.type === 'short_answer' || q.type === 'long_answer' || q.type === 'file_upload'
+    );
   }, [questions]);
 
   // Track progress of subjective evaluations
@@ -188,6 +251,26 @@ const EvaluationStudio = () => {
     }
   };
 
+  const handleViewOrDownloadFile = async (subId, questionId, download = false, originalFilename = 'document.pdf') => {
+    try {
+      const blob = await submissionService.getAnswerFileBlob(subId, questionId, download);
+      const url = window.URL.createObjectURL(blob);
+      if (download) {
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = originalFilename;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+      } else {
+        window.open(url, '_blank');
+      }
+      setTimeout(() => window.URL.revokeObjectURL(url), 10000);
+    } catch (err) {
+      toast.error(err.message || 'Failed to retrieve submitted document');
+    }
+  };
+
   if (isLoading) {
     return (
       <div className="py-20 flex flex-col items-center justify-center">
@@ -276,7 +359,7 @@ const EvaluationStudio = () => {
           {questions.map((q, idx) => {
             const qId = (q._id || q.id).toString();
             const studentAnswer = studentAnswers[qId];
-            const isSubjective = q.type === 'short_answer' || q.type === 'long_answer';
+            const isSubjective = q.type === 'short_answer' || q.type === 'long_answer' || q.type === 'file_upload';
             const fb = questionFeedback[qId] || { pointsAwarded: '', comment: '' };
 
             return (
@@ -296,7 +379,9 @@ const EvaluationStudio = () => {
                           ? 'terracotta'
                           : q.type === 'short_answer'
                           ? 'peach'
-                          : 'sage'
+                          : q.type === 'long_answer'
+                          ? 'sage'
+                          : 'secondary'
                       }
                       size="sm"
                     >
@@ -304,7 +389,9 @@ const EvaluationStudio = () => {
                         ? 'Objective MCQ'
                         : q.type === 'short_answer'
                         ? 'Short Answer'
-                        : 'Long Essay'}
+                        : q.type === 'long_answer'
+                        ? 'Long Essay'
+                        : 'Document Submission'}
                     </Badge>
                   </div>
                   <span className="text-xs font-semibold text-[#64748B] dark:text-[#94A3B8]">
@@ -379,7 +466,7 @@ const EvaluationStudio = () => {
                     <p className="text-xs text-[#1F2937] dark:text-[#F9FAFB] whitespace-pre-wrap">
                       {String(studentAnswer)}
                     </p>
-                  ) : (
+                  ) : q.type === 'long_answer' ? (
                     /* Long Answer: Render safely through HTML Sanitizer */
                     <div
                       className="text-xs text-[#1F2937] dark:text-[#F9FAFB] prose dark:prose-invert max-w-none break-words"
@@ -387,7 +474,81 @@ const EvaluationStudio = () => {
                         __html: sanitizeHtml(String(studentAnswer)),
                       }}
                     />
-                  )}
+                  ) : q.type === 'file_upload' ? (
+                    typeof studentAnswer === 'object' && studentAnswer.type === 'file' ? (
+                      <div className="p-3.5 rounded-xl bg-white dark:bg-[#1A202C] border border-[#EBE3D8] dark:border-[#2D3748] flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                        <div className="flex items-center space-x-3 overflow-hidden">
+                          <div className="w-10 h-10 rounded-xl bg-orange-100 dark:bg-orange-950/50 flex items-center justify-center text-[#E05D38] flex-shrink-0">
+                            <FileText className="w-5 h-5" />
+                          </div>
+                          <div className="min-w-0">
+                            <p className="text-xs font-bold text-[#1F2937] dark:text-[#F9FAFB] truncate">
+                              📄 {studentAnswer.originalFilename || 'submission.pdf'}
+                            </p>
+                            <p className="text-[11px] text-[#64748B] dark:text-[#94A3B8]">
+                              {studentAnswer.size ? `${(studentAnswer.size / (1024 * 1024)).toFixed(2)} MB` : ''} • Uploaded {new Date(studentAnswer.uploadedAt || Date.now()).toLocaleDateString()}
+                            </p>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center space-x-2 flex-shrink-0">
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            icon={ExternalLink}
+                            onClick={() => handleViewOrDownloadFile(submissionId, qId, false, studentAnswer.originalFilename)}
+                            title="Preview file"
+                          >
+                            Preview / View
+                          </Button>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            icon={Download}
+                            onClick={() => handleViewOrDownloadFile(submissionId, qId, true, studentAnswer.originalFilename)}
+                            title="Download file"
+                          >
+                            Download
+                          </Button>
+                        </div>
+                      </div>
+                    ) : typeof studentAnswer === 'object' && studentAnswer.type === 'google_docs' ? (
+                      <div className="p-3.5 rounded-xl bg-white dark:bg-[#1A202C] border border-[#EBE3D8] dark:border-[#2D3748] flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                        <div className="flex items-center space-x-3 overflow-hidden">
+                          <div className="w-10 h-10 rounded-xl bg-blue-100 dark:bg-blue-950/50 flex items-center justify-center text-blue-600 dark:text-blue-400 flex-shrink-0">
+                            <FileText className="w-5 h-5" />
+                          </div>
+                          <div className="min-w-0">
+                            <div className="flex items-center space-x-2">
+                              <span className="text-xs font-bold text-[#1F2937] dark:text-[#F9FAFB]">
+                                Google Docs:
+                              </span>
+                              <Badge variant="peach" size="sm">Online Document</Badge>
+                            </div>
+                            <p className="text-xs text-[#E05D38] truncate mt-0.5">
+                              {studentAnswer.googleDocsUrl}
+                            </p>
+                          </div>
+                        </div>
+
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          icon={ExternalLink}
+                          onClick={() => window.open(studentAnswer.googleDocsUrl, '_blank', 'noopener,noreferrer')}
+                        >
+                          Open Document
+                        </Button>
+                      </div>
+                    ) : (
+                      <p className="text-xs italic text-[#64748B]">
+                        (No document submitted by student)
+                      </p>
+                    )
+                  ) : null}
                 </div>
 
                 {/* Scoring & Feedback Input Area */}
@@ -449,18 +610,62 @@ const EvaluationStudio = () => {
           <Card title="Student Information">
             <div className="space-y-3 text-xs">
               <div className="flex items-center space-x-3">
-                <div className="w-10 h-10 rounded-2xl bg-[#FDECE2] dark:bg-[#341C16] text-[#E05D38] dark:text-[#F4A261] font-bold text-sm flex items-center justify-center border border-[#F4A261]/30">
-                  {submission.student?.name?.charAt(0) || 'S'}
-                </div>
-                <div>
-                  <div className="text-sm font-semibold text-[#1F2937] dark:text-[#F9FAFB]">
+                {submission.student?.avatar ? (
+                  <img
+                    src={submission.student.avatar}
+                    alt={submission.student.name}
+                    className="w-12 h-12 rounded-2xl object-cover border border-[#F4A261]/40 shadow-warm-xs"
+                  />
+                ) : (
+                  <div className="w-12 h-12 rounded-2xl bg-[#FDECE2] dark:bg-[#341C16] text-[#E05D38] dark:text-[#F4A261] font-bold text-base flex items-center justify-center border border-[#F4A261]/30 shadow-warm-xs">
+                    {submission.student?.name?.charAt(0) || 'S'}
+                  </div>
+                )}
+                <div className="flex-1 min-w-0">
+                  <div className="text-sm font-semibold text-[#1F2937] dark:text-[#F9FAFB] truncate">
                     {submission.student?.name || 'Student Candidate'}
                   </div>
-                  <div className="text-[#64748B] dark:text-[#94A3B8]">{submission.student?.email}</div>
+                  <div className="text-[#64748B] dark:text-[#94A3B8] truncate">{submission.student?.email}</div>
+                  <div className="flex items-center space-x-1.5 mt-1">
+                    <span className="text-[10px] font-mono font-bold px-1.5 py-0.5 rounded bg-amber-50 dark:bg-amber-950/40 text-amber-800 dark:text-amber-300 border border-amber-200 dark:border-amber-800 flex items-center">
+                      <Lock className="w-2.5 h-2.5 mr-1" />
+                      {submission.student?.studentId || 'STU-2026-001'}
+                    </span>
+                    {submission.student?.department && (
+                      <span className="text-[10px] text-slate-500 truncate">
+                        • {submission.student.department}
+                      </span>
+                    )}
+                  </div>
                 </div>
               </div>
 
               <div className="pt-2 border-t border-[#EBE3D8] dark:border-[#2D3748] space-y-1.5 text-[#1F2937] dark:text-[#E2E8F0]">
+                <div className="flex justify-between">
+                  <span className="text-[#64748B] dark:text-[#94A3B8]">Assessment:</span>
+                  <span className="font-semibold text-right truncate max-w-[180px]">{submission.assessment?.title}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-[#64748B] dark:text-[#94A3B8]">Evaluation Score:</span>
+                  <span className="font-bold text-[#E05D38] dark:text-[#F4A261]">
+                    {submission.finalScore || submission.score || autoScore} / {totalPoints} pts
+                  </span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-[#64748B] dark:text-[#94A3B8]">Submission Status:</span>
+                  <Badge variant={submission.status === 'evaluated' ? 'success' : 'neutral'} size="sm">
+                    {submission.status}
+                  </Badge>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-[#64748B] dark:text-[#94A3B8]">Evaluation Status:</span>
+                  <Badge
+                    variant={submission.evaluationStatus === 'completed' ? 'success' : 'warning'}
+                    size="sm"
+                  >
+                    {submission.evaluationStatus === 'completed' ? 'Completed' : 'Pending Review'}
+                  </Badge>
+                </div>
                 <div className="flex justify-between">
                   <span className="text-[#64748B] dark:text-[#94A3B8]">Submitted At:</span>
                   <span className="font-medium">
@@ -470,18 +675,144 @@ const EvaluationStudio = () => {
                   </span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-[#64748B] dark:text-[#94A3B8]">Submission Reason:</span>
-                  <span className="font-medium">{submission.submittedReason || 'USER_SUBMITTED'}</span>
-                </div>
-                <div className="flex justify-between">
                   <span className="text-[#64748B] dark:text-[#94A3B8]">Time Spent:</span>
                   <span className="font-medium">
                     {Math.round((submission.timeSpentSeconds || 0) / 60)} minutes
                   </span>
                 </div>
               </div>
+
+              {/* Faculty Email Action */}
+              <div className="pt-2 border-t border-[#EBE3D8] dark:border-[#2D3748]">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="w-full justify-center"
+                  icon={Mail}
+                  onClick={() => {
+                    setEmailSubject(`Academic Feedback: ${submission.assessment?.title || 'Assessment'}`);
+                    setEmailModal(true);
+                  }}
+                >
+                  Send Email to Student
+                </Button>
+              </div>
             </div>
           </Card>
+
+          {/* Proctoring Telemetry Card (Read-Only Visibility) */}
+          {submission.proctoring?.session && (
+            <Card
+              title="Proctoring Telemetry"
+              subtitle="Audited lifecycle and camera verification events"
+            >
+              <div className="space-y-3 text-xs">
+                <div className="grid grid-cols-2 gap-2">
+                  <div className="p-2 rounded-xl bg-[#FFF9F2] dark:bg-[#12161F] border border-[#EBE3D8] dark:border-[#2D3748]">
+                    <span className="text-[10px] text-[#64748B] dark:text-[#94A3B8] block">Session Status</span>
+                    <Badge variant={submission.proctoring.session.status === 'completed' ? 'success' : 'warning'} size="sm">
+                      {submission.proctoring.session.status}
+                    </Badge>
+                  </div>
+                  <div className="p-2 rounded-xl bg-[#FFF9F2] dark:bg-[#12161F] border border-[#EBE3D8] dark:border-[#2D3748]">
+                    <span className="text-[10px] text-[#64748B] dark:text-[#94A3B8] block">Camera Status</span>
+                    <Badge
+                      variant={
+                        submission.proctoring.session.cameraStatus === 'granted'
+                          ? 'success'
+                          : submission.proctoring.session.cameraStatus === 'denied'
+                          ? 'danger'
+                          : 'neutral'
+                      }
+                      size="sm"
+                    >
+                      {submission.proctoring.session.cameraStatus}
+                    </Badge>
+                  </div>
+                </div>
+
+                <div className="pt-2 border-t border-[#EBE3D8] dark:border-[#2D3748] space-y-1 text-[#64748B] dark:text-[#94A3B8]">
+                  <div className="flex justify-between">
+                    <span>Session Started:</span>
+                    <span className="font-medium text-[#1F2937] dark:text-[#F9FAFB]">
+                      {submission.proctoring.session.startedAt
+                        ? new Date(submission.proctoring.session.startedAt).toLocaleTimeString()
+                        : '—'}
+                    </span>
+                  </div>
+                  {submission.proctoring.session.endedAt && (
+                    <div className="flex justify-between">
+                      <span>Session Ended:</span>
+                      <span className="font-medium text-[#1F2937] dark:text-[#F9FAFB]">
+                        {new Date(submission.proctoring.session.endedAt).toLocaleTimeString()}
+                      </span>
+                    </div>
+                  )}
+                </div>
+
+                {/* Event Log */}
+                {submission.proctoring.events && submission.proctoring.events.length > 0 && (
+                  <div className="pt-2 border-t border-[#EBE3D8] dark:border-[#2D3748]">
+                    <span className="font-semibold text-[#1F2937] dark:text-[#F9FAFB] block mb-2">
+                      Event Log ({submission.proctoring.events.length})
+                    </span>
+                    <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1">
+                      {submission.proctoring.events.map((evt, eIdx) => {
+                        const { title, category, badgeVariant } = formatProctoringEvent(evt);
+                        const questionTypeLabel = evt.metadata?.questionType
+                          ? evt.metadata.questionType === 'long_answer'
+                            ? 'Long Answer'
+                            : evt.metadata.questionType === 'short_answer'
+                            ? 'Short Answer'
+                            : evt.metadata.questionType
+                          : null;
+
+                        return (
+                          <div
+                            key={evt._id || evt.id || eIdx}
+                            className="p-2 rounded-lg bg-[#FFFDFB] dark:bg-[#1A202C] border border-[#EBE3D8] dark:border-[#2D3748] flex items-center justify-between text-[11px]"
+                          >
+                            <div className="space-y-0.5">
+                              <div className="flex items-center space-x-1.5">
+                                <span className="font-semibold text-[#1F2937] dark:text-[#F9FAFB]">
+                                  {title}
+                                </span>
+                                <span className="text-[9px] px-1.5 py-0.5 rounded bg-[#EBE3D8]/50 dark:bg-[#2D3748] text-[#64748B] dark:text-[#94A3B8]">
+                                  {category}
+                                </span>
+                              </div>
+                              <div className="flex items-center space-x-2 text-[10px] text-[#64748B] dark:text-[#94A3B8]">
+                                <span>
+                                  {evt.timestamp ? new Date(evt.timestamp).toLocaleTimeString() : ''}
+                                </span>
+                                {questionTypeLabel && (
+                                  <>
+                                    <span>•</span>
+                                    <span>{questionTypeLabel}</span>
+                                  </>
+                                )}
+                              </div>
+                            </div>
+                            <Badge
+                              variant={
+                                evt.severity === 'critical' || evt.severity === 'high'
+                                  ? 'danger'
+                                  : badgeVariant || 'neutral'
+                              }
+                              size="sm"
+                            >
+                              {evt.severity || 'info'}
+                            </Badge>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </Card>
+          )}
 
           {/* Live Score Tally Card */}
           <Card title="Grading Summary & Live Calculation">
@@ -606,6 +937,78 @@ const EvaluationStudio = () => {
             </Button>
           </div>
         </div>
+      </Modal>
+
+      {/* Faculty Student Email Modal */}
+      <Modal
+        isOpen={emailModal}
+        onClose={() => setEmailModal(false)}
+        title="Send Email to Student"
+      >
+        <form onSubmit={handleSendEmail} className="space-y-4">
+          <div>
+            <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+              To (Student Recipient)
+            </label>
+            <input
+              type="text"
+              value={submission.student?.email || ''}
+              disabled
+              className="w-full px-3 py-2 text-xs bg-slate-100 dark:bg-slate-800/60 border border-surface-light-border dark:border-surface-dark-border rounded-xl text-slate-500 cursor-not-allowed font-mono"
+            />
+            <p className="text-[10px] text-slate-400 mt-1">
+              Recipient is strictly resolved from verified student registration record.
+            </p>
+          </div>
+
+          <div>
+            <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+              Subject
+            </label>
+            <input
+              type="text"
+              value={emailSubject}
+              onChange={(e) => setEmailSubject(e.target.value)}
+              required
+              placeholder="Subject line..."
+              className="w-full px-3 py-2 text-xs bg-white dark:bg-surface-dark border border-surface-light-border dark:border-surface-dark-border rounded-xl focus:outline-none focus:border-brand-terracotta text-slate-800 dark:text-slate-100"
+            />
+          </div>
+
+          <div>
+            <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+              Message Body
+            </label>
+            <textarea
+              rows={4}
+              value={emailMessage}
+              onChange={(e) => setEmailMessage(e.target.value)}
+              required
+              placeholder="Compose your message to the student regarding their performance or questions..."
+              className="w-full px-3 py-2 text-xs bg-white dark:bg-surface-dark border border-surface-light-border dark:border-surface-dark-border rounded-xl focus:outline-none focus:border-brand-terracotta text-slate-800 dark:text-slate-100"
+            />
+          </div>
+
+          <div className="flex items-center justify-end space-x-2 pt-2">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => setEmailModal(false)}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="submit"
+              variant="primary"
+              size="sm"
+              icon={Mail}
+              loading={isSendingEmail}
+            >
+              Send Email
+            </Button>
+          </div>
+        </form>
       </Modal>
     </div>
   );

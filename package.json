@@ -19,7 +19,8 @@
   },
   "devDependencies": {
     "@playwright/test": "^1.62.1",
-    "concurrently": "^9.1.2"
+    "concurrently": "^9.1.2",
+    "otplib": "^13.5.0"
   },
   "keywords": [
     "assessment",
@@ -31,5 +32,8 @@
     "postgresql"
   ],
   "author": "Unified Assessment Platform Team",
-  "license": "MIT"
+  "license": "MIT",
+  "allowScripts": {
+    "otplib@13.5.0": true
+  }
 }

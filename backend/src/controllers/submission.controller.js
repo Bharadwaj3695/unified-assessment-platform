@@ -78,6 +78,71 @@ class SubmissionController {
       next(err);
     }
   }
+
+  async uploadAnswerFile(req, res, next) {
+    try {
+      const { submissionId, questionId } = req.params;
+      const result = await submissionService.uploadAnswerFile(
+        submissionId,
+        req.user.id,
+        questionId,
+        req.file
+      );
+      return successResponse(res, 'Document answer uploaded successfully', result);
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  async attachGoogleDocsUrl(req, res, next) {
+    try {
+      const { submissionId, questionId } = req.params;
+      const { googleDocsUrl } = req.body;
+      const result = await submissionService.attachGoogleDocsUrl(
+        submissionId,
+        req.user.id,
+        questionId,
+        googleDocsUrl
+      );
+      return successResponse(res, 'Google Docs link attached successfully', result);
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  async removeAnswerFile(req, res, next) {
+    try {
+      const { submissionId, questionId } = req.params;
+      const result = await submissionService.removeAnswerFile(
+        submissionId,
+        req.user.id,
+        questionId
+      );
+      return successResponse(res, 'Draft answer file removed successfully', result);
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  async getAnswerFile(req, res, next) {
+    try {
+      const { submissionId, questionId } = req.params;
+      const download = req.query.download === 'true';
+      const fileData = await submissionService.getAnswerFile(
+        submissionId,
+        req.user.id,
+        req.user.role,
+        questionId
+      );
+
+      res.setHeader('Content-Type', fileData.mimeType);
+      const disposition = download ? 'attachment' : 'inline';
+      res.setHeader('Content-Disposition', `${disposition}; filename="${encodeURIComponent(fileData.originalFilename)}"`);
+      return res.sendFile(fileData.filePath);
+    } catch (err) {
+      next(err);
+    }
+  }
 }
 
 module.exports = new SubmissionController();

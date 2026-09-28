@@ -13,7 +13,7 @@ class EmailService {
     const port = parseInt(process.env.SMTP_PORT, 10) || 587;
     const secure = process.env.SMTP_SECURE === 'true' || port === 465;
     const user = process.env.SMTP_USER;
-    const pass = process.env.SMTP_PASS;
+    const pass = process.env.SMTP_PASSWORD || process.env.SMTP_PASS;
 
     if (this.isTestMode || !host || host === 'test') {
       // In-memory JSON/Stream transport for isolated and deterministic automated tests
@@ -21,14 +21,25 @@ class EmailService {
         jsonTransport: true,
       });
     } else {
-      // Production / Live SMTP Transporter
-      this.transporter = nodemailer.createTransport({
+      // Production / Live SMTP Transporter (supports Google SMTP / smtp.gmail.com, etc.)
+      const transportConfig = {
         host,
         port,
         secure,
         auth: user && pass ? { user, pass } : undefined,
-      });
+      };
+
+      if (host.includes('gmail') || host.includes('google')) {
+        transportConfig.service = 'gmail';
+      }
+
+      this.transporter = nodemailer.createTransport(transportConfig);
     }
+  }
+
+  sanitizeError(message) {
+    if (!message) return '';
+    return String(message).replace(/(password|pass|secret|token)\s*[:=]?\s*([^\s]+)/gi, '$1=***');
   }
 
   async verifyConnection() {
@@ -39,8 +50,9 @@ class EmailService {
       await this.transporter.verify();
       return { verified: true, mode: 'smtp_live' };
     } catch (err) {
-      console.warn(`[EmailService] SMTP connection verification failed: ${err.message}`);
-      return { verified: false, error: err.message };
+      const sanitized = this.sanitizeError(err.message || 'Verification failed');
+      console.warn(`[EmailService] SMTP connection verification failed: ${sanitized}`);
+      return { verified: false, error: sanitized };
     }
   }
 
@@ -327,6 +339,26 @@ class EmailService {
     return this.sendMail({
       to: studentUser.email,
       subject: `Evaluation Completed: ${assessment.title} (${submission.percentage}%)`,
+      html,
+    });
+  }
+
+  // 9. Password Reset Email
+  async sendPasswordResetEmail(user, resetToken) {
+    const html = this.buildHtmlTemplate({
+      title: 'Password Reset Request',
+      recipientName: user.name,
+      messageHtml: `
+        <p>You recently requested to reset the password for your Unified Assessment Platform account.</p>
+        <p>Click the button below to choose a new password. This link will expire in 1 hour.</p>
+      `,
+      actionUrl: `/auth/reset-password?token=${resetToken}`,
+      actionText: 'Reset Password',
+    });
+
+    return this.sendMail({
+      to: user.email,
+      subject: 'Password Reset Request — Unified Assessment Platform',
       html,
     });
   }

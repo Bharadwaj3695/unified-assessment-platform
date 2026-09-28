@@ -25,6 +25,34 @@ export const submissionService = {
     const res = await api.get(`/submissions/${submissionId}`);
     return res.data;
   },
+  uploadAnswerFile: async (submissionId, questionId, file, onUploadProgress) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    const res = await api.post(`/submissions/${submissionId}/answers/${questionId}/file`, formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data',
+      },
+      onUploadProgress,
+    });
+    return res.data;
+  },
+  attachGoogleDocsUrl: async (submissionId, questionId, googleDocsUrl) => {
+    const res = await api.post(`/submissions/${submissionId}/answers/${questionId}/google-docs`, {
+      googleDocsUrl,
+    });
+    return res.data;
+  },
+  removeAnswerFile: async (submissionId, questionId) => {
+    const res = await api.delete(`/submissions/${submissionId}/answers/${questionId}/file`);
+    return res.data;
+  },
+  getAnswerFileBlob: async (submissionId, questionId, download = false) => {
+    const res = await api.get(`/submissions/${submissionId}/answers/${questionId}/file`, {
+      params: { download: download ? 'true' : 'false' },
+      responseType: 'blob',
+    });
+    return res;
+  },
 };
 
 export default submissionService;

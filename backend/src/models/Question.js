@@ -15,7 +15,7 @@ const questionSchema = new mongoose.Schema(
     },
     type: {
       type: String,
-      enum: ['mcq', 'short_answer', 'long_answer', 'true_false', 'code'],
+      enum: ['mcq', 'short_answer', 'long_answer', 'true_false', 'code', 'file_upload'],
       default: 'mcq',
       required: true,
     },
@@ -44,6 +44,53 @@ const questionSchema = new mongoose.Schema(
     orderIndex: {
       type: Number,
       default: 0,
+    },
+    fileUploadConfig: {
+      allowedFileTypes: {
+        type: [String],
+        default: ['pdf', 'doc', 'docx'],
+      },
+      maxFileSizeMb: {
+        type: Number,
+        default: 10,
+        min: 1,
+        max: 50,
+      },
+      allowGoogleDocs: {
+        type: Boolean,
+        default: true,
+      },
+      isRequired: {
+        type: Boolean,
+        default: true,
+      },
+    },
+    bankQuestionId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'BankQuestion',
+      default: null,
+    },
+    questionBankId: {
+      type: String,
+      default: null,
+    },
+    questionBankVersion: {
+      type: Number,
+      default: null,
+    },
+    difficulty: {
+      type: String,
+      enum: ['EASY', 'MEDIUM', 'HARD', null],
+      default: null,
+    },
+    bloomLevel: {
+      type: String,
+      enum: ['REMEMBER', 'UNDERSTAND', 'APPLY', 'ANALYZE', 'EVALUATE', 'CREATE', null],
+      default: null,
+    },
+    tags: {
+      type: [String],
+      default: [],
     },
   },
   {

@@ -23,4 +23,11 @@ router.post(
   evaluationController.evaluateSubmission
 );
 
+router.post(
+  '/submission/:id/email',
+  authenticate,
+  authorize('instructor', 'admin'),
+  evaluationController.sendStudentEmail
+);
+
 module.exports = router;

@@ -35,6 +35,8 @@ const auditLogSchema = new mongoose.Schema(
   }
 );
 
+auditLogSchema.index({ createdAt: -1 });
+
 auditLogSchema.set('toJSON', {
   transform: (doc, ret) => {
     ret.id = ret._id.toString();

@@ -29,7 +29,13 @@ import {
   FileText,
   AlertTriangle,
   X,
+  Shield,
+  Camera,
+  Upload,
+  Database,
+  Shuffle,
 } from 'lucide-react';
+import QuestionBankPickerModal from '../../components/modals/QuestionBankPickerModal';
 
 const CATEGORIES = [
   'Computer Science',
@@ -56,7 +62,15 @@ const AssessmentBuilder = () => {
   const [passingScore, setPassingScore] = useState(60);
   const [accessType, setAccessType] = useState('public');
   const [assignedStudents, setAssignedStudents] = useState([]);
+  const [proctoringEnabled, setProctoringEnabled] = useState(false);
+  const [cameraRequired, setCameraRequired] = useState(false);
   const [status, setStatus] = useState('draft');
+  const [randomization, setRandomization] = useState({
+    enabled: false,
+    poolCount: '',
+    shuffleOrder: true,
+  });
+  const [isQuestionBankModalOpen, setIsQuestionBankModalOpen] = useState(false);
 
   // Question bank state
   const [questions, setQuestions] = useState([
@@ -102,7 +116,16 @@ const AssessmentBuilder = () => {
           setAssignedStudents(
             data.assignedStudents?.map((s) => (s._id || s.id || s).toString()) || []
           );
+          setProctoringEnabled(Boolean(data.proctoringEnabled));
+          setCameraRequired(Boolean(data.cameraRequired));
           setStatus(data.status || 'draft');
+          if (data.randomization) {
+            setRandomization({
+              enabled: Boolean(data.randomization.enabled),
+              poolCount: data.randomization.poolCount || '',
+              shuffleOrder: data.randomization.shuffleOrder ?? true,
+            });
+          }
 
           if (data.questions && data.questions.length > 0) {
             setQuestions(
@@ -123,6 +146,18 @@ const AssessmentBuilder = () => {
                       ],
                 correctAnswer: q.correctAnswer || (q.options?.[0]?.id ?? 'opt_1'),
                 explanation: q.explanation || '',
+                bankQuestionId: q.bankQuestionId || null,
+                questionBankId: q.questionBankId || null,
+                questionBankVersion: q.questionBankVersion || null,
+                difficulty: q.difficulty,
+                bloomLevel: q.bloomLevel,
+                tags: q.tags || [],
+                fileUploadConfig: q.fileUploadConfig || {
+                  allowedFileTypes: ['pdf', 'doc', 'docx'],
+                  maxFileSizeMb: 10,
+                  allowGoogleDocs: true,
+                  isRequired: true,
+                },
               }))
             );
           }
@@ -151,12 +186,35 @@ const AssessmentBuilder = () => {
   );
 
   // Question Management Helpers
+  const handleImportFromQuestionBank = (importedQuestions) => {
+    setQuestions((prev) => {
+      const isInitialEmpty = prev.length === 1 && !prev[0].questionText.trim();
+      const newItems = importedQuestions.map((iq, idx) => ({
+        id: `qb-${Date.now()}-${idx}`,
+        questionText: iq.questionText,
+        type: iq.type,
+        points: iq.points || 5,
+        options: iq.options || [],
+        correctAnswer: iq.correctAnswer || (iq.options?.[0]?.id ?? 'opt_1'),
+        explanation: iq.explanation || '',
+        bankQuestionId: iq.bankQuestionId,
+        questionBankId: iq.questionBankId,
+        questionBankVersion: iq.questionBankVersion,
+        difficulty: iq.difficulty,
+        bloomLevel: iq.bloomLevel,
+        tags: iq.tags,
+      }));
+      return isInitialEmpty ? newItems : [...prev, ...newItems];
+    });
+    toast.success(`Imported ${importedQuestions.length} question(s) from Question Bank.`);
+  };
+
   const addQuestion = (type = 'mcq') => {
     const newQ = {
       id: `temp-${Date.now()}`,
       questionText: '',
       type,
-      points: type === 'long_answer' ? 20 : type === 'short_answer' ? 10 : 5,
+      points: type === 'long_answer' ? 20 : type === 'short_answer' ? 10 : type === 'file_upload' ? 20 : 5,
       options:
         type === 'mcq'
           ? [
@@ -168,8 +226,55 @@ const AssessmentBuilder = () => {
           : [],
       correctAnswer: type === 'mcq' ? 'opt_1' : null,
       explanation: '',
+      fileUploadConfig: {
+        allowedFileTypes: ['pdf', 'doc', 'docx'],
+        maxFileSizeMb: 10,
+        allowGoogleDocs: true,
+        isRequired: true,
+      },
     };
     setQuestions([...questions, newQ]);
+  };
+
+  const updateFileUploadConfig = (qIndex, field, val) => {
+    const updated = [...questions];
+    const currentConfig = updated[qIndex].fileUploadConfig || {
+      allowedFileTypes: ['pdf', 'doc', 'docx'],
+      maxFileSizeMb: 10,
+      allowGoogleDocs: true,
+      isRequired: true,
+    };
+    updated[qIndex].fileUploadConfig = {
+      ...currentConfig,
+      [field]: val,
+    };
+    setQuestions(updated);
+  };
+
+  const toggleAllowedFileType = (qIndex, format) => {
+    const updated = [...questions];
+    const currentConfig = updated[qIndex].fileUploadConfig || {
+      allowedFileTypes: ['pdf', 'doc', 'docx'],
+      maxFileSizeMb: 10,
+      allowGoogleDocs: true,
+      isRequired: true,
+    };
+    const types = [...(currentConfig.allowedFileTypes || ['pdf', 'doc', 'docx'])];
+    const idx = types.indexOf(format);
+    if (idx >= 0) {
+      if (types.length === 1) {
+        toast.warning('At least one file format must be allowed.');
+        return;
+      }
+      types.splice(idx, 1);
+    } else {
+      types.push(format);
+    }
+    updated[qIndex].fileUploadConfig = {
+      ...currentConfig,
+      allowedFileTypes: types,
+    };
+    setQuestions(updated);
   };
 
   const removeQuestion = (index) => {
@@ -264,6 +369,12 @@ const AssessmentBuilder = () => {
           errors[`q_${idx}_answer`] = `Question #${idx + 1} must have a designated correct answer.`;
         }
       }
+      if (q.type === 'file_upload') {
+        const allowed = q.fileUploadConfig?.allowedFileTypes || [];
+        if (allowed.length === 0) {
+          errors[`q_${idx}_filetypes`] = `Question #${idx + 1} must have at least one allowed file format.`;
+        }
+      }
     });
 
     setValidationErrors(errors);
@@ -287,7 +398,17 @@ const AssessmentBuilder = () => {
         passingScore: parseInt(passingScore, 10),
         accessType,
         assignedStudents: accessType === 'restricted' ? assignedStudents : [],
+        proctoringEnabled: Boolean(proctoringEnabled),
+        cameraRequired: proctoringEnabled ? Boolean(cameraRequired) : false,
         status: targetStatus,
+        randomization: {
+          enabled: Boolean(randomization.enabled),
+          poolCount:
+            randomization.enabled && randomization.poolCount
+              ? parseInt(randomization.poolCount, 10)
+              : null,
+          shuffleOrder: Boolean(randomization.shuffleOrder),
+        },
         questions: questions.map((q, idx) => ({
           questionText: q.questionText.trim(),
           type: q.type,
@@ -296,6 +417,21 @@ const AssessmentBuilder = () => {
           correctAnswer: q.type === 'mcq' ? q.correctAnswer : null,
           explanation: q.explanation?.trim() || null,
           orderIndex: idx,
+          bankQuestionId: q.bankQuestionId || null,
+          questionBankId: q.questionBankId || null,
+          questionBankVersion: q.questionBankVersion || null,
+          difficulty: q.difficulty,
+          bloomLevel: q.bloomLevel,
+          tags: q.tags || [],
+          fileUploadConfig:
+            q.type === 'file_upload'
+              ? {
+                  allowedFileTypes: q.fileUploadConfig?.allowedFileTypes || ['pdf', 'doc', 'docx'],
+                  maxFileSizeMb: q.fileUploadConfig?.maxFileSizeMb || 10,
+                  allowGoogleDocs: q.fileUploadConfig?.allowGoogleDocs ?? true,
+                  isRequired: q.fileUploadConfig?.isRequired ?? true,
+                }
+              : undefined,
         })),
       };
 
@@ -553,6 +689,131 @@ const AssessmentBuilder = () => {
               )}
             </div>
           </Card>
+
+          {/* Proctoring Settings */}
+          <Card title="Proctoring & Integrity">
+            <div className="space-y-3.5">
+              <label className="flex items-start space-x-3 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={proctoringEnabled}
+                  onChange={(e) => {
+                    const checked = e.target.checked;
+                    setProctoringEnabled(checked);
+                    if (!checked) setCameraRequired(false);
+                  }}
+                  className="mt-1 rounded border-[#EBE3D8] text-[#E05D38] focus:ring-[#E05D38]/30"
+                />
+                <div>
+                  <div className="flex items-center space-x-1.5 text-sm font-semibold text-[#1F2937] dark:text-[#F9FAFB]">
+                    <Shield className="w-4 h-4 text-[#E05D38]" />
+                    <span>Enable AI-Assisted Proctoring</span>
+                  </div>
+                  <span className="text-xs text-[#64748B] dark:text-[#94A3B8] block mt-0.5">
+                    Record candidate lifecycle and verification telemetry during examination attempts.
+                  </span>
+                </div>
+              </label>
+
+              {proctoringEnabled && (
+                <div className="pl-7 pt-2.5 border-t border-[#EBE3D8] dark:border-[#2D3748]">
+                  <label className="flex items-start space-x-3 cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={cameraRequired}
+                      onChange={(e) => setCameraRequired(e.target.checked)}
+                      className="mt-1 rounded border-[#EBE3D8] text-[#E05D38] focus:ring-[#E05D38]/30"
+                    />
+                    <div>
+                      <div className="flex items-center space-x-1.5 text-xs font-semibold text-[#1F2937] dark:text-[#F9FAFB]">
+                        <Camera className="w-3.5 h-3.5 text-[#3D8A78]" />
+                        <span>Require Web Camera Access</span>
+                      </div>
+                      <span className="text-[11px] text-[#64748B] dark:text-[#94A3B8] block mt-0.5">
+                        Candidates will be prompted to grant camera permission prior to beginning assessment.
+                      </span>
+                    </div>
+                  </label>
+                </div>
+              )}
+            </div>
+          </Card>
+
+          {/* Assessment Randomization Settings */}
+          <Card title="Assessment Randomization">
+            <div className="space-y-3.5 text-xs">
+              <label className="flex items-start space-x-3 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={randomization.enabled}
+                  onChange={(e) =>
+                    setRandomization({
+                      ...randomization,
+                      enabled: e.target.checked,
+                    })
+                  }
+                  className="mt-1 rounded border-[#EBE3D8] text-[#E05D38] focus:ring-[#E05D38]/30"
+                />
+                <div>
+                  <div className="flex items-center space-x-1.5 text-sm font-semibold text-[#1F2937] dark:text-[#F9FAFB]">
+                    <Shuffle className="w-4 h-4 text-indigo-600" />
+                    <span>Enable Question Randomization</span>
+                  </div>
+                  <span className="text-xs text-[#64748B] dark:text-[#94A3B8] block mt-0.5">
+                    Select a subset pool or shuffle question order uniquely per candidate.
+                  </span>
+                </div>
+              </label>
+
+              {randomization.enabled && (
+                <div className="pl-7 pt-2.5 border-t border-[#EBE3D8] dark:border-[#2D3748] space-y-3">
+                  <div>
+                    <label className="block text-xs font-semibold text-[#1F2937] dark:text-[#F9FAFB] mb-1">
+                      Pool Selection Count (Optional)
+                    </label>
+                    <input
+                      type="number"
+                      min="1"
+                      max={questions.length || 100}
+                      placeholder={`e.g. 5 out of ${questions.length} total questions`}
+                      value={randomization.poolCount}
+                      onChange={(e) =>
+                        setRandomization({
+                          ...randomization,
+                          poolCount: e.target.value,
+                        })
+                      }
+                      className="w-full p-2 border border-slate-300 rounded-md text-xs bg-white dark:bg-[#1A202C]"
+                    />
+                    <span className="text-[11px] text-[#64748B] dark:text-[#94A3B8] block mt-0.5">
+                      Leave empty to deliver all authored questions in randomized order.
+                    </span>
+                  </div>
+
+                  <label className="flex items-center space-x-2 cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={randomization.shuffleOrder}
+                      onChange={(e) =>
+                        setRandomization({
+                          ...randomization,
+                          shuffleOrder: e.target.checked,
+                        })
+                      }
+                      className="rounded border-[#EBE3D8] text-[#E05D38] focus:ring-[#E05D38]/30"
+                    />
+                    <span className="text-xs font-medium text-[#1F2937] dark:text-[#F9FAFB]">
+                      Shuffle Question Delivery Order
+                    </span>
+                  </label>
+
+                  <div className="p-2.5 rounded-md bg-indigo-50 dark:bg-indigo-950/30 text-[11px] text-indigo-900 dark:text-indigo-300">
+                    <b>Integrity Guarantee:</b> Candidate questions are deterministically assigned upon attempt start and permanently saved to their submission. Resuming or refreshing the exam guarantees the exact same question set and sequence.
+                  </div>
+                </div>
+              )}
+            </div>
+          </Card>
         </div>
 
         {/* Right Column: Question Bank & Questions (7 Cols) */}
@@ -595,7 +856,9 @@ const AssessmentBuilder = () => {
                           ? 'terracotta'
                           : q.type === 'short_answer'
                           ? 'peach'
-                          : 'sage'
+                          : q.type === 'long_answer'
+                          ? 'sage'
+                          : 'secondary'
                       }
                       size="sm"
                     >
@@ -603,7 +866,9 @@ const AssessmentBuilder = () => {
                         ? 'Multiple Choice'
                         : q.type === 'short_answer'
                         ? 'Short Answer'
-                        : 'Long Essay'}
+                        : q.type === 'long_answer'
+                        ? 'Long Essay'
+                        : 'File Upload'}
                     </Badge>
                   </div>
 
@@ -654,6 +919,7 @@ const AssessmentBuilder = () => {
                       <option value="mcq">Multiple Choice (MCQ)</option>
                       <option value="short_answer">Short Answer (Subjective)</option>
                       <option value="long_answer">Long Essay (Subjective)</option>
+                      <option value="file_upload">File Upload / Document (Subjective)</option>
                     </select>
                   </div>
 
@@ -691,6 +957,96 @@ const AssessmentBuilder = () => {
                     </p>
                   )}
                 </div>
+
+                {/* File Upload Configuration */}
+                {q.type === 'file_upload' && (
+                  <div className="p-4 rounded-xl border border-[#EBE3D8] dark:border-[#2D3748] bg-[#FFF9F2]/60 dark:bg-[#12161F]/60 space-y-3">
+                    <div className="text-xs font-bold uppercase tracking-wider text-[#64748B] dark:text-[#94A3B8] flex items-center space-x-1.5">
+                      <Upload className="w-3.5 h-3.5 text-[#E05D38]" />
+                      <span>Document Upload Configuration</span>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-1">
+                      {/* Allowed Formats */}
+                      <div>
+                        <label className="block text-xs font-semibold text-[#1F2937] dark:text-[#F9FAFB] mb-1.5">
+                          Allowed Document Formats *
+                        </label>
+                        <div className="flex items-center space-x-3 text-xs">
+                          {['pdf', 'doc', 'docx'].map((fmt) => {
+                            const isChecked = (q.fileUploadConfig?.allowedFileTypes || ['pdf', 'doc', 'docx']).includes(fmt);
+                            return (
+                              <label key={fmt} className="flex items-center space-x-1.5 cursor-pointer">
+                                <input
+                                  type="checkbox"
+                                  checked={isChecked}
+                                  onChange={() => toggleAllowedFileType(qIndex, fmt)}
+                                  className="rounded border-[#EBE3D8] text-[#E05D38] focus:ring-[#E05D38]"
+                                />
+                                <span className="font-semibold uppercase text-[#1F2937] dark:text-[#F9FAFB]">.{fmt}</span>
+                              </label>
+                            );
+                          })}
+                        </div>
+                        {validationErrors[`q_${qIndex}_filetypes`] && (
+                          <p className="text-xs text-red-500 mt-1">
+                            {validationErrors[`q_${qIndex}_filetypes`]}
+                          </p>
+                        )}
+                      </div>
+
+                      {/* Max File Size */}
+                      <div>
+                        <label className="block text-xs font-semibold text-[#1F2937] dark:text-[#F9FAFB] mb-1.5">
+                          Maximum File Size (MB)
+                        </label>
+                        <div className="flex items-center space-x-2">
+                          <input
+                            type="number"
+                            min="1"
+                            max="50"
+                            value={q.fileUploadConfig?.maxFileSizeMb ?? 10}
+                            onChange={(e) =>
+                              updateFileUploadConfig(
+                                qIndex,
+                                'maxFileSizeMb',
+                                Math.max(1, Math.min(50, parseInt(e.target.value, 10) || 10))
+                              )
+                            }
+                            className="w-24 px-3 py-1 text-xs bg-white dark:bg-[#12161F] border border-[#EBE3D8] dark:border-[#2D3748] rounded-xl text-[#1F2937] dark:text-[#F9FAFB] focus:outline-none focus:border-[#E05D38]"
+                          />
+                          <span className="text-xs text-[#64748B] dark:text-[#94A3B8]">MB (1 - 50MB)</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="flex flex-wrap items-center gap-4 pt-1 border-t border-[#EBE3D8]/60 dark:border-[#2D3748]/60 text-xs">
+                      <label className="flex items-center space-x-2 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={q.fileUploadConfig?.allowGoogleDocs ?? true}
+                          onChange={(e) => updateFileUploadConfig(qIndex, 'allowGoogleDocs', e.target.checked)}
+                          className="rounded border-[#EBE3D8] text-[#E05D38] focus:ring-[#E05D38]"
+                        />
+                        <span className="text-[#1F2937] dark:text-[#F9FAFB] font-medium">
+                          Allow Google Docs URL submissions
+                        </span>
+                      </label>
+
+                      <label className="flex items-center space-x-2 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={q.fileUploadConfig?.isRequired ?? true}
+                          onChange={(e) => updateFileUploadConfig(qIndex, 'isRequired', e.target.checked)}
+                          className="rounded border-[#EBE3D8] text-[#E05D38] focus:ring-[#E05D38]"
+                        />
+                        <span className="text-[#1F2937] dark:text-[#F9FAFB] font-medium">
+                          Mandatory Submission (Required)
+                        </span>
+                      </label>
+                    </div>
+                  </div>
+                )}
 
                 {/* Multiple Choice Options List */}
                 {q.type === 'mcq' && (
@@ -807,6 +1163,25 @@ const AssessmentBuilder = () => {
             >
               Add Long Essay
             </Button>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              icon={Upload}
+              onClick={() => addQuestion('file_upload')}
+            >
+              Add File Upload
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              icon={Database}
+              onClick={() => setIsQuestionBankModalOpen(true)}
+              className="text-indigo-700 border-indigo-200 hover:bg-indigo-50 font-semibold"
+            >
+              Import from Question Bank
+            </Button>
           </div>
         </div>
       </div>
@@ -856,6 +1231,13 @@ const AssessmentBuilder = () => {
           </div>
         </div>
       </Modal>
+
+      {/* Question Bank Picker Modal */}
+      <QuestionBankPickerModal
+        isOpen={isQuestionBankModalOpen}
+        onClose={() => setIsQuestionBankModalOpen(false)}
+        onSelectQuestions={handleImportFromQuestionBank}
+      />
     </div>
   );
 };

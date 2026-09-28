@@ -71,6 +71,29 @@ const assessmentSchema = new mongoose.Schema(
         ref: 'User',
       },
     ],
+    proctoringEnabled: {
+      type: Boolean,
+      default: false,
+      index: true,
+    },
+    cameraRequired: {
+      type: Boolean,
+      default: false,
+    },
+    randomization: {
+      enabled: {
+        type: Boolean,
+        default: false,
+      },
+      poolCount: {
+        type: Number,
+        default: null,
+      },
+      shuffleOrder: {
+        type: Boolean,
+        default: false,
+      },
+    },
   },
   {
     timestamps: true,
@@ -78,6 +101,9 @@ const assessmentSchema = new mongoose.Schema(
     toObject: { virtuals: true },
   }
 );
+
+// Phase 6 Category analytics index
+assessmentSchema.index({ category: 1, status: 1 });
 
 // Virtual for questions
 assessmentSchema.virtual('questions', {

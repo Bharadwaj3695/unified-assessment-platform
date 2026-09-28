@@ -27,6 +27,20 @@ class EvaluationController {
       next(err);
     }
   }
+
+  async sendStudentEmail(req, res, next) {
+    try {
+      const { subject, message } = req.body;
+      const result = await evaluationService.sendStudentEmail(
+        req.user.id,
+        req.params.id,
+        { subject, message }
+      );
+      return successResponse(res, result.message, result);
+    } catch (err) {
+      next(err);
+    }
+  }
 }
 
 module.exports = new EvaluationController();

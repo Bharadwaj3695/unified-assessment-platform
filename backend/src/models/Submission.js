@@ -96,6 +96,18 @@ const submissionSchema = new mongoose.Schema(
       default: null,
       trim: true,
     },
+    proctoringSessionId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'ProctoringSession',
+      default: null,
+      index: true,
+    },
+    assignedQuestionIds: [
+      {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'Question',
+      },
+    ],
   },
   {
     timestamps: true,
@@ -107,8 +119,20 @@ const submissionSchema = new mongoose.Schema(
 // Compound uniqueness: exactly one submission attempt per student per assessment
 submissionSchema.index({ assessmentId: 1, studentId: 1 }, { unique: true });
 
+// Phase 6 Analytics performance indexes
+submissionSchema.index({ studentId: 1, status: 1, submittedAt: -1 });
+submissionSchema.index({ assessmentId: 1, status: 1 });
+submissionSchema.index({ submittedAt: -1 });
+
 submissionSchema.virtual('evaluation', {
   ref: 'Evaluation',
+  localField: '_id',
+  foreignField: 'submissionId',
+  justOne: true,
+});
+
+submissionSchema.virtual('proctoringSession', {
+  ref: 'ProctoringSession',
   localField: '_id',
   foreignField: 'submissionId',
   justOne: true,

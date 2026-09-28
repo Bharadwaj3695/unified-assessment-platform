@@ -15,6 +15,24 @@ export const storage = {
       console.error('Failed to save token to localStorage', e);
     }
   },
+  getRefreshToken: () => {
+    try {
+      return localStorage.getItem(STORAGE_KEYS.REFRESH_TOKEN);
+    } catch {
+      return null;
+    }
+  },
+  setRefreshToken: (token) => {
+    try {
+      if (token) {
+        localStorage.setItem(STORAGE_KEYS.REFRESH_TOKEN, token);
+      } else {
+        localStorage.removeItem(STORAGE_KEYS.REFRESH_TOKEN);
+      }
+    } catch (e) {
+      console.error('Failed to save refresh token to localStorage', e);
+    }
+  },
   removeToken: () => {
     try {
       localStorage.removeItem(STORAGE_KEYS.TOKEN);

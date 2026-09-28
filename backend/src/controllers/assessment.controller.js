@@ -28,7 +28,7 @@ class AssessmentController {
 
   async getAssessments(req, res, next) {
     try {
-      const { status, category, search, page = 1, limit = 10 } = req.query;
+      const { status, category, search, page = 1, limit = 200, dateFilter } = req.query;
       const { total, assessments } = await assessmentService.getAssessments({
         role: req.user.role,
         userId: req.user.id,
@@ -37,6 +37,7 @@ class AssessmentController {
         search,
         page,
         limit,
+        dateFilter,
       });
       return paginatedResponse(res, 'Assessments retrieved successfully', assessments, page, limit, total);
     } catch (err) {

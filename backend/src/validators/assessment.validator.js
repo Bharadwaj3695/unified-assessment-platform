@@ -11,8 +11,11 @@ const createAssessmentValidator = [
   body('status').optional().isIn(['draft', 'published', 'archived']).withMessage('Status must be draft, published, or archived'),
   body('questions').optional().isArray().withMessage('Questions must be an array'),
   body('questions.*.questionText').optional().trim().notEmpty().withMessage('Question text is required'),
-  body('questions.*.type').optional().isIn(['mcq', 'multiple_choice', 'true_false', 'short_answer', 'long_answer', 'code']).withMessage('Invalid question type'),
+  body('questions.*.type').optional().isIn(['mcq', 'multiple_choice', 'true_false', 'short_answer', 'long_answer', 'code', 'file_upload']).withMessage('Invalid question type'),
   body('questions.*.points').optional().isInt({ min: 1 }).withMessage('Points must be at least 1'),
+  body('questions.*.fileUploadConfig').optional().isObject().withMessage('fileUploadConfig must be an object'),
+  body('proctoringEnabled').optional().isBoolean().withMessage('proctoringEnabled must be a boolean'),
+  body('cameraRequired').optional().isBoolean().withMessage('cameraRequired must be a boolean'),
 ];
 
 const updateAssessmentValidator = [
@@ -26,8 +29,11 @@ const updateAssessmentValidator = [
   body('assignedStudents.*').optional().isMongoId().withMessage('Each assigned student must be a valid User ID'),
   body('questions').optional().isArray().withMessage('Questions must be an array'),
   body('questions.*.questionText').optional().trim().notEmpty().withMessage('Question text is required'),
-  body('questions.*.type').optional().isIn(['mcq', 'multiple_choice', 'true_false', 'short_answer', 'long_answer', 'code']).withMessage('Invalid question type'),
+  body('questions.*.type').optional().isIn(['mcq', 'multiple_choice', 'true_false', 'short_answer', 'long_answer', 'code', 'file_upload']).withMessage('Invalid question type'),
   body('questions.*.points').optional().isInt({ min: 1 }).withMessage('Points must be at least 1'),
+  body('questions.*.fileUploadConfig').optional().isObject().withMessage('fileUploadConfig must be an object'),
+  body('proctoringEnabled').optional().isBoolean().withMessage('proctoringEnabled must be a boolean'),
+  body('cameraRequired').optional().isBoolean().withMessage('cameraRequired must be a boolean'),
 ];
 
 module.exports = {

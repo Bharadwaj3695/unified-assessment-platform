@@ -43,7 +43,7 @@ test.describe('Authentication Workflows', () => {
     // Should redirect to admin dashboard
     await expect(page).toHaveURL(/\/admin\/dashboard/);
     await expect(page.getByText('admin Workspace', { exact: true })).toBeVisible({ timeout: 10000 });
-    await expect(page.locator('text=System Governance')).toBeVisible();
+    await expect(page.getByText('System Governance', { exact: true })).toBeVisible();
   });
 
   test('4. Invalid login displays authentication error message and blocks access', async ({ page }) => {
@@ -72,5 +72,30 @@ test.describe('Authentication Workflows', () => {
     await expect(alertOrToast.first()).toBeVisible({ timeout: 5000 });
     const text = await alertOrToast.first().textContent();
     expect(text.toLowerCase()).toContain('pending');
+  });
+
+  test('6. Regression: Google SSO initiation properly parses response contract and redirects to Google OAuth', async ({ page }) => {
+    await page.goto('/auth/login');
+
+    const googleBtn = page.getByRole('button', { name: /Continue with Google/i });
+    await expect(googleBtn).toBeVisible();
+
+    const [request] = await Promise.all([
+      page.waitForRequest((req) => req.url().includes('/api/auth/google/url')),
+      googleBtn.click(),
+    ]);
+
+    expect(request.url()).toContain('/api/auth/google/url');
+
+    // Wait for Google OAuth redirect to accounts.google.com
+    await page.waitForURL(/^https:\/\/accounts\.google\.com\//, { timeout: 10000 });
+    expect(page.url()).toContain('accounts.google.com');
+    expect(page.url()).toContain('client_id=');
+    expect(page.url()).toContain('redirect_uri=');
+    expect(page.url()).toContain('state=');
+
+    // Ensure error banner did not appear
+    const alert = page.locator('[role="alert"], .bg-red-50');
+    await expect(alert).not.toBeVisible();
   });
 });

@@ -232,4 +232,18 @@ test.describe('Student Assessment Engine & Autosave E2E', () => {
     await expect(page.locator('text=Cannot Access Assessment')).toBeVisible({ timeout: 10000 });
     await expect(page.locator('text=Only one attempt is permitted')).toBeVisible();
   });
+
+  test('5. Regression: Authenticated student dashboard renders complete workspace without blank screen or hook errors', async ({ page }) => {
+    const pageErrors = [];
+    page.on('pageerror', (err) => pageErrors.push(err.message));
+
+    await page.goto('/student/dashboard');
+    await expect(page.getByText('Student Workspace', { exact: true })).toBeVisible({ timeout: 10000 });
+    await expect(page.getByText('Welcome back, Alex Johnson!', { exact: false })).toBeVisible();
+    await expect(page.getByText('Assigned & Open Assessments')).toBeVisible();
+    await expect(page.getByText('Academic Performance')).toBeVisible();
+    await expect(page.getByText('Recent Submissions')).toBeVisible();
+
+    expect(pageErrors).toHaveLength(0);
+  });
 });

@@ -6,6 +6,11 @@ const Evaluation = require('./Evaluation');
 const Notification = require('./Notification');
 const AuditLog = require('./AuditLog');
 const SystemSetting = require('./SystemSetting');
+const ProctoringSession = require('./ProctoringSession');
+const ProctoringEvent = require('./ProctoringEvent');
+const BankQuestion = require('./BankQuestion');
+const QuestionImportJob = require('./QuestionImportJob');
+const MfaChallenge = require('./MfaChallenge');
 
 module.exports = {
   User,
@@ -16,4 +21,9 @@ module.exports = {
   Notification,
   AuditLog,
   SystemSetting,
+  ProctoringSession,
+  ProctoringEvent,
+  BankQuestion,
+  QuestionImportJob,
+  MfaChallenge,
 };

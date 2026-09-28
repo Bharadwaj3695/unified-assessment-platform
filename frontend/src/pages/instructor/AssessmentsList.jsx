@@ -33,6 +33,7 @@ import {
   AlertTriangle,
   Users,
   Search,
+  BarChart2,
 } from 'lucide-react';
 
 const AssessmentsList = () => {
@@ -45,6 +46,7 @@ const AssessmentsList = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [accessFilter, setAccessFilter] = useState('all');
+  const [dateFilter, setDateFilter] = useState('all');
 
   // Modals
   const [previewModal, setPreviewModal] = useState({ isOpen: false, assessment: null });
@@ -73,6 +75,13 @@ const AssessmentsList = () => {
   const filteredAssessments = assessments.filter((asmt) => {
     if (statusFilter !== 'all' && asmt.status !== statusFilter) return false;
     if (accessFilter !== 'all' && asmt.accessType !== accessFilter) return false;
+    if (dateFilter !== 'all') {
+      const createdAt = asmt.createdAt ? new Date(asmt.createdAt).getTime() : 0;
+      const now = Date.now();
+      if (dateFilter === 'recent' && now - createdAt > 48 * 60 * 60 * 1000) return false;
+      if (dateFilter === 'last_week' && now - createdAt > 7 * 24 * 60 * 60 * 1000) return false;
+      if (dateFilter === 'last_month' && now - createdAt > 30 * 24 * 60 * 60 * 1000) return false;
+    }
     if (searchTerm.trim()) {
       const term = searchTerm.toLowerCase();
       const matchTitle = asmt.title?.toLowerCase().includes(term);
@@ -180,7 +189,7 @@ const AssessmentsList = () => {
           ))}
         </div>
 
-        {/* Access Type & Search Controls */}
+        {/* Access Type, Date Filter & Search Controls */}
         <div className="flex items-center space-x-2">
           <select
             value={accessFilter}
@@ -190,6 +199,17 @@ const AssessmentsList = () => {
             <option value="all">All Access Types</option>
             <option value="public">Public Only</option>
             <option value="restricted">Restricted Only</option>
+          </select>
+
+          <select
+            value={dateFilter}
+            onChange={(e) => setDateFilter(e.target.value)}
+            className="px-3 py-1.5 text-xs bg-[#FFF9F2] dark:bg-[#12161F] border border-[#EBE3D8] dark:border-[#2D3748] rounded-xl text-[#1F2937] dark:text-[#F9FAFB] focus:outline-none focus:border-[#E05D38] focus:ring-2 focus:ring-[#E05D38]/20 transition-all"
+          >
+            <option value="all">All Dates</option>
+            <option value="recent">Recent (48 hrs)</option>
+            <option value="last_week">Last Week</option>
+            <option value="last_month">Last Month</option>
           </select>
 
           <div className="relative">
@@ -221,21 +241,22 @@ const AssessmentsList = () => {
           <EmptyState
             title="No assessments found"
             description={
-              searchTerm || statusFilter !== 'all' || accessFilter !== 'all'
+              searchTerm || statusFilter !== 'all' || accessFilter !== 'all' || dateFilter !== 'all'
                 ? 'No assessments match the selected search or filter criteria.'
                 : 'You have not authored any assessments yet.'
             }
             actionLabel={
-              searchTerm || statusFilter !== 'all' || accessFilter !== 'all'
+              searchTerm || statusFilter !== 'all' || accessFilter !== 'all' || dateFilter !== 'all'
                 ? 'Clear Filters'
                 : 'Create First Assessment'
             }
             onAction={
-              searchTerm || statusFilter !== 'all' || accessFilter !== 'all'
+              searchTerm || statusFilter !== 'all' || accessFilter !== 'all' || dateFilter !== 'all'
                 ? () => {
                     setSearchTerm('');
                     setStatusFilter('all');
                     setAccessFilter('all');
+                    setDateFilter('all');
                   }
                 : () => navigate('/instructor/create')
             }
@@ -328,6 +349,17 @@ const AssessmentsList = () => {
                     {/* Actions */}
                     <TableCell className="text-right">
                       <div className="flex items-center justify-end space-x-1">
+                        {/* Analytics */}
+                        <Link to={`/instructor/analytics/${asmtId}`}>
+                          <button
+                            type="button"
+                            className="p-1.5 text-[#3B82F6] hover:text-[#2563EB] rounded-xl hover:bg-blue-50 dark:hover:bg-blue-950/30 transition-colors cursor-pointer"
+                            title="Assessment Analytics"
+                          >
+                            <BarChart2 className="w-4 h-4" />
+                          </button>
+                        </Link>
+
                         {/* Preview */}
                         <button
                           type="button"

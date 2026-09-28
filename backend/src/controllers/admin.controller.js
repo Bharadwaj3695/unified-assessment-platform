@@ -161,6 +161,8 @@ class AdminController {
       user.approvedAt = new Date();
       user.approvedBy = req.user._id;
       user.rejectionReason = null;
+      user.revokedAt = null;
+      user.revokedBy = null;
       await user.save();
 
       await AuditLog.create({
@@ -197,6 +199,10 @@ class AdminController {
       const user = await User.findById(req.params.id);
       if (!user) {
         return errorResponse(res, 'User not found', 404);
+      }
+
+      if (user._id.toString() === req.user._id.toString()) {
+        return errorResponse(res, 'You cannot reject your own administrator account', 400);
       }
 
       const reason = req.body.reason || 'Registration rejected by administrator';

@@ -47,6 +47,11 @@ export const instructorService = {
     const res = await api.post(`/evaluations/submission/${submissionId}`, data);
     return res.data || res;
   },
+
+  sendStudentEmail: async (submissionId, emailData) => {
+    const res = await api.post(`/evaluations/submission/${submissionId}/email`, emailData);
+    return res.data || res;
+  },
 };
 
 export default instructorService;

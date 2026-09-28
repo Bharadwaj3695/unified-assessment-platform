@@ -19,7 +19,9 @@ build/
 .env.development.local
 .env.test.local
 .env.production.local
-
+.envx
+*.env
+*.envx
 # SQLite database files
 *.sqlite
 *.sqlite3
@@ -48,3 +50,6 @@ Thumbs.db
 # Uploads
 backend/uploads/*
 !backend/uploads/.gitkeep
+backend/storage/*
+backend/storage/documents/*
+!backend/storage/documents/.gitkeep

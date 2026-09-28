@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../hooks/useAuth';
+import { getTimeBasedGreeting } from '../../utils/greeting';
 import assessmentService from '../../services/assessment.service';
 import instructorService from '../../services/instructor.service';
 import InstructorSearchBar from '../../components/instructor/InstructorSearchBar';
@@ -34,6 +35,7 @@ import {
   Edit,
   Globe,
   Lock,
+  BarChart2,
 } from 'lucide-react';
 
 const InstructorDashboard = () => {
@@ -97,9 +99,9 @@ const InstructorDashboard = () => {
   }, [loadDashboardData]);
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4 sm:space-y-5 lg:space-y-6">
       {/* Prominent Workspace Search Bar */}
-      <div className="rounded-2xl border border-[#EBE3D8] dark:border-[#2D3748] bg-white dark:bg-[#1A202C] p-4 sm:p-5 shadow-warm-xs">
+      <div className="rounded-2xl border border-[#EBE3D8] dark:border-[#2D3748] bg-white dark:bg-[#1A202C] p-3.5 sm:p-4 shadow-warm-xs">
         <InstructorSearchBar
           placeholder="Search course assessments, students, or submissions..."
           onSelectAssessment={(asmt) => navigate(`/instructor/edit/${asmt._id || asmt.id}`)}
@@ -107,20 +109,20 @@ const InstructorDashboard = () => {
       </div>
 
       {/* Personalized Welcome Header with Instructor Illustration */}
-      <div className="rounded-2xl border border-[#EBE3D8] dark:border-[#2D3748] bg-gradient-to-r from-[#EAF4F1] via-[#FFFDFB] to-[#FDECE2] dark:from-[#132A24] dark:via-[#1A202C] dark:to-[#341C16] p-6 sm:p-7 shadow-warm-xs relative overflow-hidden">
-        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-6 relative z-10">
+      <div className="rounded-2xl border border-[#EBE3D8] dark:border-[#2D3748] bg-gradient-to-r from-[#EAF4F1] via-[#FFFDFB] to-[#FDECE2] dark:from-[#132A24] dark:via-[#1A202C] dark:to-[#341C16] p-5 sm:p-6 lg:py-5 lg:px-7 shadow-warm-xs relative overflow-hidden">
+        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-5 sm:gap-6 relative z-10">
           <div className="max-w-xl">
-            <div className="flex items-center space-x-2 mb-2">
+            <div className="flex items-center space-x-2 mb-1.5 sm:mb-2">
               <Badge variant="sage" size="sm" dot>Instructor Studio</Badge>
               <span className="text-xs text-[#64748B] dark:text-[#94A3B8]">· Department of Computer Science</span>
             </div>
             <h1 className="text-2xl sm:text-3xl font-display font-bold tracking-tight text-[#1F2937] dark:text-[#F9FAFB]">
-              Welcome, {user?.name || 'Professor'}
+              {getTimeBasedGreeting(user?.name)}
             </h1>
-            <p className="mt-2 text-sm text-[#64748B] dark:text-[#94A3B8] leading-relaxed">
-              Manage your assessment question banks, monitor student enrollments, and review examination attempts with real-time feedback.
+            <p className="mt-1.5 sm:mt-2 text-sm text-[#64748B] dark:text-[#94A3B8] leading-relaxed">
+              Welcome back. Manage your assessments and monitor student performance.
             </p>
-            <div className="mt-4 flex items-center space-x-3">
+            <div className="mt-3.5 sm:mt-4 flex items-center space-x-3">
               <Link to="/instructor/create">
                 <Button variant="primary" size="md" icon={PlusCircle}>
                   Create Assessment
@@ -135,7 +137,7 @@ const InstructorDashboard = () => {
           </div>
 
           <div className="hidden md:flex flex-shrink-0 items-center justify-center">
-            <InstructorHeroIllustration className="w-56 h-40 object-contain drop-shadow-sm" />
+            <InstructorHeroIllustration className="w-40 h-28 sm:w-48 sm:h-32 lg:w-52 lg:h-36 object-contain drop-shadow-sm" />
           </div>
         </div>
       </div>
@@ -251,6 +253,11 @@ const InstructorDashboard = () => {
                       </div>
 
                       <div className="flex items-center space-x-2 flex-shrink-0">
+                        <Link to={`/instructor/analytics/${asmtId}`}>
+                          <Button variant="secondary" size="sm" icon={BarChart2}>
+                            Analytics
+                          </Button>
+                        </Link>
                         <Link to={`/instructor/edit/${asmtId}`}>
                           <Button variant="outline" size="sm" icon={Edit}>
                             Edit

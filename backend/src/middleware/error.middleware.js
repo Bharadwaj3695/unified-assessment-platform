@@ -4,6 +4,16 @@ const logger = require('../utils/logger');
 const errorHandler = (err, req, res, next) => {
   logger.error('API Error: %s', err.message || err);
 
+  // Multer Error (file upload limits and invalid multipart)
+  if (err.name === 'MulterError') {
+    const statusCode = err.code === 'LIMIT_FILE_SIZE' ? 413 : 400;
+    const message =
+      err.code === 'LIMIT_FILE_SIZE'
+        ? 'File size exceeds the allowed limit'
+        : err.message || 'File upload error';
+    return errorResponse(res, message, statusCode);
+  }
+
   // Mongoose Bad ObjectId (CastError)
   if (err.name === 'CastError') {
     return errorResponse(res, `Resource not found with id of ${err.value}`, 404);

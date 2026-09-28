@@ -23,7 +23,7 @@ const MainLayout = ({ showSidebar = true }) => {
         />
 
         <main className="flex-1 flex flex-col overflow-y-auto min-w-0">
-          <div className="flex-1 p-4 sm:p-6 lg:p-8">
+          <div className="flex-1 p-3.5 sm:p-5 lg:p-6 xl:p-8">
             <div className="max-w-7xl mx-auto w-full">
               <Outlet />
             </div>

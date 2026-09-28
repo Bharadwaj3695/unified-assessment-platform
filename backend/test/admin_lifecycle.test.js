@@ -16,6 +16,7 @@ describe('Phase B Verification: Admin Approval & Account Lifecycle', () => {
     await User.updateOne({ email: 'pending@uap.edu' }, { status: 'pending', isActive: false });
     await User.updateOne({ email: 'alice@uap.edu' }, { status: 'active', isActive: true });
     await User.deleteOne({ email: 'rejected_candidate@uap.edu' });
+    await User.deleteOne({ email: 'new_candidate@uap.edu' });
     adminUser = await User.findOne({ email: 'admin@uap.edu' });
     pendingUser = await User.findOne({ email: 'pending@uap.edu' });
   });
@@ -24,6 +25,7 @@ describe('Phase B Verification: Admin Approval & Account Lifecycle', () => {
     await User.updateOne({ email: 'pending@uap.edu' }, { status: 'pending', isActive: false });
     await User.updateOne({ email: 'alice@uap.edu' }, { status: 'active', isActive: true });
     await User.deleteOne({ email: 'rejected_candidate@uap.edu' });
+    await User.deleteOne({ email: 'new_candidate@uap.edu' });
     await disconnectDB();
   });
 
@@ -215,5 +217,185 @@ describe('Phase B Verification: Admin Approval & Account Lifecycle', () => {
 
     assert.strictEqual(statusCode, 400);
     assert.match(responseData.message, /cannot revoke your own administrator account/i);
+  });
+
+  describe('Lifecycle Verification Suite: 6 Step Authentication Lifecycle', () => {
+    let testCandidate;
+
+    it('1. New registration -> pending status and isActive false', async () => {
+      await User.deleteOne({ email: 'new_candidate@uap.edu' });
+      const regResult = await authService.register({
+        name: 'New Candidate',
+        email: 'new_candidate@uap.edu',
+        password: 'Password123!',
+        role: 'student',
+        instituteCode: 'TEST-2026',
+      });
+
+      assert.ok(regResult.user.id);
+      assert.strictEqual(regResult.status, 'pending');
+      assert.strictEqual(regResult.user.status, 'pending');
+      assert.strictEqual(regResult.accessToken, undefined, 'Pending user must not receive access token');
+
+      testCandidate = await User.findOne({ email: 'new_candidate@uap.edu' });
+      assert.ok(testCandidate);
+      assert.strictEqual(testCandidate.status, 'pending');
+      assert.strictEqual(testCandidate.isActive, false);
+    });
+
+    it('2. Pending user -> cannot login (HTTP 403)', async () => {
+      await assert.rejects(
+        async () => {
+          await authService.login({
+            email: 'new_candidate@uap.edu',
+            password: 'Password123!',
+          });
+        },
+        (err) => {
+          assert.strictEqual(err.statusCode, 403);
+          assert.match(err.message, /pending administrator approval/i);
+          return true;
+        }
+      );
+    });
+
+    it('3. Admin approval -> active (status = active, isActive = true)', async () => {
+      const approveReq = {
+        params: { id: testCandidate._id.toString() },
+        body: { role: 'student' },
+        user: adminUser,
+        ip: '127.0.0.1',
+      };
+
+      let responseData = null;
+      const approveRes = {
+        status: () => approveRes,
+        json: (data) => {
+          responseData = data;
+          return approveRes;
+        },
+      };
+
+      await adminController.approveUser(approveReq, approveRes, (err) => {
+        if (err) throw err;
+      });
+
+      assert.ok(responseData && responseData.success);
+      const approved = await User.findById(testCandidate._id);
+      assert.strictEqual(approved.status, 'active');
+      assert.strictEqual(approved.isActive, true);
+      assert.ok(approved.approvedAt);
+      assert.strictEqual(approved.approvedBy.toString(), adminUser._id.toString());
+    });
+
+    it('4. Active user -> can login repeatedly without approval', async () => {
+      // Login attempt 1
+      const login1 = await authService.login({
+        email: 'new_candidate@uap.edu',
+        password: 'Password123!',
+      });
+      assert.ok(login1.accessToken, 'First login should return access token');
+      assert.ok(login1.refreshToken, 'First login should return refresh token');
+      assert.strictEqual(login1.user.status, 'active');
+      assert.strictEqual(login1.user.isActive, true);
+      assert.strictEqual(login1.user.role, 'student');
+
+      // Login attempt 2 (immediate repeat, no approval requested)
+      const login2 = await authService.login({
+        email: 'new_candidate@uap.edu',
+        password: 'Password123!',
+      });
+      assert.ok(login2.accessToken, 'Second login should return access token');
+      assert.strictEqual(login2.user.status, 'active');
+      assert.strictEqual(login2.user.isActive, true);
+
+      // Login attempt 3
+      const login3 = await authService.login({
+        email: 'new_candidate@uap.edu',
+        password: 'Password123!',
+      });
+      assert.ok(login3.accessToken, 'Third login should return access token');
+      assert.strictEqual(login3.user.status, 'active');
+      assert.strictEqual(login3.user.isActive, true);
+
+      // Verify user document did not reset or generate approval workflow
+      const verified = await User.findById(testCandidate._id);
+      assert.strictEqual(verified.status, 'active');
+      assert.strictEqual(verified.isActive, true);
+    });
+
+    it('5. Admin revoke -> user can no longer authenticate', async () => {
+      const revokeReq = {
+        params: { id: testCandidate._id.toString() },
+        body: { reason: 'Violation of platform terms' },
+        user: adminUser,
+        ip: '127.0.0.1',
+      };
+
+      let responseData = null;
+      const revokeRes = {
+        status: () => revokeRes,
+        json: (data) => {
+          responseData = data;
+          return revokeRes;
+        },
+      };
+
+      await adminController.revokeUser(revokeReq, revokeRes, (err) => {
+        if (err) throw err;
+      });
+
+      assert.ok(responseData && responseData.success);
+      const revoked = await User.findById(testCandidate._id);
+      assert.strictEqual(revoked.status, 'revoked');
+      assert.strictEqual(revoked.isActive, false);
+      assert.ok(revoked.revokedAt);
+      assert.strictEqual(revoked.revokedBy.toString(), adminUser._id.toString());
+      assert.strictEqual(revoked.rejectionReason, 'Violation of platform terms');
+
+      // Authentication attempt must now be rejected
+      await assert.rejects(
+        async () => {
+          await authService.login({
+            email: 'new_candidate@uap.edu',
+            password: 'Password123!',
+          });
+        },
+        (err) => {
+          assert.strictEqual(err.statusCode, 403);
+          assert.match(err.message, /has been revoked/i);
+          return true;
+        }
+      );
+    });
+
+    it('6. Existing admin/instructor/student demo accounts continue to work', async () => {
+      const adminLogin = await authService.login({
+        email: 'admin@uap.edu',
+        password: 'Admin@123',
+      });
+      assert.ok(adminLogin.accessToken);
+      assert.strictEqual(adminLogin.user.role, 'admin');
+      assert.strictEqual(adminLogin.user.status, 'active');
+      assert.strictEqual(adminLogin.user.isActive, true);
+
+      const instructorLogin = await authService.login({
+        email: 'instructor@uap.edu',
+        password: 'Instructor@123',
+      });
+      assert.ok(instructorLogin.accessToken);
+      assert.strictEqual(instructorLogin.user.role, 'instructor');
+      assert.strictEqual(instructorLogin.user.status, 'active');
+      assert.strictEqual(instructorLogin.user.isActive, true);
+
+      const studentLogin = await authService.login({
+        email: 'student@uap.edu',
+        password: 'Student@123',
+      });
+      assert.ok(studentLogin.accessToken);
+      assert.strictEqual(studentLogin.user.role, 'student');
+      assert.strictEqual(studentLogin.user.status, 'active');
+      assert.strictEqual(studentLogin.user.isActive, true);
+    });
   });
 });
