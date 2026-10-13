@@ -1,34 +1,22 @@
-import React, { useState, useEffect, useRef } from 'react';
+import { useState, useEffect } from 'react';
 import { useAuth } from '../../hooks/useAuth';
 import { authService } from '../../services/auth.service';
 import Card from '../../components/ui/Card';
 import Button from '../../components/ui/Button';
 import Badge from '../../components/ui/Badge';
-import Spinner from '../../components/ui/Spinner';
+import SectionLoader from '../../components/ui/SectionLoader';
 import Alert from '../../components/ui/Alert';
-import {
-  User as UserIcon,
-  Mail,
-  Lock,
-  Building,
-  BookOpen,
-  Camera,
-  Save,
-  CheckCircle2,
-  GraduationCap,
-  Layers,
-} from 'lucide-react';
+import { Lock, Save } from 'lucide-react';
 import { toast } from 'react-toastify';
 import TwoFactorAuthSection from '../../components/auth/TwoFactorAuthSection';
+import ProfilePhotoUploader from '../../components/common/ProfilePhotoUploader';
 
 const InstructorProfile = () => {
   const { user } = useAuth();
-  const fileInputRef = useRef(null);
 
   const [profile, setProfile] = useState(null);
   const [loading, setLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
-  const [isUploading, setIsUploading] = useState(false);
   const [error, setError] = useState(null);
 
   // Form State
@@ -86,41 +74,8 @@ const InstructorProfile = () => {
     }
   };
 
-  const handleFileChange = async (e) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    const allowed = ['image/jpeg', 'image/png', 'image/webp'];
-    if (!allowed.includes(file.type)) {
-      toast.error('Only image files (JPEG, PNG, WEBP) are permitted for profile pictures');
-      return;
-    }
-    if (file.size > 5 * 1024 * 1024) {
-      toast.error('Profile image cannot exceed 5MB');
-      return;
-    }
-
-    try {
-      setIsUploading(true);
-      const formData = new FormData();
-      formData.append('avatar', file);
-      await authService.uploadAvatar(formData);
-      toast.success('Profile picture updated successfully');
-      fetchProfile();
-    } catch (err) {
-      toast.error(err.message || 'Failed to upload profile picture');
-    } finally {
-      setIsUploading(false);
-    }
-  };
-
   if (loading) {
-    return (
-      <div className="py-20 flex flex-col items-center justify-center">
-        <Spinner size="lg" />
-        <p className="mt-3 text-xs text-slate-500 font-medium">Loading faculty academic profile...</p>
-      </div>
-    );
+    return <SectionLoader message="Loading faculty academic profile..." minHeight="min-h-[350px]" />;
   }
 
   return (
@@ -142,35 +97,12 @@ const InstructorProfile = () => {
         <div className="md:col-span-5 space-y-6">
           <Card>
             <div className="flex flex-col items-center text-center space-y-3">
-              <div className="relative group">
-                {profile?.avatar ? (
-                  <img
-                    src={profile.avatar}
-                    alt={profile.name}
-                    className="w-24 h-24 rounded-3xl object-cover border-2 border-brand-sage shadow-warm-sm"
-                  />
-                ) : (
-                  <div className="w-24 h-24 rounded-3xl bg-gradient-to-br from-emerald-100 to-teal-200 dark:from-emerald-950 dark:to-teal-900 border-2 border-brand-sage/40 flex items-center justify-center text-brand-sage text-3xl font-extrabold shadow-warm-xs">
-                    {profile?.name?.charAt(0) || 'F'}
-                  </div>
-                )}
-                <button
-                  type="button"
-                  onClick={() => fileInputRef.current?.click()}
-                  disabled={isUploading}
-                  className="absolute -bottom-1.5 -right-1.5 p-2 rounded-xl bg-brand-sage text-white shadow-warm-sm hover:bg-brand-sage/90 transition-all cursor-pointer"
-                  title="Upload faculty profile picture"
-                >
-                  <Camera className="w-4 h-4" />
-                </button>
-                <input
-                  type="file"
-                  ref={fileInputRef}
-                  onChange={handleFileChange}
-                  accept="image/jpeg,image/png,image/webp"
-                  className="hidden"
-                />
-              </div>
+              <ProfilePhotoUploader
+                avatar={profile?.avatar}
+                name={profile?.name}
+                role="instructor"
+                onPhotoUpdated={() => fetchProfile()}
+              />
 
               <div>
                 <h2 className="text-lg font-bold text-slate-900 dark:text-slate-100">

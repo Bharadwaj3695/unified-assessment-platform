@@ -1,6 +1,40 @@
-const { User, Submission } = require('../models');
+const fs = require('fs');
+const path = require('path');
+const { User, Submission, AuditLog } = require('../models');
 const userService = require('../services/user.service');
 const { successResponse, errorResponse } = require('../utils/response');
+
+/**
+ * Safely unlink an old avatar file from the uploads directory if it is local
+ * and not referenced by any other User record.
+ */
+async function cleanupAvatarFile(avatarPath, currentUserId) {
+  if (!avatarPath || typeof avatarPath !== 'string') return;
+  // Only clean up local /uploads/ files, not external SSO URLs
+  if (!avatarPath.startsWith('/uploads/')) return;
+
+  try {
+    const filename = path.basename(avatarPath);
+    const uploadsDir = path.resolve(__dirname, '../../uploads');
+    const resolvedPath = path.resolve(uploadsDir, filename);
+
+    // Prevent directory traversal attacks
+    if (!resolvedPath.startsWith(uploadsDir)) return;
+
+    // Check if another user references this same avatar file
+    const sharedCount = await User.countDocuments({
+      avatar: avatarPath,
+      _id: { $ne: currentUserId },
+    });
+    if (sharedCount > 0) return;
+
+    if (fs.existsSync(resolvedPath)) {
+      await fs.promises.unlink(resolvedPath);
+    }
+  } catch (err) {
+    console.warn('[UserController] Non-fatal error cleaning up old avatar:', err.message);
+  }
+}
 
 class UserController {
   async getProfile(req, res, next) {
@@ -27,16 +61,102 @@ class UserController {
         return errorResponse(res, 'No image file uploaded', 400);
       }
 
-      const avatarPath = `/uploads/${req.file.filename}`;
+      // Strictly resolve target user from authenticated JWT context
       const user = await User.findById(req.user.id);
       if (!user) {
         return errorResponse(res, 'User not found', 404);
       }
+
+      const previousAvatar = user.avatar;
+      const isNew = !previousAvatar;
+      const avatarPath = `/uploads/${req.file.filename}`;
+
+      // Clean up previous local avatar file to prevent orphaned files
+      if (previousAvatar && previousAvatar !== avatarPath) {
+        await cleanupAvatarFile(previousAvatar, user._id);
+      }
+
       user.avatar = avatarPath;
       await user.save();
 
-      return successResponse(res, 'Avatar uploaded successfully', {
+      // Record audit log event for security audit trail
+      try {
+        await AuditLog.create({
+          userId: user._id,
+          action: isNew ? 'PROFILE_PHOTO_ADDED' : 'PROFILE_PHOTO_CHANGED',
+          entityType: 'User',
+          entityId: user._id.toString(),
+          details: {
+            avatar: avatarPath,
+            previousAvatar: previousAvatar || null,
+            role: user.role,
+          },
+          ipAddress: req.ip,
+        });
+      } catch (auditErr) {
+        console.warn('[UserController] Failed to create audit log for avatar upload:', auditErr.message);
+      }
+
+      return successResponse(res, isNew ? 'Profile photo added successfully' : 'Profile photo updated successfully', {
         avatar: avatarPath,
+        user: {
+          id: user._id.toString(),
+          avatar: avatarPath,
+        },
+      });
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  async deleteAvatar(req, res, next) {
+    try {
+      // Strictly resolve target user from authenticated JWT context (ignore any client-provided userId)
+      const user = await User.findById(req.user.id);
+      if (!user) {
+        return errorResponse(res, 'User not found', 404);
+      }
+
+      const previousAvatar = user.avatar;
+      if (!previousAvatar) {
+        return successResponse(res, 'Profile photo already empty', {
+          avatar: null,
+          user: {
+            id: user._id.toString(),
+            avatar: null,
+          },
+        });
+      }
+
+      // Safely unlink stored avatar file if local and not shared
+      await cleanupAvatarFile(previousAvatar, user._id);
+
+      user.avatar = null;
+      await user.save();
+
+      // Record audit log event for security audit trail
+      try {
+        await AuditLog.create({
+          userId: user._id,
+          action: 'PROFILE_PHOTO_REMOVED',
+          entityType: 'User',
+          entityId: user._id.toString(),
+          details: {
+            previousAvatar,
+            role: user.role,
+          },
+          ipAddress: req.ip,
+        });
+      } catch (auditErr) {
+        console.warn('[UserController] Failed to create audit log for avatar removal:', auditErr.message);
+      }
+
+      return successResponse(res, 'Profile photo removed successfully', {
+        avatar: null,
+        user: {
+          id: user._id.toString(),
+          avatar: null,
+        },
       });
     } catch (err) {
       next(err);
