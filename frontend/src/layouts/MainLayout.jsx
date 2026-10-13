@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { Outlet } from 'react-router-dom';
+import { useState, useEffect, useRef } from 'react';
+import { Outlet, useLocation } from 'react-router-dom';
 import Header from '../components/common/Header';
 import Sidebar from '../components/common/Sidebar';
 import MobileDrawer from '../components/common/MobileDrawer';
@@ -7,6 +7,22 @@ import Footer from '../components/common/Footer';
 
 const MainLayout = ({ showSidebar = true }) => {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const location = useLocation();
+  const mainRef = useRef(null);
+
+  // Deterministically reset main content scroll container and window to top on route pathname change
+  useEffect(() => {
+    if (mainRef.current) {
+      if (typeof mainRef.current.scrollTo === 'function') {
+        mainRef.current.scrollTo({ top: 0, left: 0, behavior: 'instant' });
+      }
+      mainRef.current.scrollTop = 0;
+      mainRef.current.scrollLeft = 0;
+    }
+    if (typeof window !== 'undefined' && typeof window.scrollTo === 'function') {
+      window.scrollTo({ top: 0, left: 0, behavior: 'instant' });
+    }
+  }, [location.pathname]);
 
   return (
     <div className="flex flex-col h-screen h-[100dvh] overflow-hidden bg-bg-light dark:bg-bg-dark text-slate-900 dark:text-slate-100 transition-colors duration-150">
@@ -22,7 +38,7 @@ const MainLayout = ({ showSidebar = true }) => {
           onClose={() => setMobileMenuOpen(false)}
         />
 
-        <main className="flex-1 flex flex-col overflow-y-auto min-w-0">
+        <main ref={mainRef} className="flex-1 flex flex-col overflow-y-auto min-w-0">
           <div className="flex-1 p-3.5 sm:p-5 lg:p-6 xl:p-8">
             <div className="max-w-7xl mx-auto w-full">
               <Outlet />

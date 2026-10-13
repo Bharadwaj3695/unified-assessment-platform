@@ -1,4 +1,5 @@
-export const API_BASE_URL = import.meta.env.VITE_API_URL || '/api';
+export const API_BASE_URL =
+  (typeof import.meta !== 'undefined' && import.meta.env?.VITE_API_URL) || '/api';
 
 export const ROLES = {
   STUDENT: 'student',
@@ -40,4 +41,15 @@ export const STORAGE_KEYS = {
   REFRESH_TOKEN: 'uap_refresh_token',
   USER: 'uap_user',
   THEME: 'uap_theme',
+  ADMIN_SIDEBAR_COLLAPSED: 'uap_admin_sidebar_collapsed',
+  STUDENT_SIDEBAR_COLLAPSED: 'uap_student_sidebar_collapsed',
+  INSTRUCTOR_SIDEBAR_COLLAPSED: 'uap_instructor_sidebar_collapsed',
 };
+
+// Designated minimum presentation duration (2500ms = ~2.5 seconds) for initial application-entry and post-login branded transitions
+export const BRANDED_TRANSITION_MIN_DURATION_MS =
+  typeof window !== 'undefined' && window.__UAP_TRANSITION_MIN_DURATION_MS !== undefined
+    ? Number(window.__UAP_TRANSITION_MIN_DURATION_MS)
+    : 2500;
+
+

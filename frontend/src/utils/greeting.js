@@ -10,7 +10,16 @@
  */
 
 export const getTimeOfDay = (date = new Date()) => {
-  const hour = date.getHours();
+  const d =
+    date instanceof Date && !isNaN(date.getTime())
+      ? date
+      : typeof date === 'string' || typeof date === 'number'
+        ? new Date(date)
+        : new Date();
+
+  const safeDate = isNaN(d.getTime()) ? new Date() : d;
+  const hour = safeDate.getHours();
+
   if (hour >= 5 && hour < 12) {
     return 'morning';
   }
