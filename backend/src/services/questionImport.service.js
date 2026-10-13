@@ -2,7 +2,7 @@ const mongoose = require('mongoose');
 const QuestionImportJob = require('../models/QuestionImportJob');
 const questionParserService = require('./questionParser.service');
 const googleFormsService = require('./googleForms.service');
-const aiClassificationService = require('./aiClassification.service');
+const classificationService = require('./classification.service');
 const questionBankService = require('./questionBank.service');
 const logger = require('../utils/logger');
 
@@ -119,7 +119,7 @@ class QuestionImportService {
       // 3. AI / Heuristic Classification & Duplicate Detection
       const processedQuestions = [];
       for (const q of detected) {
-        const aiResult = await aiClassificationService.classifyQuestion({
+        const aiResult = await classificationService.classifyQuestion({
           questionText: q.questionText,
           options: q.options,
           rawText: q.rawBlock,
@@ -199,7 +199,7 @@ class QuestionImportService {
       // 3. AI / Heuristic Classification & Duplicate Detection
       const processedQuestions = [];
       for (const q of questions) {
-        const aiResult = await aiClassificationService.classifyQuestion({
+        const aiResult = await classificationService.classifyQuestion({
           questionText: q.questionText,
           options: q.options,
         });

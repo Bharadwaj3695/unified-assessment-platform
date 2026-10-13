@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate, useParams, Link } from 'react-router-dom';
 import { toast } from 'react-toastify';
 import questionBankService from '../../services/questionBank.service';
@@ -6,16 +6,11 @@ import Card from '../../components/ui/Card';
 import Button from '../../components/ui/Button';
 import Spinner from '../../components/ui/Spinner';
 import {
-  Database,
-  ArrowLeft,
+ArrowLeft,
   AlertTriangle,
   Plus,
   Trash2,
-  CheckCircle2,
-  Info,
-  Sparkles,
-  Tag,
-} from 'lucide-react';
+Info} from 'lucide-react';
 
 const QuestionBankCreate = () => {
   const navigate = useNavigate();

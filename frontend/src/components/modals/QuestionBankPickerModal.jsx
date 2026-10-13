@@ -1,11 +1,11 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import Modal from '../ui/Modal';
 import Button from '../ui/Button';
-import Badge from '../ui/Badge';
 import Spinner from '../ui/Spinner';
 import EmptyState from '../ui/EmptyState';
 import questionBankService from '../../services/questionBank.service';
-import { Search, Filter, CheckSquare, Square, Layers, BookOpen } from 'lucide-react';
+import useDebounce from '../../hooks/useDebounce';
+import { Search,CheckSquare, Square} from 'lucide-react';
 
 const QuestionBankPickerModal = ({ isOpen, onClose, onSelectQuestions }) => {
   const [questions, setQuestions] = useState([]);
@@ -14,6 +14,7 @@ const QuestionBankPickerModal = ({ isOpen, onClose, onSelectQuestions }) => {
 
   // Filters
   const [searchTerm, setSearchTerm] = useState('');
+  const debouncedSearch = useDebounce(searchTerm, 300);
   const [selectedCategory, setSelectedCategory] = useState('All');
   const [selectedDifficulty, setSelectedDifficulty] = useState('All');
   const [selectedBloom, setSelectedBloom] = useState('All');
@@ -21,6 +22,7 @@ const QuestionBankPickerModal = ({ isOpen, onClose, onSelectQuestions }) => {
 
   const [categories, setCategories] = useState([]);
   const [selectedMap, setSelectedMap] = useState({});
+  const activeRequestIdRef = useRef(0);
 
   const loadCategories = async () => {
     try {
@@ -34,25 +36,32 @@ const QuestionBankPickerModal = ({ isOpen, onClose, onSelectQuestions }) => {
   };
 
   const loadQuestions = useCallback(async () => {
+    const requestId = ++activeRequestIdRef.current;
     try {
       setIsLoading(true);
       setError(null);
       const params = {};
-      if (searchTerm.trim()) params.search = searchTerm.trim();
+      if (debouncedSearch.trim()) params.search = debouncedSearch.trim();
       if (selectedCategory !== 'All') params.category = selectedCategory;
       if (selectedDifficulty !== 'All') params.difficulty = selectedDifficulty;
       if (selectedBloom !== 'All') params.bloomLevel = selectedBloom;
       if (selectedType !== 'All') params.type = selectedType;
 
       const res = await questionBankService.getQuestions(params);
-      const list = res.data || res.questions || [];
-      setQuestions(list);
+      if (requestId === activeRequestIdRef.current) {
+        const list = res.data || res.questions || [];
+        setQuestions(list);
+      }
     } catch (err) {
-      setError(err.message || 'Failed to load question bank items.');
+      if (requestId === activeRequestIdRef.current) {
+        setError(err.message || 'Failed to load question bank items.');
+      }
     } finally {
-      setIsLoading(false);
+      if (requestId === activeRequestIdRef.current) {
+        setIsLoading(false);
+      }
     }
-  }, [searchTerm, selectedCategory, selectedDifficulty, selectedBloom, selectedType]);
+  }, [debouncedSearch, selectedCategory, selectedDifficulty, selectedBloom, selectedType]);
 
   useEffect(() => {
     if (isOpen) {

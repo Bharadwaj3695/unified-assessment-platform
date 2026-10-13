@@ -1,25 +1,21 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { toast } from 'react-toastify';
 import questionImportService from '../../services/questionImport.service';
 import Card from '../../components/ui/Card';
 import Button from '../../components/ui/Button';
-import Badge from '../../components/ui/Badge';
 import Spinner from '../../components/ui/Spinner';
-import EmptyState from '../../components/ui/EmptyState';
+import TableSkeleton from '../../components/ui/TableSkeleton';
 import {
   UploadCloud,
   FileText,
   Layers,
   ArrowRight,
   CheckCircle2,
-  AlertCircle,
-  Clock,
-  ExternalLink,
-  RefreshCw,
+Clock,
+RefreshCw,
   Database,
-  HelpCircle,
-} from 'lucide-react';
+  HelpCircle} from 'lucide-react';
 
 const QuestionImportUpload = () => {
   const navigate = useNavigate();
@@ -366,9 +362,7 @@ const QuestionImportUpload = () => {
         </div>
 
         {isLoadingJobs && jobs.length === 0 ? (
-          <div className="py-12 flex justify-center">
-            <Spinner />
-          </div>
+          <TableSkeleton rows={4} columns={6} />
         ) : jobs.length === 0 ? (
           <Card className="p-8 text-center text-slate-500 text-sm">
             No question import jobs yet. Upload a document or import a Google Form above to get started.

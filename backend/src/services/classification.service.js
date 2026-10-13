@@ -11,7 +11,7 @@ const VALID_BLOOM_LEVELS = [
   'CREATE',
 ];
 
-class AIClassificationService {
+class ClassificationService {
   /**
    * Validate and sanitize structured classification output
    */
@@ -156,4 +156,4 @@ class AIClassificationService {
   }
 }
 
-module.exports = new AIClassificationService();
+module.exports = new ClassificationService();

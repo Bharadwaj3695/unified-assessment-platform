@@ -1,13 +1,14 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { toast } from 'react-toastify';
 import questionImportService from '../../services/questionImport.service';
 import Card from '../../components/ui/Card';
 import Button from '../../components/ui/Button';
-import Badge from '../../components/ui/Badge';
 import Modal from '../../components/ui/Modal';
 import Spinner from '../../components/ui/Spinner';
 import EmptyState from '../../components/ui/EmptyState';
+import ErrorState from '../../components/ui/ErrorState';
+import CardSkeleton from '../../components/ui/CardSkeleton';
 import {
   CheckCircle,
   XCircle,
@@ -20,9 +21,7 @@ import {
   Square,
   Check,
   X,
-  FileText,
-  HelpCircle,
-} from 'lucide-react';
+HelpCircle} from 'lucide-react';
 
 const QuestionImportReview = () => {
   const { id } = useParams();
@@ -201,21 +200,25 @@ const QuestionImportReview = () => {
 
   if (isLoading) {
     return (
-      <div className="py-24 flex justify-center">
-        <Spinner />
+      <div className="max-w-6xl mx-auto px-4 sm:px-6 py-6 space-y-6">
+        <CardSkeleton count={3} />
       </div>
     );
   }
 
   if (error) {
     return (
-      <div className="max-w-4xl mx-auto p-6">
-        <Card className="p-8 text-center text-red-600 bg-red-50">
-          <p>{error}</p>
-          <Button variant="outline" className="mt-4" onClick={() => navigate('/instructor/question-import')}>
+      <div className="max-w-2xl mx-auto py-12 space-y-4">
+        <ErrorState
+          title="Import Review Error"
+          message={error}
+          onRetry={loadJobPreview}
+        />
+        <div className="text-center">
+          <Button variant="outline" onClick={() => navigate('/instructor/question-import')}>
             Back to Imports
           </Button>
-        </Card>
+        </div>
       </div>
     );
   }

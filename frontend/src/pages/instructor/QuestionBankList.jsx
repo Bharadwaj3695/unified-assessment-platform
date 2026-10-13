@@ -1,29 +1,28 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { useState, useEffect, useCallback, useRef } from 'react';
+import {useNavigate } from 'react-router-dom';
 import { toast } from 'react-toastify';
 import questionBankService from '../../services/questionBank.service';
 import Card from '../../components/ui/Card';
-import Badge from '../../components/ui/Badge';
 import Button from '../../components/ui/Button';
 import Modal from '../../components/ui/Modal';
 import Spinner from '../../components/ui/Spinner';
 import EmptyState from '../../components/ui/EmptyState';
+import ErrorState from '../../components/ui/ErrorState';
+import CardSkeleton from '../../components/ui/CardSkeleton';
+import QuestionCardSkeleton from '../../components/ui/QuestionCardSkeleton';
+import useDebounce from '../../hooks/useDebounce';
 import {
   Database,
   PlusCircle,
   UploadCloud,
   Search,
-  Filter,
-  Trash2,
+Trash2,
   Edit,
   Eye,
   History,
-  Layers,
-  Sparkles,
+Sparkles,
   Tag,
-  CheckCircle,
-  FileText,
-} from 'lucide-react';
+  CheckCircle} from 'lucide-react';
 
 const QuestionBankList = () => {
   const navigate = useNavigate();
@@ -34,6 +33,7 @@ const QuestionBankList = () => {
 
   // Filters
   const [searchTerm, setSearchTerm] = useState('');
+  const debouncedSearchTerm = useDebounce(searchTerm, 300);
   const [selectedCategory, setSelectedCategory] = useState('All');
   const [selectedDifficulty, setSelectedDifficulty] = useState('All');
   const [selectedBloom, setSelectedBloom] = useState('All');
@@ -42,6 +42,7 @@ const QuestionBankList = () => {
   // Modals
   const [deleteModal, setDeleteModal] = useState({ isOpen: false, question: null, isDeleting: false });
   const [detailModal, setDetailModal] = useState({ isOpen: false, question: null, versions: [], isLoadingDetail: false });
+  const activeRequestIdRef = useRef(0);
 
   const loadCategories = async () => {
     try {
@@ -55,25 +56,32 @@ const QuestionBankList = () => {
   };
 
   const loadQuestions = useCallback(async () => {
+    const requestId = ++activeRequestIdRef.current;
     try {
       setIsLoading(true);
       setError(null);
       const params = {};
-      if (searchTerm.trim()) params.search = searchTerm.trim();
+      if (debouncedSearchTerm.trim()) params.search = debouncedSearchTerm.trim();
       if (selectedCategory !== 'All') params.category = selectedCategory;
       if (selectedDifficulty !== 'All') params.difficulty = selectedDifficulty;
       if (selectedBloom !== 'All') params.bloomLevel = selectedBloom;
       if (selectedType !== 'All') params.type = selectedType;
 
       const res = await questionBankService.getQuestions(params);
-      const list = res.data || res.questions || [];
-      setQuestions(list);
+      if (requestId === activeRequestIdRef.current) {
+        const list = res.data || res.questions || [];
+        setQuestions(list);
+      }
     } catch (err) {
-      setError(err.message || 'Failed to retrieve questions.');
+      if (requestId === activeRequestIdRef.current) {
+        setError(err.message || 'Failed to retrieve questions.');
+      }
     } finally {
-      setIsLoading(false);
+      if (requestId === activeRequestIdRef.current) {
+        setIsLoading(false);
+      }
     }
-  }, [searchTerm, selectedCategory, selectedDifficulty, selectedBloom, selectedType]);
+  }, [debouncedSearchTerm, selectedCategory, selectedDifficulty, selectedBloom, selectedType]);
 
   useEffect(() => {
     loadCategories();
@@ -124,7 +132,7 @@ const QuestionBankList = () => {
   };
 
   return (
-    <div className="space-y-6 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+    <div className="space-y-6">
       {/* Top Banner & Actions */}
       <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
         <div>
@@ -137,7 +145,7 @@ const QuestionBankList = () => {
           </p>
         </div>
 
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-2.5 sm:gap-3">
           <Button
             variant="outline"
             onClick={() => navigate('/instructor/question-import')}
@@ -237,13 +245,13 @@ const QuestionBankList = () => {
 
       {/* Questions Listing */}
       {isLoading ? (
-        <div className="py-20 flex justify-center">
-          <Spinner />
-        </div>
+        <QuestionCardSkeleton count={3} />
       ) : error ? (
-        <Card className="p-8 text-center text-red-600 bg-red-50">
-          <p>{error}</p>
-        </Card>
+        <ErrorState
+          title="Unable to Load Question Bank"
+          message={error}
+          onRetry={loadQuestions}
+        />
       ) : questions.length === 0 ? (
         <EmptyState
           title="Question Bank is Empty"
@@ -260,7 +268,7 @@ const QuestionBankList = () => {
           {questions.map((q) => (
             <Card key={q._id} className="p-5 hover:shadow-md transition-shadow">
               <div className="flex flex-col md:flex-row md:items-start justify-between gap-4">
-                <div className="space-y-2 flex-1">
+                <div className="space-y-2.5 flex-1 min-w-0 pr-0 md:pr-4">
                   <div className="flex flex-wrap items-center gap-2">
                     <span className="text-xs font-semibold px-2.5 py-0.5 rounded-full bg-slate-100 text-slate-700 uppercase tracking-wide">
                       {q.type?.replace('_', ' ')}
@@ -288,7 +296,7 @@ const QuestionBankList = () => {
                     )}
                   </div>
 
-                  <p className="text-base font-semibold text-slate-900 leading-snug">
+                  <p className="text-base font-semibold text-slate-900 dark:text-slate-100 leading-snug break-words">
                     {q.questionText}
                   </p>
 
@@ -328,33 +336,33 @@ const QuestionBankList = () => {
                 </div>
 
                 {/* Card Actions */}
-                <div className="flex items-center md:flex-col gap-2 flex-shrink-0 self-end md:self-start">
+                <div className="flex flex-wrap items-center justify-end gap-2 flex-shrink-0 pt-3 md:pt-0 border-t md:border-t-0 border-slate-100 dark:border-slate-800 w-full md:w-auto">
                   <Button
                     variant="outline"
                     size="sm"
                     onClick={() => handleOpenDetail(q)}
-                    className="flex items-center gap-1 text-slate-700"
+                    className="flex items-center gap-1.5 text-slate-700 dark:text-slate-200"
                   >
                     <Eye className="w-3.5 h-3.5" />
-                    Details
+                    <span>Details</span>
                   </Button>
                   <Button
                     variant="outline"
                     size="sm"
                     onClick={() => navigate(`/instructor/question-bank/edit/${q._id}`)}
-                    className="flex items-center gap-1 text-indigo-700 hover:bg-indigo-50"
+                    className="flex items-center gap-1.5 text-indigo-700 hover:bg-indigo-50 dark:text-indigo-400 dark:hover:bg-indigo-950/40"
                   >
                     <Edit className="w-3.5 h-3.5" />
-                    Edit
+                    <span>Edit</span>
                   </Button>
                   <Button
                     variant="outline"
                     size="sm"
                     onClick={() => setDeleteModal({ isOpen: true, question: q, isDeleting: false })}
-                    className="flex items-center gap-1 text-red-600 hover:bg-red-50"
+                    className="flex items-center gap-1.5 text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-950/40"
                   >
                     <Trash2 className="w-3.5 h-3.5" />
-                    Delete
+                    <span>Delete</span>
                   </Button>
                 </div>
               </div>

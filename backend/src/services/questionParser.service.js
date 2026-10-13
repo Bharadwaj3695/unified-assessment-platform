@@ -1,6 +1,5 @@
 const pdfParse = require('pdf-parse');
 const mammoth = require('mammoth');
-const logger = require('../utils/logger');
 
 class QuestionParserService {
   /**
