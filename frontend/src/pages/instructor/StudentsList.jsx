@@ -1,11 +1,11 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { instructorService } from '../../services/instructor.service';
 import InstructorSearchBar from '../../components/instructor/InstructorSearchBar';
 import Card from '../../components/ui/Card';
 import Badge from '../../components/ui/Badge';
-import Button from '../../components/ui/Button';
-import Spinner from '../../components/ui/Spinner';
 import EmptyState from '../../components/ui/EmptyState';
+import ErrorState from '../../components/ui/ErrorState';
+import TableSkeleton from '../../components/ui/TableSkeleton';
 import {
   Table,
   TableHead,
@@ -15,14 +15,9 @@ import {
   TableCell,
 } from '../../components/ui/Table';
 import {
-  Users,
-  Search,
-  CheckCircle2,
-  Calendar,
-  FileCheck2,
-  Mail,
-  UserCheck,
-} from 'lucide-react';
+Search,
+FileCheck2,
+  Mail} from 'lucide-react';
 
 const StudentsList = () => {
   const [students, setStudents] = useState([]);
@@ -96,14 +91,13 @@ const StudentsList = () => {
       {/* Directory Table */}
       <Card>
         {isLoading ? (
-          <div className="py-16 flex flex-col items-center justify-center">
-            <Spinner size="md" />
-            <p className="mt-3 text-xs text-[#64748B]">Loading student roster...</p>
-          </div>
+          <TableSkeleton rows={5} columns={5} />
         ) : error ? (
-          <div className="py-12 text-center text-red-500 text-sm">
-            {error}
-          </div>
+          <ErrorState
+            title="Failed to Load Students"
+            message={error}
+            onRetry={loadStudents}
+          />
         ) : filteredStudents.length === 0 ? (
           <EmptyState
             title="No students found"

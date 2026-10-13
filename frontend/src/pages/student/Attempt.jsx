@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import ReactQuill from 'react-quill';
 import 'react-quill/dist/quill.snow.css';
@@ -11,6 +11,7 @@ import Badge from '../../components/ui/Badge';
 import Button from '../../components/ui/Button';
 import Modal from '../../components/ui/Modal';
 import Spinner from '../../components/ui/Spinner';
+import PageLoader from '../../components/ui/PageLoader';
 import ErrorState from '../../components/ui/ErrorState';
 import ProgressBar from '../../components/ui/ProgressBar';
 import {
@@ -20,9 +21,7 @@ import {
   ChevronLeft,
   ChevronRight,
   Send,
-  Save,
-  HelpCircle,
-  FileText,
+FileText,
   AlertTriangle,
   RefreshCw,
   Shield,
@@ -35,8 +34,7 @@ import {
   FileCheck,
   Trash2,
   Paperclip,
-  X,
-} from 'lucide-react';
+  X} from 'lucide-react';
 
 const Attempt = () => {
   const { id: assessmentId } = useParams();
@@ -560,14 +558,7 @@ const Attempt = () => {
   );
 
   if (isLoading) {
-    return (
-      <div className="flex flex-col items-center justify-center min-h-[450px] space-y-4">
-        <Spinner size="lg" />
-        <p className="text-sm font-medium text-slate-500 dark:text-slate-400">
-          Loading authorized exam environment...
-        </p>
-      </div>
-    );
+    return <PageLoader message="Loading authorized exam environment..." />;
   }
 
   if (loadError) {

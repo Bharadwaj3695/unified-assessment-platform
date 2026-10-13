@@ -1,4 +1,3 @@
-import React from 'react';
 import Button from './Button';
 import { AlertOctagon, RotateCcw } from 'lucide-react';
 

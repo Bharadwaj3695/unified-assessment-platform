@@ -1,10 +1,9 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useTheme } from '../hooks/useTheme';
 import { useAuth } from '../hooks/useAuth';
 import { authService } from '../services/auth.service';
 import Button from '../components/ui/Button';
-import Card from '../components/ui/Card';
 import Badge from '../components/ui/Badge';
 import { AuthHeroIllustration } from '../components/illustrations';
 import {
@@ -15,21 +14,16 @@ import {
   FileCheck2,
   FileText,
   TrendingUp,
-  Award,
-  ArrowRight,
+ArrowRight,
   CheckCircle2,
   Lock,
-  Layers,
-  Sparkles,
-  Users,
-  Eye,
+Eye,
   Clock,
   Flame,
   GraduationCap,
   ShieldAlert,
   Server,
-  Activity,
-} from 'lucide-react';
+  Activity} from 'lucide-react';
 
 const LandingPage = () => {
   const navigate = useNavigate();

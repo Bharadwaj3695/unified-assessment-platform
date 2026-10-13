@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { Link, useNavigate, useLocation } from 'react-router-dom';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { useNavigate, useLocation, useParams } from 'react-router-dom';
 import { toast } from 'react-toastify';
 import { useAuth } from '../../hooks/useAuth';
 import { getTimeBasedGreeting } from '../../utils/greeting';
@@ -13,6 +13,9 @@ import Modal from '../../components/ui/Modal';
 import Spinner from '../../components/ui/Spinner';
 import EmptyState from '../../components/ui/EmptyState';
 import ErrorState from '../../components/ui/ErrorState';
+import DashboardSkeleton from '../../components/ui/DashboardSkeleton';
+import CardSkeleton from '../../components/ui/CardSkeleton';
+import TableSkeleton from '../../components/ui/TableSkeleton';
 import StatCard from '../../components/common/StatCard';
 import PerformanceDonutChart from '../../components/charts/PerformanceDonutChart';
 import ScoreTrendChart from '../../components/charts/ScoreTrendChart';
@@ -29,39 +32,23 @@ import {
   BookOpen,
   Clock,
   CheckCircle2,
-  AlertCircle,
-  Award,
+Award,
   ArrowRight,
   RefreshCw,
-  FileCheck2,
-  Search,
-  User,
-  GraduationCap,
-  Sparkles,
-  Calendar,
+Search,
+Calendar,
   Lock,
-  Globe,
-  Shield,
-  Camera,
-  AlertTriangle,
+Shield,
+AlertTriangle,
   TrendingUp,
-  MessageSquare,
-  Eye,
-  Layers,
-  ChevronRight,
-  Download,
+Download,
   ExternalLink,
   FileText,
   Flame,
   Trophy,
-  Target,
-  BarChart2,
-  TrendingDown,
+TrendingDown,
   Minus,
-  Zap,
-  Medal,
-  Star,
-} from 'lucide-react';
+Star} from 'lucide-react';
 
 const STANDARD_CATEGORIES = [
   'Artificial Intelligence',
@@ -89,6 +76,9 @@ const StudentDashboard = () => {
   const [selectedLeaderboardAssessment, setSelectedLeaderboardAssessment] = useState('');
   const [leaderboardData, setLeaderboardData] = useState(null);
   const [isLoadingLeaderboard, setIsLoadingLeaderboard] = useState(false);
+  const [isRefreshingAnalytics, setIsRefreshingAnalytics] = useState(false);
+  const analyticsRequestIdRef = useRef(0);
+  const leaderboardRequestIdRef = useRef(0);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState(null);
   const [catalogSearch, setCatalogSearch] = useState('');
@@ -96,6 +86,8 @@ const StudentDashboard = () => {
   const [selectedAssessmentForModal, setSelectedAssessmentForModal] = useState(null);
   const [selectedFeedbackSubmission, setSelectedFeedbackSubmission] = useState(null);
   const [isLoadingFeedback, setIsLoadingFeedback] = useState(false);
+  const { id: routeSubmissionId } = useParams();
+  const lastProcessedStudentSearchRef = useRef('');
 
   const openFeedbackModal = async (subId) => {
     try {
@@ -108,6 +100,19 @@ const StudentDashboard = () => {
       setIsLoadingFeedback(false);
     }
   };
+
+  // Effect hook to process deep-linked submission evaluation feedback or assessment from notifications
+  useEffect(() => {
+    const searchParams = new URLSearchParams(location.search);
+    const querySubId = searchParams.get('submissionId') || searchParams.get('subId');
+    const targetSubId = querySubId || routeSubmissionId;
+
+    const currentKey = `${location.pathname}${location.search}`;
+    if (!targetSubId || currentKey === lastProcessedStudentSearchRef.current) return;
+    lastProcessedStudentSearchRef.current = currentKey;
+
+    openFeedbackModal(targetSubId);
+  }, [location.pathname, location.search, routeSubmissionId]);
 
   const handleDownloadStudentFile = async (subId, qId, download = false, filename = 'submission.pdf') => {
     try {
@@ -149,8 +154,12 @@ const StudentDashboard = () => {
     return ['All', ...Array.from(set).sort()];
   }, [assessments]);
 
-  const loadData = useCallback(async () => {
-    setIsLoading(true);
+  const coreLoadedRef = useRef(false);
+
+  const loadData = useCallback(async (forceReload = false) => {
+    if (forceReload || !coreLoadedRef.current) {
+      setIsLoading(true);
+    }
     setError(null);
     try {
       const analyticsParams = dateFilter !== 'all' ? { dateFilter } : {};
@@ -168,6 +177,7 @@ const StudentDashboard = () => {
       setSubmissions(loadedSubmissions);
       if (perfRes) setPerformanceData(perfRes);
       if (trendsRes) setScoreTrends(trendsRes);
+      coreLoadedRef.current = true;
     } catch (err) {
       setError(err.message || 'Failed to retrieve assessment data.');
     } finally {
@@ -176,6 +186,7 @@ const StudentDashboard = () => {
   }, [dateFilter]);
 
   const loadLeaderboard = useCallback(async () => {
+    const reqId = ++leaderboardRequestIdRef.current;
     try {
       setIsLoadingLeaderboard(true);
       const params = {
@@ -186,17 +197,49 @@ const StudentDashboard = () => {
         params.assessmentId = selectedLeaderboardAssessment;
       }
       const data = await analyticsService.getLeaderboard(params);
-      setLeaderboardData(data);
+      if (reqId === leaderboardRequestIdRef.current) {
+        setLeaderboardData(data);
+      }
     } catch (err) {
-      console.warn('[Leaderboard] Failed to load leaderboard:', err.message);
+      if (reqId === leaderboardRequestIdRef.current) {
+        console.warn('[Leaderboard] Failed to load leaderboard:', err.message);
+      }
     } finally {
-      setIsLoadingLeaderboard(false);
+      if (reqId === leaderboardRequestIdRef.current) {
+        setIsLoadingLeaderboard(false);
+      }
     }
   }, [leaderboardScope, selectedLeaderboardAssessment]);
 
+  // Initial load: do not reload when toggling between sub-routes (/catalog, /submissions, /dashboard)
   useEffect(() => {
-    loadData();
-  }, [loadData, location.pathname]);
+    if (!coreLoadedRef.current) {
+      loadData(true);
+    }
+  }, [loadData]);
+
+  // Isolate dateFilter changes so they only refresh analytics rather than the full catalog
+  useEffect(() => {
+    if (coreLoadedRef.current) {
+      const reqId = ++analyticsRequestIdRef.current;
+      setIsRefreshingAnalytics(true);
+      const analyticsParams = dateFilter !== 'all' ? { dateFilter } : {};
+      Promise.all([
+        analyticsService.getStudentPerformance(analyticsParams).catch(() => null),
+        analyticsService.getStudentTrends(analyticsParams).catch(() => []),
+      ]).then(([perfRes, trendsRes]) => {
+        if (reqId === analyticsRequestIdRef.current) {
+          if (perfRes) setPerformanceData(perfRes);
+          if (trendsRes) setScoreTrends(trendsRes);
+          setIsRefreshingAnalytics(false);
+        }
+      }).catch(() => {
+        if (reqId === analyticsRequestIdRef.current) {
+          setIsRefreshingAnalytics(false);
+        }
+      });
+    }
+  }, [dateFilter]);
 
   useEffect(() => {
     loadLeaderboard();
@@ -275,15 +318,28 @@ const StudentDashboard = () => {
     };
   }, [performanceData]);
 
-  if (isLoading) {
-    return (
-      <div className="flex flex-col items-center justify-center min-h-[400px] space-y-4">
-        <Spinner size="lg" />
-        <p className="text-sm font-medium text-slate-500 dark:text-slate-400">
-          Loading your student workspace...
-        </p>
-      </div>
-    );
+  if (isLoading && assessments.length === 0 && submissions.length === 0) {
+    if (currentView === 'catalog') {
+      return (
+        <Card
+          title="Assessment Catalog"
+          subtitle="Browse all course examinations and quizzes available to your account"
+        >
+          <CardSkeleton count={6} />
+        </Card>
+      );
+    }
+    if (currentView === 'submissions') {
+      return (
+        <Card
+          title="Your Assessment Submissions & Results"
+          subtitle="Chronological record of exam attempts, scores, and evaluation feedback"
+        >
+          <TableSkeleton rows={5} columns={6} />
+        </Card>
+      );
+    }
+    return <DashboardSkeleton />;
   }
 
   if (error) {
@@ -363,139 +419,145 @@ const StudentDashboard = () => {
 
   return (
     <div className="space-y-4 sm:space-y-5 lg:space-y-6">
-      {/* 1. Personalized Welcome / Hero Area */}
-      <div className="rounded-3xl border border-surface-light-border dark:border-surface-dark-border bg-gradient-to-r from-[#FFF4EB] via-white to-[#EEF6F4] dark:from-[#241712] dark:via-surface-dark dark:to-[#132822] p-5 sm:p-6 lg:py-5 lg:px-7 shadow-warm-xs relative overflow-hidden">
-        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-5 sm:gap-6 relative z-10">
-          <div className="max-w-xl">
-            <div className="flex items-center space-x-2 mb-1.5 sm:mb-2">
-              <Badge variant="peach" size="sm" dot>Student Workspace</Badge>
-              <span className="text-xs font-semibold text-slate-400 dark:text-slate-500">
-                · Academic Year {new Date().getFullYear()}
-              </span>
-            </div>
-            <h1 className="text-2xl sm:text-3xl lg:text-4xl font-bold font-display tracking-tight text-slate-900 dark:text-slate-100">
-              {getTimeBasedGreeting(user?.name)}
-            </h1>
-            <p className="mt-1.5 sm:mt-2 text-xs sm:text-sm text-slate-600 dark:text-slate-300 leading-relaxed">
-              Welcome back, {user?.name || 'Student'}! Continue your assessments and track your progress.
-            </p>
+      {/* Personalized Welcome / Hero Area, Date Filter Toolbar, Overview Stat Cards (Only in dashboard view) */}
+      {currentView === 'dashboard' && (
+        <>
+          {/* 1. Personalized Welcome / Hero Area */}
+          <div className="rounded-3xl border border-surface-light-border dark:border-surface-dark-border bg-gradient-to-r from-[#FFF4EB] via-white to-[#EEF6F4] dark:from-[#241712] dark:via-surface-dark dark:to-[#132822] p-5 sm:p-6 lg:py-5 lg:px-7 shadow-warm-xs relative overflow-hidden">
+            <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-5 sm:gap-6 relative z-10">
+              <div className="max-w-xl">
+                <div className="flex items-center space-x-2 mb-1.5 sm:mb-2">
+                  <Badge variant="peach" size="sm" dot>Student Workspace</Badge>
+                  <span className="text-xs font-semibold text-slate-400 dark:text-slate-500">
+                    · Academic Year {new Date().getFullYear()}
+                  </span>
+                </div>
+                <h1 className="text-2xl sm:text-3xl lg:text-4xl font-bold font-display tracking-tight text-slate-900 dark:text-slate-100">
+                  {getTimeBasedGreeting(user?.name)}
+                </h1>
+                <p className="mt-1.5 sm:mt-2 text-xs sm:text-sm text-slate-600 dark:text-slate-300 leading-relaxed">
+                  Welcome back, {user?.name || 'Student'}! Continue your assessments and track your progress.
+                </p>
 
-            <div className="mt-3.5 sm:mt-4 flex flex-wrap items-center gap-2">
-              <Button
-                variant="outline"
-                size="sm"
-                icon={RefreshCw}
-                onClick={loadData}
-              >
-                Refresh Data
-              </Button>
-              {currentView !== 'catalog' && (
-                <Button
-                  variant="primary"
-                  size="sm"
-                  icon={BookOpen}
-                  onClick={() => navigate('/student/catalog')}
-                >
-                  Browse Catalog
-                </Button>
+                <div className="mt-3.5 sm:mt-4 flex flex-wrap items-center gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    icon={RefreshCw}
+                    onClick={loadData}
+                  >
+                    Refresh Data
+                  </Button>
+                  <Button
+                    variant="primary"
+                    size="sm"
+                    icon={BookOpen}
+                    onClick={() => navigate('/student/catalog')}
+                  >
+                    Browse Catalog
+                  </Button>
+                </div>
+              </div>
+
+              <div className="hidden sm:flex flex-shrink-0 items-center justify-center">
+                <StudentHeroIllustration className="w-28 h-28 sm:w-32 sm:h-32 lg:w-36 lg:h-36 object-contain" />
+              </div>
+            </div>
+          </div>
+
+          {/* Date Filter Toolbar */}
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3.5 rounded-2xl bg-white dark:bg-surface-dark border border-surface-light-border dark:border-surface-dark-border shadow-warm-xs">
+            <div className="flex items-center space-x-2 text-xs font-semibold text-slate-600 dark:text-slate-300">
+              <Calendar className="w-4 h-4 text-brand-terracotta" />
+              <span>Analytics Timeframe:</span>
+              {isRefreshingAnalytics && (
+                <span className="text-[11px] font-normal text-slate-400 animate-pulse ml-2">Updating metrics...</span>
               )}
             </div>
+            <div className="flex items-center space-x-1.5 overflow-x-auto pb-1 sm:pb-0">
+              {[
+                { id: 'all', label: 'All History' },
+                { id: 'recent', label: 'Recent (48 hrs)' },
+                { id: 'last_week', label: 'Last 7 Days' },
+                { id: 'last_month', label: 'Last 30 Days' },
+              ].map((f) => (
+                <button
+                  key={f.id}
+                  type="button"
+                  onClick={() => setDateFilter(f.id)}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition-colors cursor-pointer ${
+                    dateFilter === f.id
+                      ? 'bg-[#FDECE2] text-[#E05D38] dark:bg-[#341C16] dark:text-[#F4A261] shadow-warm-xs'
+                      : 'text-slate-600 dark:text-slate-400 hover:bg-[#FFF4EB]/60 dark:hover:bg-slate-800'
+                  }`}
+                >
+                  {f.label}
+                </button>
+              ))}
+            </div>
           </div>
 
-          <div className="hidden sm:flex flex-shrink-0 items-center justify-center">
-            <StudentHeroIllustration className="w-28 h-28 sm:w-32 sm:h-32 lg:w-36 lg:h-36 object-contain" />
+          {/* 2. Overview Metric Stat Cards */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            <StatCard
+              title="Average Score"
+              value={
+                performanceData?.overallAverageScore !== null && performanceData?.overallAverageScore !== undefined
+                  ? `${performanceData.overallAverageScore}%`
+                  : '—'
+              }
+              subtitle={
+                performanceData?.hasData
+                  ? `Pass Rate: ${performanceData.passRate}%`
+                  : 'No completed exams'
+              }
+              icon={Award}
+              color="terracotta"
+            />
+            <StatCard
+              title="Assessments Completed"
+              value={
+                performanceData
+                  ? `${performanceData.assessmentsCompleted} / ${performanceData.assessmentsAttempted}`
+                  : `${submissions.length}`
+              }
+              subtitle={
+                performanceData?.hasData
+                  ? `${performanceData.passedAssessments} Passed · ${performanceData.failedAssessments} Failed`
+                  : 'Started vs submitted'
+              }
+              icon={CheckCircle2}
+              color="sage"
+            />
+            <StatCard
+              title="Academic Streak"
+              value={`${performanceData?.currentStreak || 0} Days 🔥`}
+              subtitle={
+                performanceData?.bestStreak
+                  ? `Best: ${performanceData.bestStreak} Days · ${performanceData.streakActiveToday ? 'Active today' : 'Submit today!'}`
+                  : 'Complete tests to build streak'
+              }
+              icon={Flame}
+              color="peach"
+            />
+            <StatCard
+              title="Leaderboard Position"
+              value={
+                performanceData?.leaderboardPosition
+                  ? `#${performanceData.leaderboardPosition.rank}`
+                  : '—'
+              }
+              subtitle={
+                performanceData?.leaderboardPosition
+                  ? `of ${performanceData.leaderboardPosition.totalStudents} ranked students`
+                  : 'Complete exams to rank'
+              }
+              icon={Trophy}
+              color="secondary"
+            />
           </div>
-        </div>
-      </div>
-
-      {/* Date Filter Toolbar */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3.5 rounded-2xl bg-white dark:bg-surface-dark border border-surface-light-border dark:border-surface-dark-border shadow-warm-xs">
-        <div className="flex items-center space-x-2 text-xs font-semibold text-slate-600 dark:text-slate-300">
-          <Calendar className="w-4 h-4 text-brand-terracotta" />
-          <span>Analytics Timeframe:</span>
-        </div>
-        <div className="flex items-center space-x-1.5 overflow-x-auto pb-1 sm:pb-0">
-          {[
-            { id: 'all', label: 'All History' },
-            { id: 'recent', label: 'Recent (48 hrs)' },
-            { id: 'last_week', label: 'Last 7 Days' },
-            { id: 'last_month', label: 'Last 30 Days' },
-          ].map((f) => (
-            <button
-              key={f.id}
-              type="button"
-              onClick={() => setDateFilter(f.id)}
-              className={`px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition-colors cursor-pointer ${
-                dateFilter === f.id
-                  ? 'bg-[#FDECE2] text-[#E05D38] dark:bg-[#341C16] dark:text-[#F4A261] shadow-warm-xs'
-                  : 'text-slate-600 dark:text-slate-400 hover:bg-[#FFF4EB]/60 dark:hover:bg-slate-800'
-              }`}
-            >
-              {f.label}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {/* 2. Overview Metric Stat Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <StatCard
-          title="Average Score"
-          value={
-            performanceData?.overallAverageScore !== null && performanceData?.overallAverageScore !== undefined
-              ? `${performanceData.overallAverageScore}%`
-              : '—'
-          }
-          subtitle={
-            performanceData?.hasData
-              ? `Pass Rate: ${performanceData.passRate}%`
-              : 'No completed exams'
-          }
-          icon={Award}
-          color="terracotta"
-        />
-        <StatCard
-          title="Assessments Completed"
-          value={
-            performanceData
-              ? `${performanceData.assessmentsCompleted} / ${performanceData.assessmentsAttempted}`
-              : `${submissions.length}`
-          }
-          subtitle={
-            performanceData?.hasData
-              ? `${performanceData.passedAssessments} Passed · ${performanceData.failedAssessments} Failed`
-              : 'Started vs submitted'
-          }
-          icon={CheckCircle2}
-          color="sage"
-        />
-        <StatCard
-          title="Academic Streak"
-          value={`${performanceData?.currentStreak || 0} Days 🔥`}
-          subtitle={
-            performanceData?.bestStreak
-              ? `Best: ${performanceData.bestStreak} Days · ${performanceData.streakActiveToday ? 'Active today' : 'Submit today!'}`
-              : 'Complete tests to build streak'
-          }
-          icon={Flame}
-          color="peach"
-        />
-        <StatCard
-          title="Leaderboard Position"
-          value={
-            performanceData?.leaderboardPosition
-              ? `#${performanceData.leaderboardPosition.rank}`
-              : '—'
-          }
-          subtitle={
-            performanceData?.leaderboardPosition
-              ? `of ${performanceData.leaderboardPosition.totalStudents} ranked students`
-              : 'Complete exams to rank'
-          }
-          icon={Trophy}
-          color="secondary"
-        />
-      </div>
+        </>
+      )}
 
       {/* 3. Sub-View: CATALOG ONLY */}
       {currentView === 'catalog' && (
@@ -534,7 +596,9 @@ const StudentDashboard = () => {
             </div>
           </div>
 
-          {filteredCatalog.length === 0 ? (
+          {isLoading && assessments.length === 0 ? (
+            <CardSkeleton count={6} />
+          ) : filteredCatalog.length === 0 ? (
             <EmptyState
               title="No matching assessments"
               description="No open assessments match your current search or category filter."
@@ -1013,9 +1077,7 @@ const StudentDashboard = () => {
               }
             >
               {isLoadingLeaderboard ? (
-                <div className="flex justify-center py-8">
-                  <Spinner size="md" />
-                </div>
+                <TableSkeleton rows={4} columns={5} />
               ) : !leaderboardData?.rankings || leaderboardData.rankings.length === 0 ? (
                 <EmptyState
                   title="No Leaderboard Data"
@@ -1152,7 +1214,9 @@ const StudentDashboard = () => {
             title={currentView === 'submissions' ? 'Your Assessment Submissions & Results' : 'Recent Submissions'}
             subtitle="Chronological record of exam attempts, scores, and evaluation feedback"
           >
-            {submissions.length === 0 ? (
+            {isLoading && submissions.length === 0 ? (
+              <TableSkeleton rows={5} columns={6} />
+            ) : submissions.length === 0 ? (
               <EmptyState
                 title="No Submissions Yet"
                 description="When you complete an assessment, your submission score and evaluation will appear here."

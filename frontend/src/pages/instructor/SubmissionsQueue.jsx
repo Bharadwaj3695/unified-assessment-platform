@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import instructorService from '../../services/instructor.service';
 import InstructorSearchBar from '../../components/instructor/InstructorSearchBar';
@@ -7,6 +7,8 @@ import Badge from '../../components/ui/Badge';
 import Button from '../../components/ui/Button';
 import Spinner from '../../components/ui/Spinner';
 import EmptyState from '../../components/ui/EmptyState';
+import ErrorState from '../../components/ui/ErrorState';
+import TableSkeleton from '../../components/ui/TableSkeleton';
 import {
   Table,
   TableHead,
@@ -16,15 +18,7 @@ import {
   TableCell,
 } from '../../components/ui/Table';
 import {
-  FileCheck2,
-  Search,
-  Clock,
-  CheckCircle2,
-  AlertCircle,
-  Award,
-  ArrowRight,
-  Filter,
-} from 'lucide-react';
+Search} from 'lucide-react';
 
 const SubmissionsQueue = () => {
   const navigate = useNavigate();
@@ -98,8 +92,8 @@ const SubmissionsQueue = () => {
         </div>
 
         {/* Filter Controls */}
-        <div className="flex items-center space-x-2">
-          <div className="flex items-center space-x-1 bg-[#FFF9F2] dark:bg-[#12161F] border border-[#EBE3D8] dark:border-[#2D3748] p-1 rounded-xl">
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="flex flex-wrap items-center gap-1 bg-[#FFF9F2] dark:bg-[#12161F] border border-[#EBE3D8] dark:border-[#2D3748] p-1 rounded-xl">
             {[
               { id: 'all', label: 'All' },
               { id: 'pending', label: 'Needs Review' },
@@ -134,15 +128,17 @@ const SubmissionsQueue = () => {
       </div>
 
       {/* Submissions Table */}
-      <Card>
-        {isLoading ? (
-          <div className="py-16 flex flex-col items-center justify-center">
-            <Spinner size="md" />
-            <p className="mt-3 text-xs text-slate-500">Loading student submissions...</p>
-          </div>
-        ) : error ? (
-          <div className="py-12 text-center text-red-500 text-sm">{error}</div>
-        ) : filteredSubmissions.length === 0 ? (
+      {isLoading ? (
+        <TableSkeleton rows={5} columns={8} />
+      ) : error ? (
+        <ErrorState
+          title="Unable to Load Submissions"
+          message={error}
+          onRetry={loadSubmissions}
+        />
+      ) : (
+        <Card>
+          {filteredSubmissions.length === 0 ? (
           <EmptyState
             title="No submissions found"
             description={
@@ -244,6 +240,7 @@ const SubmissionsQueue = () => {
           </Table>
         )}
       </Card>
+      )}
     </div>
   );
 };

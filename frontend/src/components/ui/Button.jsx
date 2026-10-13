@@ -1,4 +1,3 @@
-import React from 'react';
 import Spinner from './Spinner';
 
 const variantClasses = {
@@ -33,6 +32,7 @@ const Button = ({
   variant = 'primary',
   size = 'md',
   isLoading = false,
+  loading = false,
   disabled = false,
   type = 'button',
   icon: Icon = null,
@@ -42,20 +42,24 @@ const Button = ({
   onClick,
   ...props
 }) => {
+  const isSpinning = Boolean(isLoading || loading);
+  const isDisabled = Boolean(disabled || isSpinning);
+
   const baseClasses =
     'inline-flex items-center justify-center transition-all duration-150 focus:outline-none focus:ring-2 disabled:opacity-50 disabled:cursor-not-allowed disabled:pointer-events-none cursor-pointer';
 
   return (
     <button
       type={type}
-      disabled={disabled || isLoading}
-      onClick={onClick}
+      disabled={isDisabled}
+      aria-busy={isSpinning}
+      onClick={isDisabled ? undefined : onClick}
       className={`${baseClasses} ${variantClasses[variant] || variantClasses.primary} ${
         sizeClasses[size] || sizeClasses.md
       } ${fullWidth ? 'w-full' : ''} ${className}`}
       {...props}
     >
-      {isLoading ? (
+      {isSpinning ? (
         <Spinner size="sm" color="currentColor" className="mr-2" />
       ) : Icon && iconPosition === 'left' ? (
         <Icon className="w-4 h-4 mr-2" />
@@ -63,7 +67,7 @@ const Button = ({
 
       <span>{children}</span>
 
-      {!isLoading && Icon && iconPosition === 'right' && (
+      {!isSpinning && Icon && iconPosition === 'right' && (
         <Icon className="w-4 h-4 ml-2" />
       )}
     </button>

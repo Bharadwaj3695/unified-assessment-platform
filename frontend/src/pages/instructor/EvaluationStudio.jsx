@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { toast } from 'react-toastify';
 import instructorService from '../../services/instructor.service';
@@ -10,32 +10,19 @@ import Badge from '../../components/ui/Badge';
 import Modal from '../../components/ui/Modal';
 import Spinner from '../../components/ui/Spinner';
 import Alert from '../../components/ui/Alert';
+import PageLoader from '../../components/ui/PageLoader';
+import ErrorState from '../../components/ui/ErrorState';
 import {
   ArrowLeft,
-  CheckCircle2,
-  AlertCircle,
-  Clock,
-  User,
-  BookOpen,
-  Award,
+Award,
   Send,
   Save,
   HelpCircle,
   FileText,
-  AlignLeft,
-  ListChecks,
-  Check,
-  X,
-  Sparkles,
-  Shield,
-  Camera,
-  VideoOff,
-  Activity,
-  Mail,
+Mail,
   Lock,
   Download,
-  ExternalLink,
-} from 'lucide-react';
+  ExternalLink} from 'lucide-react';
 
 const formatProctoringEvent = (evt) => {
   switch (evt.eventType) {
@@ -103,57 +90,48 @@ const EvaluationStudio = () => {
     }
   };
 
-  useEffect(() => {
-    let mounted = true;
-    const fetchSubmission = async () => {
-      try {
-        setIsLoading(true);
-        setError(null);
-        const data = await instructorService.getSubmissionForEvaluation(submissionId);
-        if (!mounted) return;
+  const fetchSubmission = useCallback(async () => {
+    try {
+      setIsLoading(true);
+      setError(null);
+      const data = await instructorService.getSubmissionForEvaluation(submissionId);
 
-        setSubmission(data);
-        setGeneralFeedback(data.feedback || data.evaluation?.generalFeedback || '');
+      setSubmission(data);
+      setGeneralFeedback(data.feedback || data.evaluation?.generalFeedback || '');
 
-        // Prepopulate feedback from existing evaluation if present
-        const initialFeedback = {};
-        const existingFb = data.evaluation?.questionFeedback || {};
+      // Prepopulate feedback from existing evaluation if present
+      const initialFeedback = {};
+      const existingFb = data.evaluation?.questionFeedback || {};
 
-        if (data.assessment?.questions) {
-          data.assessment.questions.forEach((q) => {
-            const qId = (q._id || q.id).toString();
-            const prev = existingFb[qId];
-            if (prev) {
-              initialFeedback[qId] = {
-                pointsAwarded: prev.pointsAwarded !== undefined ? prev.pointsAwarded : '',
-                comment: prev.comment || '',
-              };
-            } else if (q.type === 'short_answer' || q.type === 'long_answer' || q.type === 'file_upload') {
-              initialFeedback[qId] = {
-                pointsAwarded: '',
-                comment: '',
-              };
-            }
-          });
-        }
-
-        setQuestionFeedback(initialFeedback);
-      } catch (err) {
-        if (mounted) {
-          setError(err.message || 'Failed to load submission for evaluation.');
-        }
-      } finally {
-        if (mounted) {
-          setIsLoading(false);
-        }
+      if (data.assessment?.questions) {
+        data.assessment.questions.forEach((q) => {
+          const qId = (q._id || q.id).toString();
+          const prev = existingFb[qId];
+          if (prev) {
+            initialFeedback[qId] = {
+              pointsAwarded: prev.pointsAwarded !== undefined ? prev.pointsAwarded : '',
+              comment: prev.comment || '',
+            };
+          } else if (q.type === 'short_answer' || q.type === 'long_answer' || q.type === 'file_upload') {
+            initialFeedback[qId] = {
+              pointsAwarded: '',
+              comment: '',
+            };
+          }
+        });
       }
-    };
 
-    fetchSubmission();
-    return () => {
-      mounted = false;
-    };
+      setQuestionFeedback(initialFeedback);
+    } catch (err) {
+      setError(err.message || 'Failed to load submission for evaluation.');
+    } finally {
+      setIsLoading(false);
+    }
   }, [submissionId]);
+
+  useEffect(() => {
+    fetchSubmission();
+  }, [fetchSubmission]);
 
   const questions = submission?.assessment?.questions || [];
   const subjectiveQuestions = useMemo(() => {
@@ -272,27 +250,24 @@ const EvaluationStudio = () => {
   };
 
   if (isLoading) {
-    return (
-      <div className="py-20 flex flex-col items-center justify-center">
-        <Spinner size="lg" />
-        <p className="mt-4 text-sm text-slate-500 font-medium">
-          Loading submission evaluation studio...
-        </p>
-      </div>
-    );
+    return <PageLoader message="Loading submission evaluation studio..." />;
   }
 
   if (error || !submission) {
     return (
       <div className="max-w-2xl mx-auto py-12 space-y-4">
-        <Alert variant="error" title="Evaluation Access Error">
-          {error || 'Submission could not be retrieved.'}
-        </Alert>
-        <Link to="/instructor/submissions">
-          <Button variant="outline" icon={ArrowLeft}>
-            Back to Submissions Queue
-          </Button>
-        </Link>
+        <ErrorState
+          title="Evaluation Access Error"
+          message={error || 'Submission could not be retrieved.'}
+          onRetry={fetchSubmission}
+        />
+        <div className="text-center">
+          <Link to="/instructor/submissions">
+            <Button variant="outline" icon={ArrowLeft}>
+              Back to Submissions Queue
+            </Button>
+          </Link>
+        </div>
       </div>
     );
   }
@@ -328,7 +303,7 @@ const EvaluationStudio = () => {
           </p>
         </div>
 
-        <div className="flex items-center space-x-2.5 self-start sm:self-auto">
+        <div className="flex flex-wrap items-center gap-2.5 self-start sm:self-auto">
           <Button
             type="button"
             variant="outline"

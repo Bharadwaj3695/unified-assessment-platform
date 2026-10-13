@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate, useParams, Link } from 'react-router-dom';
 import { toast } from 'react-toastify';
 import assessmentService from '../../services/assessment.service';
@@ -6,35 +6,31 @@ import StudentSelector from '../../components/instructor/StudentSelector';
 import Card from '../../components/ui/Card';
 import Button from '../../components/ui/Button';
 import Badge from '../../components/ui/Badge';
-import Input from '../../components/ui/Input';
 import Modal from '../../components/ui/Modal';
 import Spinner from '../../components/ui/Spinner';
+import PageLoader from '../../components/ui/PageLoader';
 import Alert from '../../components/ui/Alert';
 import {
-  BookOpen,
-  Plus,
+Plus,
   Trash2,
   ChevronUp,
   ChevronDown,
   Save,
   Send,
   ArrowLeft,
-  HelpCircle,
-  Clock,
+Clock,
   Award,
   Globe,
   Lock,
   ListChecks,
   AlignLeft,
   FileText,
-  AlertTriangle,
-  X,
+X,
   Shield,
   Camera,
   Upload,
   Database,
-  Shuffle,
-} from 'lucide-react';
+  Shuffle} from 'lucide-react';
 import QuestionBankPickerModal from '../../components/modals/QuestionBankPickerModal';
 
 const CATEGORIES = [
@@ -461,14 +457,7 @@ const AssessmentBuilder = () => {
   };
 
   if (isLoading) {
-    return (
-      <div className="flex flex-col items-center justify-center py-20">
-        <Spinner size="lg" />
-        <p className="mt-4 text-sm font-medium text-slate-500">
-          Loading assessment studio...
-        </p>
-      </div>
-    );
+    return <PageLoader message="Loading assessment studio..." />;
   }
 
   if (loadError) {
@@ -513,7 +502,7 @@ const AssessmentBuilder = () => {
         </div>
 
         {/* Action Controls */}
-        <div className="flex items-center space-x-2.5 self-start sm:self-auto">
+        <div className="flex flex-wrap items-center gap-2.5 self-start sm:self-auto">
           <Button
             type="button"
             variant="outline"

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { instructorService } from '../../services/instructor.service';
 import Badge from '../ui/Badge';
 import Button from '../ui/Button';
@@ -8,11 +8,8 @@ import {
   Search,
   X,
   Check,
-  UserCheck,
-  Users,
-  AlertCircle,
-  Plus,
-} from 'lucide-react';
+Users,
+  AlertCircle} from 'lucide-react';
 
 const StudentSelector = ({ value = [], onChange, error }) => {
   const [allStudents, setAllStudents] = useState([]);

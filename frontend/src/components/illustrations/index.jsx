@@ -1,4 +1,3 @@
-import React from 'react';
 
 /**
  * Editorial EdTech Hero Illustration for Authentication and Brand Screens

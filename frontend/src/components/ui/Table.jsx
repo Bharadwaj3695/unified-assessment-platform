@@ -1,4 +1,3 @@
-import React from 'react';
 
 export const Table = ({ children, className = '' }) => (
   <div className="w-full overflow-x-auto rounded-2xl border border-surface-light-border dark:border-surface-dark-border">

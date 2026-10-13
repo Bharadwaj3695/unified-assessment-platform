@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../hooks/useAuth';
 import { getTimeBasedGreeting } from '../../utils/greeting';
@@ -9,6 +9,10 @@ import Card from '../../components/ui/Card';
 import Badge from '../../components/ui/Badge';
 import Button from '../../components/ui/Button';
 import EmptyState from '../../components/ui/EmptyState';
+import ErrorState from '../../components/ui/ErrorState';
+import DashboardSkeleton from '../../components/ui/DashboardSkeleton';
+import CardSkeleton from '../../components/ui/CardSkeleton';
+import TableSkeleton from '../../components/ui/TableSkeleton';
 import StatCard from '../../components/common/StatCard';
 import ActivityBarChart from '../../components/charts/ActivityBarChart';
 import Spinner from '../../components/ui/Spinner';
@@ -24,19 +28,13 @@ import {
 import {
   BookOpen,
   PlusCircle,
-  Clock,
-  CheckCircle2,
+CheckCircle2,
   FileText,
-  Users,
-  AlertCircle,
-  FileCheck2,
-  ArrowRight,
-  TrendingUp,
-  Edit,
+AlertCircle,
+Edit,
   Globe,
   Lock,
-  BarChart2,
-} from 'lucide-react';
+  BarChart2} from 'lucide-react';
 
 const InstructorDashboard = () => {
   const { user } = useAuth();
@@ -98,6 +96,20 @@ const InstructorDashboard = () => {
     loadDashboardData();
   }, [loadDashboardData]);
 
+  if (isLoading && assessments.length === 0 && submissions.length === 0) {
+    return <DashboardSkeleton />;
+  }
+
+  if (error && assessments.length === 0 && submissions.length === 0) {
+    return (
+      <ErrorState
+        title="Instructor Dashboard Unavailable"
+        message={error}
+        onRetry={loadDashboardData}
+      />
+    );
+  }
+
   return (
     <div className="space-y-4 sm:space-y-5 lg:space-y-6">
       {/* Prominent Workspace Search Bar */}
@@ -122,7 +134,7 @@ const InstructorDashboard = () => {
             <p className="mt-1.5 sm:mt-2 text-sm text-[#64748B] dark:text-[#94A3B8] leading-relaxed">
               Welcome back. Manage your assessments and monitor student performance.
             </p>
-            <div className="mt-3.5 sm:mt-4 flex items-center space-x-3">
+            <div className="mt-3.5 sm:mt-4 flex flex-wrap items-center gap-2.5 sm:gap-3">
               <Link to="/instructor/create">
                 <Button variant="primary" size="md" icon={PlusCircle}>
                   Create Assessment
@@ -192,10 +204,7 @@ const InstructorDashboard = () => {
             }
           >
             {isLoading ? (
-              <div className="py-12 flex flex-col items-center justify-center">
-                <Spinner size="sm" />
-                <p className="mt-2 text-xs text-[#64748B]">Loading assessments...</p>
-              </div>
+              <CardSkeleton count={3} />
             ) : assessments.length === 0 ? (
               <EmptyState
                 title="No assessments created yet"
@@ -252,7 +261,7 @@ const InstructorDashboard = () => {
                         </p>
                       </div>
 
-                      <div className="flex items-center space-x-2 flex-shrink-0">
+                      <div className="flex flex-wrap items-center gap-2 flex-shrink-0">
                         <Link to={`/instructor/analytics/${asmtId}`}>
                           <Button variant="secondary" size="sm" icon={BarChart2}>
                             Analytics
@@ -303,9 +312,7 @@ const InstructorDashboard = () => {
         }
       >
         {isLoading ? (
-          <div className="py-8 flex justify-center">
-            <Spinner size="sm" />
-          </div>
+          <TableSkeleton rows={4} columns={6} />
         ) : submissions.length === 0 ? (
           <EmptyState
             title="All submissions evaluated"

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { instructorService } from '../../services/instructor.service';
 import Badge from '../ui/Badge';
@@ -9,9 +9,7 @@ import {
   Users,
   FileCheck2,
   Loader2,
-  ArrowRight,
-  Sparkles,
-} from 'lucide-react';
+  ArrowRight} from 'lucide-react';
 
 const InstructorSearchBar = ({ onSelectAssessment, placeholder = 'Search assessments, students, or submissions...' }) => {
   const navigate = useNavigate();
@@ -29,20 +27,30 @@ const InstructorSearchBar = ({ onSelectAssessment, placeholder = 'Search assessm
       return;
     }
 
+    let isCurrent = true;
     const timer = setTimeout(async () => {
       setIsLoading(true);
       try {
         const res = await instructorService.searchWorkspace(query);
-        setResults(res);
-        setIsOpen(true);
+        if (isCurrent) {
+          setResults(res);
+          setIsOpen(true);
+        }
       } catch (err) {
-        console.error('Workspace search error:', err);
+        if (isCurrent) {
+          console.error('Workspace search error:', err);
+        }
       } finally {
-        setIsLoading(false);
+        if (isCurrent) {
+          setIsLoading(false);
+        }
       }
-    }, 280);
+    }, 300);
 
-    return () => clearTimeout(timer);
+    return () => {
+      isCurrent = false;
+      clearTimeout(timer);
+    };
   }, [query]);
 
   // Click outside listener

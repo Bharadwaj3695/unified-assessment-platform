@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { toast } from 'react-toastify';
 import assessmentService from '../../services/assessment.service';
@@ -9,6 +9,8 @@ import Button from '../../components/ui/Button';
 import Modal from '../../components/ui/Modal';
 import Spinner from '../../components/ui/Spinner';
 import EmptyState from '../../components/ui/EmptyState';
+import ErrorState from '../../components/ui/ErrorState';
+import TableSkeleton from '../../components/ui/TableSkeleton';
 import {
   Table,
   TableHead,
@@ -18,23 +20,18 @@ import {
   TableCell,
 } from '../../components/ui/Table';
 import {
-  BookOpen,
-  PlusCircle,
+PlusCircle,
   Clock,
-  Award,
-  Globe,
+Globe,
   Lock,
   Edit,
   Trash2,
   Eye,
   Send,
-  CheckCircle2,
-  Calendar,
-  AlertTriangle,
+AlertTriangle,
   Users,
   Search,
-  BarChart2,
-} from 'lucide-react';
+  BarChart2} from 'lucide-react';
 
 const AssessmentsList = () => {
   const navigate = useNavigate();
@@ -190,7 +187,7 @@ const AssessmentsList = () => {
         </div>
 
         {/* Access Type, Date Filter & Search Controls */}
-        <div className="flex items-center space-x-2">
+        <div className="flex flex-wrap items-center gap-2">
           <select
             value={accessFilter}
             onChange={(e) => setAccessFilter(e.target.value)}
@@ -226,18 +223,17 @@ const AssessmentsList = () => {
       </div>
 
       {/* Main Table / List */}
-      <Card>
-        {isLoading ? (
-          <div className="py-16 flex flex-col items-center justify-center">
-            <Spinner size="md" />
-            <p className="mt-3 text-xs text-slate-500">Loading your assessments...</p>
-          </div>
-        ) : error ? (
-          <div className="py-12 text-center text-red-500 text-sm">
-            <AlertTriangle className="w-6 h-6 mx-auto mb-2" />
-            {error}
-          </div>
-        ) : filteredAssessments.length === 0 ? (
+      {isLoading ? (
+        <TableSkeleton rows={5} columns={7} />
+      ) : error ? (
+        <ErrorState
+          title="Unable to Load Assessments"
+          message={error}
+          onRetry={loadAssessments}
+        />
+      ) : (
+        <Card>
+          {filteredAssessments.length === 0 ? (
           <EmptyState
             title="No assessments found"
             description={
@@ -348,7 +344,7 @@ const AssessmentsList = () => {
 
                     {/* Actions */}
                     <TableCell className="text-right">
-                      <div className="flex items-center justify-end space-x-1">
+                      <div className="flex flex-wrap items-center justify-end gap-1">
                         {/* Analytics */}
                         <Link to={`/instructor/analytics/${asmtId}`}>
                           <button
@@ -411,6 +407,7 @@ const AssessmentsList = () => {
           </Table>
         )}
       </Card>
+      )}
 
       {/* Delete Confirmation Modal (Requirement 5) */}
       <Modal

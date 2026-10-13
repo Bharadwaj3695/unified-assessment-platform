@@ -1,4 +1,3 @@
-import React from 'react';
 
 const variantMap = {
   primary: 'bg-[#FDF1EC] text-[#E05D38] dark:bg-[#341C16] dark:text-[#F4A261] border-[#F8D8CC] dark:border-[#52291E]',

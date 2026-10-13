@@ -1,4 +1,3 @@
-import React from 'react';
 import { AlertCircle, CheckCircle2, Info, AlertTriangle } from 'lucide-react';
 
 const alertTypeMap = {

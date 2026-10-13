@@ -1,6 +1,5 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
-import { toast } from 'react-toastify';
 import analyticsService from '../../services/analytics.service';
 import Card from '../../components/ui/Card';
 import Badge from '../../components/ui/Badge';
@@ -8,6 +7,7 @@ import Button from '../../components/ui/Button';
 import Spinner from '../../components/ui/Spinner';
 import EmptyState from '../../components/ui/EmptyState';
 import ErrorState from '../../components/ui/ErrorState';
+import DashboardSkeleton from '../../components/ui/DashboardSkeleton';
 import StatCard from '../../components/common/StatCard';
 import ScoreDistributionChart from '../../components/charts/ScoreDistributionChart';
 import {
@@ -20,23 +20,16 @@ import {
 } from '../../components/ui/Table';
 import {
   ArrowLeft,
-  BookOpen,
-  Users,
+Users,
   CheckCircle2,
-  Clock,
-  Award,
+Award,
   AlertTriangle,
   FileCheck,
-  TrendingUp,
-  HelpCircle,
-  BarChart2,
-  Eye,
+Eye,
   RefreshCw,
   Lock,
   Globe,
-  Check,
-  X,
-} from 'lucide-react';
+  Check} from 'lucide-react';
 
 const AssessmentAnalytics = () => {
   const { id } = useParams();
@@ -70,14 +63,7 @@ const AssessmentAnalytics = () => {
   }, [loadAnalytics]);
 
   if (isLoading) {
-    return (
-      <div className="flex flex-col items-center justify-center min-h-[400px] space-y-4">
-        <Spinner size="lg" />
-        <p className="text-sm font-medium text-slate-500 dark:text-slate-400">
-          Compiling assessment analytics & question performance telemetry...
-        </p>
-      </div>
-    );
+    return <DashboardSkeleton />;
   }
 
   if (error) {
@@ -112,7 +98,7 @@ const AssessmentAnalytics = () => {
     <div className="space-y-6">
       {/* Navigation & Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-        <div className="flex items-center space-x-3">
+        <div className="flex flex-col sm:flex-row sm:items-center gap-3">
           <Button
             variant="outline"
             size="sm"
@@ -147,7 +133,7 @@ const AssessmentAnalytics = () => {
           </div>
         </div>
 
-        <div className="flex items-center space-x-2">
+        <div className="flex flex-wrap items-center gap-2">
           <Button
             variant="outline"
             size="sm"
