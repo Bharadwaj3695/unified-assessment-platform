@@ -748,4 +748,109 @@ describe('Phase 8A: Multi-Factor Authentication (MFA / 2FA) Backend Foundation',
 
     googleAuthService.clearMockVerificationHandler();
   });
+
+  // =========================================================================
+  // 26. HASHED MFA CHALLENGE SECURITY VERIFICATION (Mentor Requirement)
+  // =========================================================================
+  it('26. Hashed Challenge: raw challenge is NOT persisted in MongoDB, stored value is SHA-256 hash', async () => {
+    studentUser.mfaEnabled = true;
+    const secret = mfaUtil.generateTotpSecret();
+    studentUser.mfaSecret = mfaUtil.encryptSecret(secret);
+    await studentUser.save();
+
+    const loginRes = await authService.login({
+      email: 'student@uap.edu',
+      password: 'Student@123',
+    });
+
+    assert.strictEqual(loginRes.mfaRequired, true);
+    assert.ok(loginRes.mfaToken);
+
+    // Decode JWT to extract the raw challengeId from jti
+    const { verifyMfaChallengeToken } = require('../src/utils/jwt');
+    const decoded = verifyMfaChallengeToken(loginRes.mfaToken);
+    const rawJti = decoded.jti;
+    assert.ok(rawJti, 'Raw JTI UUID must exist in token');
+
+    // 1. Raw challenge MUST NOT exist in MongoDB
+    const rawDoc = await MfaChallenge.collection.findOne({ challengeId: rawJti });
+    assert.strictEqual(rawDoc, null, 'Raw challengeId must NOT be persisted in MongoDB collection');
+
+    // 2. Document MUST be stored with challengeHash = SHA256(rawJti)
+    const expectedHash = mfaUtil.hashMfaChallenge(rawJti);
+    const hashedDoc = await MfaChallenge.collection.findOne({ challengeHash: expectedHash });
+    assert.ok(hashedDoc, 'Document must be stored under challengeHash');
+    assert.strictEqual(hashedDoc.challengeHash, expectedHash);
+    assert.strictEqual(hashedDoc.challengeId, undefined, 'Document must NOT contain challengeId field');
+
+    // 3. Document belongs to correct user
+    assert.strictEqual(hashedDoc.userId.toString(), studentUser._id.toString());
+
+    // 4. 5-minute lifetime (expiresAt ~ now + 5 min)
+    const now = Date.now();
+    const diffMs = new Date(hashedDoc.expiresAt).getTime() - now;
+    assert.ok(diffMs > 4.5 * 60 * 1000 && diffMs <= 5.1 * 60 * 1000, 'Expiry must be approximately 5 minutes');
+
+    // 5. Initial unconsumed state
+    assert.strictEqual(hashedDoc.consumed, false);
+    assert.strictEqual(hashedDoc.attempts, 0);
+    assert.strictEqual(hashedDoc.maxAttempts, 5);
+
+    // 6. TTL index verified
+    const indexes = await MfaChallenge.collection.indexes();
+    const ttlIndex = indexes.find((idx) => idx.key && idx.key.expiresAt === 1);
+    assert.ok(ttlIndex, 'MongoDB TTL index on expiresAt must exist');
+    assert.strictEqual(ttlIndex.expireAfterSeconds, 0);
+  });
+
+  it('27. Audit Log: raw challenge identifier is NOT leaked in AuditLog metadata', async () => {
+    const logs = await AuditLog.find({ action: 'MFA_CHALLENGE_ISSUED' }).sort({ createdAt: -1 }).limit(5);
+    assert.ok(logs.length > 0, 'Audit logs for MFA challenge issuance must exist');
+    for (const log of logs) {
+      if (log.details) {
+        assert.strictEqual(log.details.challengeId, undefined, 'AuditLog details must NOT expose raw challengeId');
+      }
+    }
+  });
+
+  it('28. Hashed Challenge: successful verification consumes the hashed challenge atomically', async () => {
+    const decryptedSecret = mfaUtil.decryptSecret(studentUser.mfaSecret);
+    const validTotp = mfaUtil.generateTotpCode(decryptedSecret);
+
+    const loginRes = await authService.login({
+      email: 'student@uap.edu',
+      password: 'Student@123',
+    });
+    const mfaToken = loginRes.mfaToken;
+    const { verifyMfaChallengeToken } = require('../src/utils/jwt');
+    const decoded = verifyMfaChallengeToken(mfaToken);
+    const expectedHash = mfaUtil.hashMfaChallenge(decoded.jti);
+
+    // Verify
+    const verifyRes = await authService.verifyMfaChallenge({
+      mfaToken,
+      code: validTotp,
+    });
+    assert.ok(verifyRes.accessToken, 'Access token must be issued');
+    assert.ok(verifyRes.refreshToken, 'Refresh token must be issued');
+
+    // Check MongoDB directly
+    const storedDoc = await MfaChallenge.collection.findOne({ challengeHash: expectedHash });
+    assert.ok(storedDoc);
+    assert.strictEqual(storedDoc.consumed, true, 'Challenge must be marked consumed');
+    assert.ok(storedDoc.consumedAt instanceof Date || typeof storedDoc.consumedAt === 'object', 'consumedAt must be recorded');
+
+    // Replay attempt must fail
+    await assert.rejects(
+      async () => {
+        await authService.verifyMfaChallenge({ mfaToken, code: validTotp });
+      },
+      (err) => {
+        assert.strictEqual(err.statusCode, 401);
+        assert.ok(err.message.includes('already been used'));
+        return true;
+      }
+    );
+  });
 });
+

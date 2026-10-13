@@ -18,7 +18,7 @@ const {
   QuestionImportJob,
 } = require('../src/models');
 
-const aiClassificationService = require('../src/services/aiClassification.service');
+const classificationService = require('../src/services/classification.service');
 const questionParserService = require('../src/services/questionParser.service');
 const googleFormsService = require('../src/services/googleForms.service');
 const questionBankService = require('../src/services/questionBank.service');
@@ -291,21 +291,21 @@ describe('Phase 7 Verification Suite: Question Bank, Intelligent Import, Version
   // =========================================================================
   describe('3. AI Classification & Deterministic Heuristic Fallback', () => {
     it('3.1 should classify Bloom taxonomy and difficulty using deterministic heuristic analysis', async () => {
-      const rememberQ = await aiClassificationService.classifyQuestion({
+      const rememberQ = await classificationService.classifyQuestion({
         questionText: 'List and recall the primary HTTP methods.',
         options: [],
       });
       assert.strictEqual(rememberQ.bloomLevel, 'REMEMBER');
       assert.ok(rememberQ.confidence >= 50 && rememberQ.confidence <= 100);
 
-      const createQ = await aiClassificationService.classifyQuestion({
+      const createQ = await classificationService.classifyQuestion({
         questionText: 'Design and build a scalable microservice architecture for video processing.',
         options: [],
       });
       assert.strictEqual(createQ.bloomLevel, 'CREATE');
       assert.strictEqual(createQ.difficulty, 'HARD');
 
-      const analyzeQ = await aiClassificationService.classifyQuestion({
+      const analyzeQ = await classificationService.classifyQuestion({
         questionText: 'Compare, contrast, and analyze the trade-offs between SQL and NoSQL databases.',
         options: [],
       });
@@ -313,7 +313,7 @@ describe('Phase 7 Verification Suite: Question Bank, Intelligent Import, Version
     });
 
     it('3.2 should strictly validate AI classification output schema', () => {
-      const valid = aiClassificationService.validateClassification({
+      const valid = classificationService.validateClassification({
         bloomLevel: 'APPLY',
         difficulty: 'MEDIUM',
         confidence: 85,
@@ -322,7 +322,7 @@ describe('Phase 7 Verification Suite: Question Bank, Intelligent Import, Version
       });
       assert.strictEqual(valid.valid, true);
 
-      const invalid = aiClassificationService.validateClassification({
+      const invalid = classificationService.validateClassification({
         bloomLevel: 'SUPER_HARD',
         difficulty: 'EXTREME',
         confidence: 250,

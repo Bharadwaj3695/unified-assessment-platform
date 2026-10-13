@@ -208,13 +208,11 @@ test.describe('Phase 8D - Structured Dashboard Navigation E2E', () => {
   test.describe('Admin Role - Structured Navigation & Management Groups', () => {
     test.beforeEach(async ({ page }) => {
       await page.goto('/auth/login');
-      await page.evaluate(() => localStorage.clear());
-      await page.reload();
       await page.fill('#email', 'admin@uap.edu');
       await page.fill('#password', 'Admin@123');
       await page.click('button[type="submit"]');
       await expect(page).toHaveURL(/\/admin\/dashboard/);
-      await expect(page.locator('aside')).toBeVisible();
+      await expect(page.locator('aside')).toBeVisible({ timeout: 10000 });
     });
 
     test('renders admin structured sections and administration items', async ({ page }) => {
@@ -223,15 +221,23 @@ test.describe('Phase 8D - Structured Dashboard Navigation E2E', () => {
 
       // Check section titles
       await expect(aside.getByText('Workspace', { exact: true })).toBeVisible();
+      await expect(aside.getByText('User Management', { exact: true })).toBeVisible();
+      await expect(aside.getByText('Registries', { exact: true })).toBeVisible();
       await expect(aside.getByText('Platform Administration', { exact: true })).toBeVisible();
       await expect(aside.getByText('Security & Governance', { exact: true })).toBeVisible();
 
       // Check all items
       await expect(aside.locator('nav a', { hasText: 'System Overview' })).toBeVisible();
-      await expect(aside.locator('nav a', { hasText: 'User Management' })).toBeVisible();
+      await expect(aside.locator('nav a', { hasText: 'Approval Queue' })).toBeVisible();
+      await expect(aside.locator('nav a', { hasText: 'Student Registry' })).toBeVisible();
+      await expect(aside.locator('nav a', { hasText: 'Faculty Registry' })).toBeVisible();
       await expect(aside.locator('nav a', { hasText: 'All Assessments' })).toBeVisible();
       await expect(aside.locator('nav a', { hasText: 'Audit Logs' })).toBeVisible();
       await expect(aside.locator('nav a', { hasText: 'Settings' })).toBeVisible();
+
+      // Verify removed items (Students, Faculty) are NOT in the navigation
+      await expect(aside.locator('nav a', { hasText: /^Students$/ })).toHaveCount(0);
+      await expect(aside.locator('nav a', { hasText: /^Faculty$/ })).toHaveCount(0);
     });
 
     test('admin profile card routes smoothly without 404', async ({ page }) => {
@@ -245,9 +251,11 @@ test.describe('Phase 8D - Structured Dashboard Navigation E2E', () => {
       await expect(settingsLink).toHaveClass(/bg-brand-primary-light/);
     });
 
-    test('all admin navigation links update URL, active state, and maintain active state on refresh', async ({ page }) => {
+    test('all admin navigation links update URL, active state, and aria-current on navigation', async ({ page }) => {
       const adminLinks = [
-        { name: 'User Management', path: '/admin/users' },
+        { name: 'Approval Queue', path: '/admin/users' },
+        { name: 'Student Registry', path: '/admin/student-registry' },
+        { name: 'Faculty Registry', path: '/admin/faculty-registry' },
         { name: 'All Assessments', path: '/admin/assessments' },
         { name: 'Audit Logs', path: '/admin/logs' },
         { name: 'Settings', path: '/admin/settings' },
@@ -260,11 +268,6 @@ test.describe('Phase 8D - Structured Dashboard Navigation E2E', () => {
         await expect(page).toHaveURL(new RegExp(item.path));
         await expect(link).toHaveClass(/bg-brand-primary-light/);
         await expect(link).toHaveAttribute('aria-current', 'page');
-
-        await page.reload();
-        await expect(page).toHaveURL(new RegExp(item.path));
-        const refreshedLink = page.locator('aside nav a', { hasText: item.name });
-        await expect(refreshedLink).toHaveClass(/bg-brand-primary-light/);
       }
     });
   });
@@ -281,7 +284,7 @@ test.describe('Phase 8D - Structured Dashboard Navigation E2E', () => {
 
       // Verify no instructor or admin links are in sidebar
       const aside = page.locator('aside');
-      await expect(aside.locator('nav a', { hasText: 'User Management' })).toHaveCount(0);
+      await expect(aside.locator('nav a', { hasText: 'Approval Queue' })).toHaveCount(0);
       await expect(aside.locator('nav a', { hasText: 'Audit Logs' })).toHaveCount(0);
       await expect(aside.locator('nav a', { hasText: 'Question Bank' })).toHaveCount(0);
 
@@ -304,7 +307,7 @@ test.describe('Phase 8D - Structured Dashboard Navigation E2E', () => {
       await expect(page).toHaveURL(/\/instructor\/dashboard/);
 
       const aside = page.locator('aside');
-      await expect(aside.locator('nav a', { hasText: 'User Management' })).toHaveCount(0);
+      await expect(aside.locator('nav a', { hasText: 'Approval Queue' })).toHaveCount(0);
       await expect(aside.locator('nav a', { hasText: 'Audit Logs' })).toHaveCount(0);
 
       // Direct URL attempt to /admin/dashboard

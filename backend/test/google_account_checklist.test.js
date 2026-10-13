@@ -13,9 +13,24 @@ const adminController = require('../src/controllers/admin.controller');
 const env = require('../src/config/env');
 
 const mockResponse = () => {
+  const headers = {};
   const res = {
     statusCode: 200,
     responseData: null,
+    setHeader(name, value) {
+      const key = name.toLowerCase();
+      if (!headers[key]) {
+        headers[key] = value;
+      } else if (Array.isArray(headers[key])) {
+        headers[key] = [...headers[key], value];
+      } else {
+        headers[key] = [headers[key], value];
+      }
+      return this;
+    },
+    getHeader(name) {
+      return headers[name.toLowerCase()];
+    },
     status(code) {
       this.statusCode = code;
       return this;
@@ -26,6 +41,15 @@ const mockResponse = () => {
     },
   };
   return res;
+};
+
+const getMockCookie = (res, name) => {
+  const raw = res.getHeader('set-cookie');
+  if (!raw) return null;
+  const list = Array.isArray(raw) ? raw : [raw];
+  const found = list.find((c) => c.startsWith(`${name}=`));
+  if (!found) return null;
+  return decodeURIComponent(found.split(';')[0].slice(name.length + 1));
 };
 
 describe('Google SSO, Lifecycle Governance & SMTP Verification Matrix (19 Requirements)', () => {
@@ -272,7 +296,8 @@ describe('Google SSO, Lifecycle Governance & SMTP Verification Matrix (19 Requir
     assert.strictEqual(capturedErr, null);
     assert.strictEqual(res.statusCode, 200);
     assert.ok(res.responseData.data.accessToken);
-    assert.ok(res.responseData.data.refreshToken);
+    const refreshToken = res.responseData.data.refreshToken || getMockCookie(res, 'uap_refresh');
+    assert.ok(refreshToken, 'Approved user must receive refresh token via body or cookie');
     assert.strictEqual(res.responseData.data.user.email, 'chk_approved_user@checklist.edu');
     assert.strictEqual(res.responseData.data.user.status, 'active');
   });
@@ -427,9 +452,10 @@ describe('Google SSO, Lifecycle Governance & SMTP Verification Matrix (19 Requir
     await authController.googleLogin({ body: { idToken: 'token' }, ip: '127.0.0.1' }, res, () => {});
 
     assert.strictEqual(res.statusCode, 200);
-    const { accessToken, refreshToken, user } = res.responseData.data;
+    const { accessToken, user } = res.responseData.data;
+    const refreshToken = res.responseData.data.refreshToken || getMockCookie(res, 'uap_refresh');
     assert.ok(accessToken);
-    assert.ok(refreshToken);
+    assert.ok(refreshToken, 'Approved user must receive refresh token');
 
     const decoded = verifyAccessToken(accessToken);
     assert.strictEqual(decoded.id, user.id);

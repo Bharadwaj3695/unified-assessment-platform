@@ -57,7 +57,7 @@ test.describe('Security, RBAC & Data Isolation E2E', () => {
     await page.fill('#email', 'student@uap.edu');
     await page.fill('#password', 'Student@123');
     await page.click('button[type="submit"]');
-    await expect(page).toHaveURL(/\/student\/dashboard/);
+    await expect(page).toHaveURL(/\/student\/(dashboard|profile)/);
 
     // Attempt to access /instructor/create
     await page.goto('/instructor/create');

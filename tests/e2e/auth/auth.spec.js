@@ -15,9 +15,8 @@ test.describe('Authentication Workflows', () => {
     await page.fill('#password', 'Student@123');
     await page.click('button[type="submit"]');
 
-    // Should redirect to student dashboard
-    await expect(page).toHaveURL(/\/student\/dashboard/);
-    await expect(page.getByText('student Workspace', { exact: true })).toBeVisible({ timeout: 10000 });
+    // Should redirect to student workspace (dashboard or profile for MFA setup)
+    await expect(page).toHaveURL(/\/student\/(dashboard|profile)/);
     await expect(page.locator('text=Welcome back').first()).toBeVisible();
   });
 
@@ -97,5 +96,32 @@ test.describe('Authentication Workflows', () => {
     // Ensure error banner did not appear
     const alert = page.locator('[role="alert"], .bg-red-50');
     await expect(alert).not.toBeVisible();
+  });
+
+  test('7. Forgot password flow renders form, submits email and displays confirmation', async ({ page }) => {
+    await page.goto('/auth/forgot-password');
+    await expect(page).toHaveURL(/\/auth\/forgot-password/);
+    await expect(page.getByRole('heading', { name: /Forgot Password\?/i })).toBeVisible();
+
+    // Fill valid demo student email
+    await page.fill('#email', 'std01@uap.edu');
+    await page.click('button[type="submit"]');
+
+    // Should display confirmation view
+    await expect(page.getByRole('heading', { name: /Check Your Inbox/i })).toBeVisible({ timeout: 10000 });
+    await expect(page.getByText('std01@uap.edu')).toBeVisible();
+    await expect(page.getByRole('button', { name: /Return to Sign In/i })).toBeVisible();
+  });
+
+  test('8. Reset password page handles missing token gracefully and renders when token present', async ({ page }) => {
+    // Without token: should warn token missing
+    await page.goto('/auth/reset-password');
+    await expect(page).toHaveURL(/\/auth\/reset-password/);
+
+    // With mock token query: should render password reset inputs
+    await page.goto('/auth/reset-password?token=mock_reset_token_12345');
+    await expect(page.getByRole('heading', { name: /Reset Password/i })).toBeVisible();
+    await expect(page.locator('#password')).toBeVisible();
+    await expect(page.locator('#confirmPassword')).toBeVisible();
   });
 });

@@ -2,6 +2,41 @@ const { test, expect } = require('@playwright/test');
 const { generateSync } = require('otplib');
 
 test.describe('Two-Factor Authentication (MFA/2FA) Frontend Experience', () => {
+  let mfaTestEmail = 'student@uap.edu';
+  let mfaTestPassword = 'Student@123';
+
+  test.beforeAll(async ({ request }) => {
+    try {
+      // Login as admin
+      const adminRes = await request.post('http://localhost:5000/api/auth/login', {
+        data: { email: 'admin@uap.edu', password: 'Admin@123' },
+      });
+      const adminJson = await adminRes.json();
+      const adminToken = adminJson.data?.accessToken;
+
+      if (adminToken) {
+        const timestamp = Date.now();
+        const studentId = `STU-MFA-${timestamp}`;
+        const uniqueEmail = `mfatest_${timestamp}@uap.edu`;
+        const createRes = await request.post('http://localhost:5000/api/admin/students', {
+          headers: { Authorization: `Bearer ${adminToken}` },
+          data: {
+            studentId,
+            name: `MFA Test Student ${timestamp}`,
+            dateOfBirth: '2000-01-01',
+            email: uniqueEmail,
+            password: mfaTestPassword,
+          },
+        });
+        if (createRes.ok()) {
+          mfaTestEmail = uniqueEmail;
+        }
+      }
+    } catch {
+      // Fallback to default student if provisioning fails
+    }
+  });
+
   test.beforeEach(async ({ page }) => {
     await page.goto('/auth/login');
     await page.evaluate(() => {
@@ -62,19 +97,19 @@ test.describe('Two-Factor Authentication (MFA/2FA) Frontend Experience', () => {
   test('3. Full 2FA lifecycle: Enrollment, MFA-gated login, and 2FA teardown', async ({ page }) => {
     // --- Step A: Login with baseline password credentials ---
     await page.goto('/auth/login');
-    await page.fill('#email', 'student@uap.edu');
-    await page.fill('#password', 'Student@123');
+    await page.fill('#email', mfaTestEmail);
+    await page.fill('#password', mfaTestPassword);
     await page.click('button[type="submit"]');
 
-    await expect(page).toHaveURL(/\/student\/dashboard/);
+    await expect(page).toHaveURL(/\/student\/(dashboard|profile)/);
 
     // --- Step B: Navigate to Student Profile ---
     await page.goto('/student/profile');
     await expect(page.getByText('Two-Factor Authentication (2FA)')).toBeVisible();
-    await expect(page.getByText('Disabled', { exact: true })).toBeVisible();
+    await expect(page.getByText(/Required — Setup Pending|Disabled/)).toBeVisible();
 
     // --- Step C: Initiate 2FA Enrollment ---
-    const enableBtn = page.getByRole('button', { name: /Enable 2FA/i });
+    const enableBtn = page.getByRole('button', { name: /Set Up 2FA|Enable 2FA/i });
     await enableBtn.click();
 
     // Modal opens
@@ -107,8 +142,9 @@ test.describe('Two-Factor Authentication (MFA/2FA) Frontend Experience', () => {
     await doneBtn.click();
 
     // Modal closes, profile updates
-    await expect(page.getByText('Enabled & Active')).toBeVisible({ timeout: 5000 });
-    await expect(page.getByRole('button', { name: /Disable 2FA/i })).toBeVisible();
+    await expect(page.getByText(/Required & Active|Enabled & Active/)).toBeVisible({ timeout: 5000 });
+    await expect(page.getByText('MFA is required for student accounts.').first()).toBeVisible();
+    await expect(page.getByRole('button', { name: /Disable 2FA/i })).not.toBeVisible();
 
     // --- Step E: Sign out & Test MFA-Gated Login ---
     await page.evaluate(() => {
@@ -117,8 +153,8 @@ test.describe('Two-Factor Authentication (MFA/2FA) Frontend Experience', () => {
     });
     await page.goto('/auth/login');
 
-    await page.fill('#email', 'student@uap.edu');
-    await page.fill('#password', 'Student@123');
+    await page.fill('#email', mfaTestEmail);
+    await page.fill('#password', mfaTestPassword);
     await page.click('button[type="submit"]');
 
     // Frontend intercepts challenge and redirects to MFA verification
@@ -137,18 +173,24 @@ test.describe('Two-Factor Authentication (MFA/2FA) Frontend Experience', () => {
     await expect(page).toHaveURL(/\/student\/dashboard/, { timeout: 10000 });
     await expect(page.getByText('student Workspace', { exact: true })).toBeVisible();
 
-    // --- Step F: Disable 2FA to restore baseline account state ---
+    // --- Step F: Student cannot disable MFA (Mandatory Student MFA policy) ---
     await page.goto('/student/profile');
-    const disableBtn = page.getByRole('button', { name: /Disable 2FA/i });
-    await disableBtn.click();
+    await expect(page.getByText('MFA is required for student accounts.').first()).toBeVisible();
+    await expect(page.getByRole('button', { name: /Disable 2FA/i })).not.toBeVisible();
 
-    await expect(page.getByText('Disable Two-Factor Authentication')).toBeVisible();
-    await page.fill('input[type="password"]', 'Student@123');
-
-    const confirmDisableBtn = page.getByRole('button', { name: /Confirm & Disable 2FA/i });
-    await confirmDisableBtn.click();
-
-    await expect(page.getByText('Disabled', { exact: true })).toBeVisible({ timeout: 10000 });
-    await expect(page.getByRole('button', { name: /Enable 2FA/i })).toBeVisible();
+    // Verify backend rejects direct student MFA disable API call with 403 Forbidden
+    const disableResponse = await page.evaluate(async () => {
+      const token = (typeof window.__getUapAccessToken === 'function' && window.__getUapAccessToken()) || localStorage.getItem('uap_access_token');
+      const res = await fetch('/api/auth/mfa/disable', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ password: 'Student@123' }),
+      });
+      return { status: res.status, data: await res.json() };
+    });
+    expect(disableResponse.status).toBe(403);
   });
 });

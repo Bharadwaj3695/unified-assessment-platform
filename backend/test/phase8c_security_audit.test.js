@@ -620,12 +620,19 @@ describe('Phase 8C: Comprehensive Authentication Security & Regression Audit', (
   // 8. MFA DISABLEMENT
   // =========================================================================
   describe('8. MFA Disablement Protection', () => {
-    it('8.1 Disabling MFA requires authentication and correct password verification', async () => {
+    it('8.1 Disabling MFA requires authentication and correct password verification for faculty', async () => {
+      // Ensure instructor has MFA enabled
+      const secret = mfaUtil.generateTotpSecret();
+      instructorUser.mfaSecret = mfaUtil.encryptSecret(secret);
+      instructorUser.mfaEnabled = true;
+      instructorUser.mfaRecoveryCodes = [];
+      await instructorUser.save();
+
       // Wrong password rejected
       await assert.rejects(
         async () => {
           await authService.disableMfa({
-            userId: studentUser._id,
+            userId: instructorUser._id,
             password: 'WrongPassword!',
           });
         },
@@ -640,7 +647,7 @@ describe('Phase 8C: Comprehensive Authentication Security & Regression Audit', (
       await assert.rejects(
         async () => {
           await authService.disableMfa({
-            userId: studentUser._id,
+            userId: instructorUser._id,
             password: '',
           });
         },
@@ -653,16 +660,35 @@ describe('Phase 8C: Comprehensive Authentication Security & Regression Audit', (
 
       // Correct password succeeds
       const disableRes = await authService.disableMfa({
-        userId: studentUser._id,
-        password: 'Student@123',
+        userId: instructorUser._id,
+        password: 'Instructor@123',
       });
       assert.ok(disableRes.message.includes('disabled successfully'));
       assert.ok(disableRes.accessToken);
 
-      const disabledUser = await User.findById(studentUser._id);
+      const disabledUser = await User.findById(instructorUser._id);
       assert.strictEqual(disabledUser.mfaEnabled, false);
       assert.strictEqual(disabledUser.mfaSecret, null);
       assert.strictEqual(disabledUser.mfaRecoveryCodes.length, 0);
+    });
+
+    it('8.2 Backend rejects student MFA disablement attempt (Mandatory Student MFA policy)', async () => {
+      studentUser.mfaEnabled = true;
+      await studentUser.save();
+
+      await assert.rejects(
+        async () => {
+          await authService.disableMfa({
+            userId: studentUser._id,
+            password: 'Student@123',
+          });
+        },
+        (err) => {
+          assert.strictEqual(err.statusCode, 403);
+          assert.ok(err.message.includes('mandatory for student accounts'));
+          return true;
+        }
+      );
     });
   });
 
@@ -715,8 +741,21 @@ describe('Phase 8C: Comprehensive Authentication Security & Regression Audit', (
     });
 
     it('9.2 Disabling MFA increments tokenVersion and invalidates old sessions', async () => {
+      // Ensure instructor has MFA enabled first via fresh atomic update
+      const secret = mfaUtil.generateTotpSecret();
+      const currentUser = await User.findByIdAndUpdate(
+        instructorUser._id,
+        {
+          $set: {
+            mfaSecret: mfaUtil.encryptSecret(secret),
+            mfaEnabled: true,
+          },
+          $inc: { tokenVersion: 1 },
+        },
+        { new: true }
+      );
+
       // Capture token while MFA is enabled
-      const currentUser = await User.findById(studentUser._id);
       const currentToken = generateAccessToken({
         id: currentUser._id.toString(),
         role: currentUser.role,
@@ -726,8 +765,8 @@ describe('Phase 8C: Comprehensive Authentication Security & Regression Audit', (
 
       // Disable MFA
       await authService.disableMfa({
-        userId: studentUser._id,
-        password: 'Student@123',
+        userId: instructorUser._id,
+        password: 'Instructor@123',
       });
 
       // Attempt using old token

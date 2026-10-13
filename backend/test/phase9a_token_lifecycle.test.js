@@ -645,10 +645,10 @@ describe('Phase 9A: Authentication Token Lifecycle Hardening & Security Audit', 
     it('4.3 MFA disablement invalidates existing refresh tokens via tokenVersion', async () => {
       const secret = mfaUtil.generateTotpSecret();
       const user = await User.create({
-        name: 'MFA Disable User',
-        email: 'mfa_disable_uap@uap.edu',
+        name: 'MFA Disable Instructor',
+        email: 'mfa_disable_instructor@uap.edu',
         password: await require('../src/utils/password').hashPassword('Password@123'),
-        role: 'student',
+        role: 'instructor',
         status: 'active',
         isActive: true,
         mfaEnabled: true,
@@ -678,6 +678,35 @@ describe('Phase 9A: Authentication Token Lifecycle Hardening & Security Audit', 
         (err) => {
           assert.strictEqual(err.statusCode, 401);
           assert.ok(err.message.includes('Session has expired or been invalidated'));
+          return true;
+        }
+      );
+    });
+
+    it('4.4 MFA disablement rejected for student accounts (mandatory student MFA)', async () => {
+      const secret = mfaUtil.generateTotpSecret();
+      const student = await User.create({
+        name: 'MFA Disable Student',
+        email: 'mfa_disable_student@uap.edu',
+        password: await require('../src/utils/password').hashPassword('Password@123'),
+        role: 'student',
+        status: 'active',
+        isActive: true,
+        mfaEnabled: true,
+        mfaSecret: mfaUtil.encryptSecret(secret),
+        tokenVersion: 1,
+      });
+
+      await assert.rejects(
+        async () => {
+          await authService.disableMfa({
+            userId: student._id,
+            password: 'Password@123',
+          });
+        },
+        (err) => {
+          assert.strictEqual(err.statusCode, 403);
+          assert.ok(err.message.includes('mandatory for student accounts'));
           return true;
         }
       );
