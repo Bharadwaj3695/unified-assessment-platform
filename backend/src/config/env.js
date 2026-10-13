@@ -31,3 +31,4 @@ module.exports = {
   SMTP_FROM: process.env.SMTP_FROM || process.env.EMAIL_FROM || '"Unified Assessment Platform" <no-reply@uap.edu>',
   EMAIL_FROM: process.env.EMAIL_FROM || process.env.SMTP_FROM || '"Unified Assessment Platform" <no-reply@uap.edu>',
 };
+

@@ -1,5 +1,5 @@
 const mongoose = require('mongoose');
-const { ProctoringSession, ProctoringEvent, Submission, Assessment } = require('../models');
+const { ProctoringSession, ProctoringEvent, Submission } = require('../models');
 
 const VALID_EVENT_TYPES = [
   'session_started',

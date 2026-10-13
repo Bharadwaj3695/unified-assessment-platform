@@ -204,7 +204,7 @@ class EvaluationService {
           submission.passed ? 'Passed' : 'Needs Improvement'
         }).`,
         type: 'grade',
-        link: `/student/submissions/${submission._id}`,
+        link: `/student/submissions?submissionId=${submission._id}`,
       });
 
       try {
@@ -224,7 +224,7 @@ class EvaluationService {
         title: 'New Faculty Feedback',
         message: `Your faculty has added feedback to "${assessment.title}".`,
         type: 'info',
-        link: `/student/submissions/${submission._id}`,
+        link: `/student/submissions?submissionId=${submission._id}`,
       });
     }
 

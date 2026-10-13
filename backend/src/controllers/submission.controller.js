@@ -136,6 +136,9 @@ class SubmissionController {
       );
 
       res.setHeader('Content-Type', fileData.mimeType);
+      res.setHeader('Cache-Control', 'private, no-cache, no-store, must-revalidate');
+      res.setHeader('Pragma', 'no-cache');
+      res.setHeader('Expires', '0');
       const disposition = download ? 'attachment' : 'inline';
       res.setHeader('Content-Disposition', `${disposition}; filename="${encodeURIComponent(fileData.originalFilename)}"`);
       return res.sendFile(fileData.filePath);
