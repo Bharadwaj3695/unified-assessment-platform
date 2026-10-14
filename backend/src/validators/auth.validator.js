@@ -115,7 +115,14 @@ const mfaVerifyValidator = [
     .isNumeric()
     // Provide error message if TOTP code contains non-numeric characters
     .withMessage('TOTP code must contain only numbers'),
+  // Optional second-factor method selector: authenticator app (default) or emailed one-time code
+  body('method').optional().isIn(['totp', 'email']).withMessage("method must be either 'totp' or 'email'"),
 // End of mfaVerifyValidator middleware array
+];
+
+// Define validation middleware chain for requesting an emailed one-time sign-in code
+const mfaEmailOtpSendValidator = [
+  body('mfaToken').trim().notEmpty().withMessage('MFA challenge token is required'),
 ];
 
 // Define validation middleware chain for MFA recovery code verification during login
@@ -225,6 +232,8 @@ module.exports = {
   mfaSetupConfirmValidator,
   // Export MFA TOTP verification validator
   mfaVerifyValidator,
+  // Email OTP send request validator
+  mfaEmailOtpSendValidator,
   // Export MFA backup recovery code validator
   mfaRecoveryValidator,
   // Export MFA disable validator
