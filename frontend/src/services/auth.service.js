@@ -115,12 +115,18 @@ export const authService = {
   // Conclude the setupConfirmMfa method definition
   },
   // Method to verify TOTP code during a multi-factor authentication login challenge
-  verifyMfa: async ({ mfaToken, code }) => {
-    // Send an asynchronous HTTP POST request with temporary MFA token and user-entered TOTP code
-    const res = await api.post('/auth/mfa/verify', { mfaToken, code });
+  // `method` is 'totp' (authenticator app, default) or 'email' (code sent by email)
+  verifyMfa: async ({ mfaToken, code, method = 'totp' }) => {
+    // Send an asynchronous HTTP POST request with temporary MFA token and user-entered code
+    const res = await api.post('/auth/mfa/verify', { mfaToken, code, method });
     // Return the complete authenticated session tokens and profile
     return res.data;
   // Conclude the verifyMfa method definition
+  },
+  // Method to email a one-time sign-in code for the active MFA challenge
+  sendMfaEmailOtp: async ({ mfaToken }) => {
+    const res = await api.post('/auth/mfa/email-otp/send', { mfaToken });
+    return res.data;
   },
   // Method to verify an account using an emergency MFA recovery code
   recoveryMfa: async ({ mfaToken, recoveryCode }) => {
