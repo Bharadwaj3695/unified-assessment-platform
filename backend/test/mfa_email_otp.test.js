@@ -109,14 +109,12 @@ describe('MFA Email OTP (alternative second factor)', () => {
     assert.strictEqual(challenge.attempts, 1);
   });
 
-  it('5. email code cannot be used as a TOTP code, and TOTP still works untouched', async () => {
+  it('5. emailed code is the current TOTP code, and the authenticator app still works', async () => {
     const mfaToken = await login();
     await authService.sendMfaEmailOtp({ mfaToken });
     const emailCode = lastOtpFromEmail('student@uap.edu');
+    assert.ok(mfaUtil.verifyTotp(emailCode, totpSecret), 'emailed code should be a valid TOTP code');
     const totp = mfaUtil.generateTotpCode(totpSecret);
-    if (emailCode !== totp) {
-      await assert.rejects(() => authService.verifyMfaChallenge({ mfaToken, code: emailCode }));
-    }
     const res = await authService.verifyMfaChallenge({ mfaToken, code: totp });
     assert.ok(res.accessToken, 'authenticator app still works after an email code was requested');
 

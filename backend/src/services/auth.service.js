@@ -1641,8 +1641,8 @@ class AuthService {
   }
 
   // Method to email a one-time sign-in code for an active MFA challenge.
-  // This is an ALTERNATIVE second factor: it does not touch the user's TOTP secret or
-  // recovery codes, and it lives on the same challenge (same expiry, single use, 5-attempt lock).
+  // The emailed code is the user's current TOTP code (same code the authenticator app shows).
+  // It lives on the same challenge (same expiry, single use, 5-attempt lock).
   async sendMfaEmailOtp({ mfaToken, ipAddress = null }) {
     const fail = (message, statusCode) => {
       const error = new Error(message);
@@ -1681,7 +1681,7 @@ class AuthService {
     if (!user || user.status !== 'active' || !user.isActive) {
       throw fail('Your account is not active. Please contact administration.', 403);
     }
-    if (!user.mfaEnabled) {
+    if (!user.mfaEnabled || !user.mfaSecret) {
       throw fail('MFA is not enabled for this account', 400);
     }
 
@@ -1698,7 +1698,8 @@ class AuthService {
 
     // The code can never outlive the challenge it belongs to
     const otpExpiresAt = new Date(Math.min(now + EMAIL_OTP_TTL_MS, challenge.expiresAt.getTime()));
-    const code = mfaUtil.generateEmailOtp();
+    // Email the same 6-digit code the user's authenticator app is showing right now
+    const code = mfaUtil.generateTotpCode(mfaUtil.decryptSecret(user.mfaSecret));
     const otpHash = mfaUtil.hashEmailOtp(code, challengeHash);
 
     // Atomically reserve this send (two concurrent "send" clicks cannot both pass the cooldown)
