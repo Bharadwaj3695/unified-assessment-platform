@@ -212,6 +212,40 @@ function hashMfaChallenge(challenge) {
   return crypto.createHash('sha256').update(String(challenge).trim()).digest('hex');
 }
 
+/**
+ * Generates a cryptographically random 6-digit numeric one-time code for email delivery.
+ */
+function generateEmailOtp() {
+  // crypto.randomInt is uniform over [0, 1000000); pad to keep leading zeros
+  return String(crypto.randomInt(0, 1000000)).padStart(6, '0');
+}
+
+/**
+ * Hashes an email OTP with HMAC-SHA256, bound to the specific challenge so a code
+ * issued for one login attempt can never be replayed against another.
+ */
+function hashEmailOtp(code, challengeHash) {
+  if (!code || !challengeHash) return '';
+  const salt = env.MFA_ENCRYPTION_KEY || env.JWT_SECRET || 'uap_email_otp_salt';
+  return crypto
+    .createHmac('sha256', salt)
+    .update(`${challengeHash}:${String(code).trim()}`)
+    .digest('hex');
+}
+
+/**
+ * Constant-time verification of a candidate email OTP against the stored hash.
+ */
+function verifyEmailOtp(code, challengeHash, storedHash) {
+  if (!code || !storedHash) return false;
+  const cleanCode = String(code).trim();
+  if (!/^\d{6}$/.test(cleanCode)) return false;
+  const bufA = Buffer.from(hashEmailOtp(cleanCode, challengeHash), 'hex');
+  const bufB = Buffer.from(storedHash, 'hex');
+  if (bufA.length !== bufB.length) return false;
+  return crypto.timingSafeEqual(bufA, bufB);
+}
+
 // Export MFA utility functions for encryption, TOTP processing, and recovery codes
 module.exports = {
   encryptSecret,
@@ -225,5 +259,8 @@ module.exports = {
   generateRecoveryCodes,
   verifyRecoveryCode,
   hashMfaChallenge,
+  generateEmailOtp,
+  hashEmailOtp,
+  verifyEmailOtp,
 };
 

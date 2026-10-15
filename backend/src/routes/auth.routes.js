@@ -22,6 +22,8 @@ const {
   mfaSetupConfirmValidator,
   // Validator rule set for verifying MFA during 2FA login challenge
   mfaVerifyValidator,
+  // Validator rule set for requesting an emailed one-time sign-in code
+  mfaEmailOtpSendValidator,
   // Validator rule set for MFA account recovery using backup codes
   mfaRecoveryValidator,
   // Validator rule set for disabling MFA security
@@ -61,6 +63,8 @@ router.post('/mfa/setup', authenticate, authController.mfaSetup);
 router.post('/mfa/setup-confirm', authenticate, mfaSetupConfirmValidator, validate, authController.mfaSetupConfirm);
 // Route handling verification of 6-digit MFA challenge code during login
 router.post('/mfa/verify', mfaVerifyValidator, validate, authController.mfaVerify);
+// Route emailing a one-time sign-in code as an alternative to the authenticator app during login
+router.post('/mfa/email-otp/send', mfaEmailOtpSendValidator, validate, authController.mfaSendEmailOtp);
 // Route handling MFA emergency login recovery using a one-time backup recovery code
 router.post('/mfa/recovery', mfaRecoveryValidator, validate, authController.mfaRecovery);
 // Route handling disabling of MFA protection for authenticated users
