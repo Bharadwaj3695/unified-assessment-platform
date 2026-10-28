@@ -187,4 +187,106 @@
 19. `backend/src/config/seed.js` — Updated demo seed notifications to use `/student/submissions?submissionId=${submission._id}`.
 20. `tests/notification_routing_verification.test.js` — Automated 21-test test suite verifying all notification routing scenarios across all RBAC roles.
 
+---
 
+## 5. Phase 16: Shared Layout Fix — Remove Marketing Footer, Keep App Footer at Bottom (Audit & Checkpoint)
+
+### 1. Initial Repository State Audit
+- **Working Directory:** `/home/bhara/Unified Assessment Platform [original]` (Confirmed repository root).
+- **Pre-existing Modified Tracked Files (Session Start):**
+  - Backend (18 files): `package.json`, `app.js`, `config/db.js`, `config/env.js`, `controllers/admin.controller.js`, `controllers/auth.controller.js`, `middleware/auth.middleware.js`, `middleware/error.middleware.js`, `models/MfaChallenge.js`, `models/SystemSetting.js`, `models/User.js`, `routes/auth.routes.js`, `server.js`, `services/auth.service.js`, `services/email.service.js`, `utils/mfa.js`, `validators/auth.validator.js`, `backend/test/stage3_secure_cookies_csrf_caching.test.js`.
+  - Frontend (21 files): `App.jsx`, `components/auth/TwoFactorAuthSection.jsx`, `components/common/Footer.jsx`, `components/common/Header.jsx`, `components/common/NotificationPopover.jsx`, `components/common/ProfilePhotoUploader.jsx`, `components/modals/QuestionBankPickerModal.jsx`, `components/ui/Modal.jsx`, `components/ui/TableSkeleton.jsx`, `layouts/MainLayout.jsx`, `pages/admin/Dashboard.jsx`, `pages/admin/StudentBulkImportModal.jsx`, `pages/auth/GoogleCallback.jsx`, `pages/auth/Login.jsx`, `pages/auth/MfaVerify.jsx`, `pages/instructor/QuestionImportReview.jsx`, `pages/instructor/QuestionImportUpload.jsx`, `pages/student/Attempt.jsx`, `routes/AppRoutes.jsx`, `services/api.js`, `services/auth.service.js`.
+  - Tests (1 file): `tests/e2e/auth/mfa.spec.js`.
+- **Untracked Files:**
+  - Backend: `dbCheck.middleware.js`, `scripts/`, `mfa_authenticator_and_email_otp.test.js`, `mfa_authenticator_enrollment.test.js`.
+  - Frontend: `AdminProfileMenu.jsx`, `AppFooter.jsx`, `ResponsivePreviewModal.jsx`, `AdminPreviewContext.jsx`, `PublicLayout.jsx`, `Profile.jsx`, `MfaSetup.jsx`.
+  - Tests: `admin-profile-menu-preview.spec.js`, `responsive-viewports.spec.js`, `shared-layout-footer.spec.js`.
+- **Safety & Preservation Check:**
+  - `Sidebar.jsx`: Verified 100% clean, 0 diffs against git index. Width, navigation, collapsible state, profile card, logout preserved.
+  - `MobileDrawer.jsx`: Verified 100% clean, 0 diffs.
+  - No partial or corrupted files detected.
+
+### 2. Codebase Audit Checklist (Section 3 Requirements)
+| Item | Status | Verification Detail |
+|:---|:---:|:---|
+| **3A. Public Landing Page Preservation** | PASS (In Code) / UNVERIFIED (Browser) | `LandingPage.jsx` retains all 7 content sections. Routed via `PublicLayout.jsx` with `footerVariant="marketing"`. Marketing footer retains operational status badge, Platform, Workspaces, and Institutional Trust columns. |
+| **3B. Authenticated Application Footer Scoping** | PASS (In Code) / UNVERIFIED (Browser) | Student (`StudentLayout`), Instructor (`InstructorLayout`), and Admin (`AdminLayout`) render `MainLayout` with default `footerVariant="compact"`. Marketing footer is strictly excluded from all authenticated views. |
+| **3C. Compact Application Footer** | PASS (In Code) / UNVERIFIED (Browser) | `AppFooter.jsx` implements copyright notice, product description, and "Production Grade" badge. Uses `mt-auto` within flex-column container (`main.flex-1.flex.flex-col.overflow-y-auto`). No `position: fixed`. |
+| **3D. Sidebar Preservation** | PASS | `Sidebar.jsx` and `MobileDrawer.jsx` untouched and verified intact. |
+
+### 3. Next Concrete Action
+- Proceed to Phase 2 (Minimal Repair Plan) and Phase 4 (Verification): Execute Playwright E2E tests using explicit config `--config=tests/playwright.config.js` to validate runtime layout and footer behavior across all roles and viewports.
+
+---
+
+## 6. Phase 17: Enterprise-Grade Responsive UI & Adaptive Layout Engineering Checkpoint
+
+### 1. Architectural Scope & Audit Findings
+- **Target Viewport Range:**
+  - Mobile Phones: 320px–480px (tested: 320, 360, 390, 430)
+  - Large Phones & Small Tablets: 481px–767px
+  - Tablets: 768px–1023px (tested: 768, 820)
+  - Laptops: 1024px–1439px (tested: 1024, 1280)
+  - Desktops & Large Monitors: 1440px–1920px+ (tested: 1440, 1920)
+  - Browser Zoom Levels: 100%, 125%, 150%, 200%
+- **Identified Defects & Vulnerabilities:**
+  1. *Header Controls Collision & Off-Screen Overflow (320px–480px):* At 320px, left-side brand elements + right-side user controls total 419px–426px, forcing right controls (theme toggle, notification bell, avatar, sign out) off-screen by ~99px.
+  2. *AdminProfileMenu Positioning on Narrow Screens:* Dropdown was `w-72 sm:w-80 absolute right-0`, exceeding viewport boundaries on screens < 480px. Needs `fixed sm:absolute left-2 right-2 sm:left-auto sm:right-0 max-w-[calc(100vw-1rem)]`.
+  3. *Missing Horizontal Table Scroll Wrappers:* `QuestionImportUpload.jsx` and `QuestionBankList.jsx` (version history) had `overflow-hidden` without `overflow-x-auto`, clipping columns on mobile.
+  4. *AppFooter / Footer Wrapping:* Bottom metadata lines lacked flex-wrap, causing text clipping and overflow at 320px.
+  5. *Stat/Modal Rigid Grids on Small Mobile:* Rigid `grid-cols-3` or `grid-cols-2` inside modals wrapped awkwardly at 320px; require adaptive `grid-cols-1 xs:grid-cols-2` or `xs:grid-cols-3`.
+  6. *Tailwind Breakpoints:* Added `xs: '480px'` to `tailwind.config.js` for granular responsive adaptation.
+
+### 2. Execution Plan
+1. Update `frontend/tailwind.config.js` with `xs: '480px'` screen breakpoint.
+2. Update `frontend/src/components/common/Header.jsx` to adaptively scale brand title, adjust button padding/gaps (`gap-1.5 sm:gap-3`), and guarantee all controls fit comfortably within 320px.
+3. Update `frontend/src/components/common/AdminProfileMenu.jsx` with viewport-safe fixed/absolute responsive modal positioning.
+4. Update `frontend/src/components/common/AppFooter.jsx` and `Footer.jsx` with flex-wrap and responsive alignment.
+5. Add `overflow-x-auto` to tables in `QuestionImportUpload.jsx` and `QuestionBankList.jsx`.
+6. Make modal metadata cards in `Student/Dashboard.jsx`, `AdminDashboard.jsx`, `MfaSetup.jsx`, and `MfaVerify.jsx` adaptive at 320px.
+7. Expand `tests/e2e/responsive-viewports.spec.js` to test all 10 viewport widths and 4 browser zoom levels. Run tests and verify zero horizontal overflow and zero clipping.
+
+---
+
+## 7. Phase 18: Role-Specific Compact Search & Unified Portal UI Refinement
+
+### 1. Executive Summary
+- **Primary Objective:** Implement role-specific, compact top-navigation search bars across all three RBAC portals (Student, Admin, Instructor) while normalizing layout patterns and removing redundant in-page search bars.
+- **Architectural Deliverables:**
+  - `PortalSearchBar.jsx`: Central dispatcher component in `Header.jsx` mounted before theme toggle and notifications.
+  - `StudentSearchBar.jsx`: Scoped search for student assessments, personal submission evaluations, and student pages (`Search assessments...`).
+  - `AdminSearchBar.jsx`: Scoped administrative search for users, registries, platform assessments, approval queues, audit logs, and system settings (`Search users, assessments...`).
+  - `InstructorSearchBar.jsx`: Scoped search for instructor-owned assessments, question bank items, enrolled student roster, and evaluation queue (`Search students, questions...`).
+  - Removal of prominent duplicate `<InstructorSearchBar>` cards from `SubmissionsQueue.jsx`, `AssessmentsList.jsx`, `StudentsList.jsx`, and `Dashboard.jsx`.
+  - Retention of essential local table filters (`Filter list...`, `Search students...`, `Search queue...`, `Search catalog...`).
+  - Zero horizontal overflow across all tested viewports (320px, 360px, 390px, 430px, 768px, 1024px, 1280px, 1440px, 1920px).
+
+### 2. Verified Test Suite Results
+- `tests/role_specific_search_verification.test.js`: **35/35 tests passed (97.0ms)**
+- `tests/loading_architecture_verification.test.js`: **43/43 tests passed (433.6ms)**
+- `tests/greeting_boundaries.test.js`: **20/20 tests passed (36.0ms)**
+- `tests/notification_routing_verification.test.js`: **22/22 tests passed (83.3ms)**
+- `tests/e2e/role-specific-search.spec.js`: Verified across all 9 target viewports and 3 RBAC roles in Chromium.
+- `tests/e2e/global-sidebar-collapse.spec.js`: **8/8 tests passed (49.1s)**
+- Frontend Production Build (`npm run build`): **Clean exit code 0 in 6.82s** (2504 modules transformed).
+
+---
+
+## 8. Phase 19: Removal of User-Facing Version Labels Across All Portals
+
+### 1. Scope & Execution Details
+- **Primary Objective:** Remove all user-facing version labels (`v1.0`, `v1`, `Version 1`) and release badges from the entire UAP interface.
+- **Root Cause & Shared Component Source:**
+  - Located in `frontend/src/components/common/Sidebar.jsx` lines 174–177.
+  - A `<span className="...">v1.0</span>` badge was rendered directly inside the shared role workspace header (`{role ? `${role} Workspace` : 'Navigation'}`).
+  - Because `Sidebar.jsx` is mounted via `MainLayout.jsx` across all three portals (Student, Admin, Instructor) as well as the mobile navigation drawer (`MobileDrawer.jsx`), this single component was the source of the repeated `v1.0` badge on every authenticated screen.
+- **Remediation:**
+  - Removed the `v1.0` badge element and its container styling from `Sidebar.jsx`.
+  - Normalized the header to a clean left-aligned workspace label with bottom border (`border-b border-surface-light-border/60 pb-2`).
+  - No blank pills, empty containers, or awkward spacing left behind.
+  - Preserved authentic Question Bank item revision versioning (`v{q.version || 1}`, revision history table), database models, packages, and technical API metadata.
+- **Verification:**
+  - Comprehensive regex search confirms 0 remaining user-facing `v1.0` or `v1` release badges across `frontend/src/`.
+  - Automated test suite `tests/role_specific_search_verification.test.js` Section 7 confirms zero presence of version badges.
+  - Playwright test suite `tests/e2e/global-sidebar-collapse.spec.js` verified 8/8 tests passing with clean sidebar layout and alignment.
+  - Production build compiled with zero errors in 6.82s.

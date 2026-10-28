@@ -1,0 +1,16 @@
+{
+  "uap-permission-gate": {
+    "PreToolUse": [
+      {
+        "matcher": "run_command|write_file|edit_file|read_file",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 .agents/scripts/pre_tool_guard.py",
+            "timeout": 15
+          }
+        ]
+      }
+    ]
+  }
+}
