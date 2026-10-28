@@ -23,6 +23,8 @@ const emailService = require('./email.service');
 const googleAuthService = require('./googleAuth.service');
 // Import two-factor authentication utilities (TOTP secrets, QR codes, recovery codes)
 const mfaUtil = require('../utils/mfa');
+// Import platform environment configuration
+const env = require('../config/env');
 // Import Winston application logger for system logging
 const logger = require('../utils/logger');
 // Import built-in Node.js crypto module for cryptographically secure random bytes and UUIDs
@@ -691,8 +693,14 @@ class AuthService {
       throw error;
     }
 
-    // Check if two-factor authentication is enabled for this user
-    if (user.mfaEnabled) {
+    // Check if two-factor authentication is enabled for this user (TOTP or Email OTP)
+    if (user.mfaEnabled || user.emailOtpEnabled) {
+      // If TOTP is enabled on the account but no active authenticator secret exists, block login securely
+      if (user.mfaEnabled && !user.mfaSecret) {
+        const error = new Error('MFA is required for this account, but no active authenticator has been enrolled. Please contact platform administration to reset your MFA configuration.');
+        error.statusCode = 403;
+        throw error;
+      }
       // Generate and persist short-lived MFA challenge token
       const challenge = await this._createMfaChallenge(user._id);
       // Record audit log for MFA challenge issuance
@@ -711,6 +719,62 @@ class AuthService {
         ipAddress,
       });
 
+      // Check institutional security policy for Email OTP availability
+      const setting = await SystemSetting.findOne();
+      const isEmailOtpAllowed = env.MFA_EMAIL_OTP_ENABLED && (setting ? setting.mfaEmailOtpEnabled !== false : true);
+
+      // Assemble allowed MFA methods based on enabled configurations and policy
+      const allowedMethods = [];
+      if (user.mfaEnabled && user.mfaSecret) {
+        allowedMethods.push('totp');
+      }
+      if (user.emailOtpEnabled || (user.mfaEnabled && isEmailOtpAllowed)) {
+        if (isEmailOtpAllowed) {
+          allowedMethods.push('email_otp');
+        }
+      }
+      if (user.mfaEnabled && user.mfaRecoveryCodes && user.mfaRecoveryCodes.length > 0) {
+        allowedMethods.push('recovery_code');
+      }
+      if (allowedMethods.length === 0) {
+        allowedMethods.push('totp');
+      }
+
+      // Automatically dispatch email OTP if user has email OTP enabled and authorized
+      let emailOtpSent = false;
+      if (user.emailOtpEnabled && isEmailOtpAllowed) {
+        try {
+          const otpCode = mfaUtil.generateEmailOtp();
+          const hashedCode = mfaUtil.hashEmailOtp(otpCode);
+          const expiryMinutes = setting?.mfaEmailOtpExpiryMinutes || env.MFA_EMAIL_OTP_EXPIRY_MINUTES || 5;
+          const emailOtpExpiresAt = new Date(Date.now() + expiryMinutes * 60 * 1000);
+
+          const challengeHash = mfaUtil.hashMfaChallenge(challenge.challengeId);
+          await MfaChallenge.updateOne(
+            { challengeHash },
+            {
+              $set: {
+                emailOtpHash: hashedCode,
+                emailOtpExpiresAt,
+                emailOtpSentAt: new Date(),
+                emailOtpResendCount: 1,
+              },
+            }
+          );
+
+          const mailRes = await emailService.sendMfaEmailOtp({
+            to: user.email,
+            name: user.name,
+            code: otpCode,
+            expiryMinutes,
+          });
+          if (mailRes && mailRes.success) {
+            emailOtpSent = true;
+          }
+        } catch (err) {
+          console.error('[AuthService] Automatic email OTP dispatch error:', err.message);
+        }
+      }
 
       // Return challenge response prompting client for second factor code
       return {
@@ -727,6 +791,12 @@ class AuthService {
           // User role
           role: user.role,
         },
+        // Allowed MFA verification methods per institutional policy
+        allowedMethods,
+        // Default verification method
+        defaultMethod: user.emailOtpEnabled && !user.mfaEnabled ? 'email_otp' : 'totp',
+        maskedEmail: mfaUtil.maskEmail(user.email),
+        emailOtpSent,
       };
     }
 
@@ -1347,8 +1417,14 @@ class AuthService {
     }
 
     // Active user: issue application tokens (Part 9)
-    // Check if two-factor authentication is active on this account
-    if (user.mfaEnabled) {
+    // Check if two-factor authentication is active on this account (TOTP or Email OTP)
+    if (user.mfaEnabled || user.emailOtpEnabled) {
+      // If TOTP is enabled on the account but no active authenticator secret exists, block login securely
+      if (user.mfaEnabled && !user.mfaSecret) {
+        const error = new Error('MFA is required for this account, but no active authenticator has been enrolled. Please contact platform administration to reset your MFA configuration.');
+        error.statusCode = 403;
+        throw error;
+      }
       // Issue short-lived MFA challenge token
       const challenge = await this._createMfaChallenge(user._id);
       // Record audit log for MFA challenge issuance
@@ -1367,6 +1443,62 @@ class AuthService {
         ipAddress,
       });
 
+      // Check institutional security policy for Email OTP availability
+      const setting = await SystemSetting.findOne();
+      const isEmailOtpAllowed = env.MFA_EMAIL_OTP_ENABLED && (setting ? setting.mfaEmailOtpEnabled !== false : true);
+
+      // Assemble allowed MFA methods based on enabled configurations and policy
+      const allowedMethods = [];
+      if (user.mfaEnabled && user.mfaSecret) {
+        allowedMethods.push('totp');
+      }
+      if (user.emailOtpEnabled || (user.mfaEnabled && isEmailOtpAllowed)) {
+        if (isEmailOtpAllowed) {
+          allowedMethods.push('email_otp');
+        }
+      }
+      if (user.mfaEnabled && user.mfaRecoveryCodes && user.mfaRecoveryCodes.length > 0) {
+        allowedMethods.push('recovery_code');
+      }
+      if (allowedMethods.length === 0) {
+        allowedMethods.push('totp');
+      }
+
+      // Automatically dispatch email OTP if user has email OTP enabled and authorized
+      let emailOtpSent = false;
+      if (user.emailOtpEnabled && isEmailOtpAllowed) {
+        try {
+          const otpCode = mfaUtil.generateEmailOtp();
+          const hashedCode = mfaUtil.hashEmailOtp(otpCode);
+          const expiryMinutes = setting?.mfaEmailOtpExpiryMinutes || env.MFA_EMAIL_OTP_EXPIRY_MINUTES || 5;
+          const emailOtpExpiresAt = new Date(Date.now() + expiryMinutes * 60 * 1000);
+
+          const challengeHash = mfaUtil.hashMfaChallenge(challenge.challengeId);
+          await MfaChallenge.updateOne(
+            { challengeHash },
+            {
+              $set: {
+                emailOtpHash: hashedCode,
+                emailOtpExpiresAt,
+                emailOtpSentAt: new Date(),
+                emailOtpResendCount: 1,
+              },
+            }
+          );
+
+          const mailRes = await emailService.sendMfaEmailOtp({
+            to: user.email,
+            name: user.name,
+            code: otpCode,
+            expiryMinutes,
+          });
+          if (mailRes && mailRes.success) {
+            emailOtpSent = true;
+          }
+        } catch (err) {
+          console.error('[AuthService] Automatic email OTP dispatch error:', err.message);
+        }
+      }
 
       // Return challenge response prompting client for second factor code
       return {
@@ -1385,6 +1517,12 @@ class AuthService {
           // User role
           role: user.role,
         },
+        // Allowed MFA verification methods per institutional policy
+        allowedMethods,
+        // Default verification method
+        defaultMethod: user.emailOtpEnabled && !user.mfaEnabled ? 'email_otp' : 'totp',
+        maskedEmail: mfaUtil.maskEmail(user.email),
+        emailOtpSent,
       };
     }
 
@@ -1462,6 +1600,8 @@ class AuthService {
     const encryptedSecret = mfaUtil.encryptSecret(secret);
     // Store encrypted pending secret on user document
     user.mfaPendingSecret = encryptedSecret;
+    // Set 10-minute expiration window for pending enrollment session
+    user.mfaPendingExpiresAt = new Date(Date.now() + 10 * 60 * 1000);
     // Save pending MFA secret to database
     await user.save();
 
@@ -1484,7 +1624,7 @@ class AuthService {
       details: { email: user.email },
     });
 
-    // Return secret, otpauth URI, and QR code to client
+    // Return secret, otpauth URI, QR code, and expiry window to client
     return {
       // Plaintext secret string for manual entry
       secret,
@@ -1492,6 +1632,8 @@ class AuthService {
       otpauthUri,
       // Base64 QR code image data URL
       qrCode,
+      // Expiration window in minutes
+      expiresInMinutes: 10,
     };
   }
 
@@ -1519,6 +1661,16 @@ class AuthService {
       throw error;
     }
 
+    // Check if the pending MFA enrollment session has expired
+    if (user.mfaPendingExpiresAt && user.mfaPendingExpiresAt < new Date()) {
+      user.mfaPendingSecret = null;
+      user.mfaPendingExpiresAt = null;
+      await user.save();
+      const error = new Error('MFA enrollment session has expired. Please initiate setup again.');
+      error.statusCode = 400;
+      throw error;
+    }
+
     // Decrypt the stored pending TOTP secret
     const decryptedSecret = mfaUtil.decryptSecret(user.mfaPendingSecret);
     // Verify the provided code against the decrypted TOTP secret
@@ -1535,8 +1687,9 @@ class AuthService {
 
     // Promote pending secret to active secret
     user.mfaSecret = user.mfaPendingSecret;
-    // Clear pending secret field
+    // Clear pending secret and expiry fields
     user.mfaPendingSecret = null;
+    user.mfaPendingExpiresAt = null;
     // Set MFA enabled flag to true
     user.mfaEnabled = true;
     // Record MFA enrollment timestamp
@@ -2152,6 +2305,311 @@ class AuthService {
     };
   }
 
+  // Method to request and dispatch a single-use 6-digit Email OTP for an active MFA challenge
+  async sendMfaEmailOtp({ mfaToken, ipAddress = null }) {
+    if (!mfaToken) {
+      const error = new Error('MFA challenge token is required');
+      error.statusCode = 400;
+      throw error;
+    }
+
+    let decoded;
+    try {
+      decoded = verifyMfaChallengeToken(mfaToken);
+    } catch {
+      const error = new Error('Invalid or expired MFA challenge token');
+      error.statusCode = 401;
+      throw error;
+    }
+
+    // Institutional security policy check
+    const setting = await SystemSetting.findOne();
+    const isEmailOtpAllowed = env.MFA_EMAIL_OTP_ENABLED && (setting ? setting.mfaEmailOtpEnabled !== false : true);
+    if (!isEmailOtpAllowed) {
+      const error = new Error('Email OTP is not authorized by institutional security policy');
+      error.statusCode = 403;
+      throw error;
+    }
+
+    const challengeHash = mfaUtil.hashMfaChallenge(decoded.jti);
+    const challenge = await MfaChallenge.findOne({ challengeHash });
+    if (!challenge || challenge.userId.toString() !== decoded.sub) {
+      const error = new Error('Invalid MFA challenge');
+      error.statusCode = 401;
+      throw error;
+    }
+
+    // Verify challenge hash constant-time
+    const bufStored = Buffer.from(challenge.challengeHash, 'hex');
+    const bufCandidate = Buffer.from(challengeHash, 'hex');
+    if (bufStored.length !== bufCandidate.length || !crypto.timingSafeEqual(bufStored, bufCandidate)) {
+      const error = new Error('Invalid MFA challenge');
+      error.statusCode = 401;
+      throw error;
+    }
+
+    if (challenge.expiresAt < new Date()) {
+      const error = new Error('MFA challenge has expired. Please sign in again.');
+      error.statusCode = 401;
+      throw error;
+    }
+
+    if (challenge.consumed) {
+      const error = new Error('MFA challenge has already been used. Please sign in again.');
+      error.statusCode = 401;
+      throw error;
+    }
+
+    if (challenge.attempts >= challenge.maxAttempts || (challenge.emailOtpAttempts && challenge.emailOtpAttempts >= (challenge.emailOtpMaxAttempts || 5))) {
+      const error = new Error('Maximum MFA verification attempts exceeded. Please sign in again.');
+      error.statusCode = 401;
+      throw error;
+    }
+
+    // Resend throttling & rate-limiting checks
+    const cooldownSeconds = setting?.mfaEmailOtpResendCooldownSeconds || env.MFA_EMAIL_OTP_RESEND_COOLDOWN_SECONDS || 60;
+    if (challenge.emailOtpSentAt) {
+      const elapsedMs = Date.now() - new Date(challenge.emailOtpSentAt).getTime();
+      const cooldownMs = cooldownSeconds * 1000;
+      if (elapsedMs < cooldownMs) {
+        const remainingSeconds = Math.ceil((cooldownMs - elapsedMs) / 1000);
+        const error = new Error(`Please wait ${remainingSeconds} seconds before requesting a new verification code.`);
+        error.statusCode = 429;
+        throw error;
+      }
+    }
+
+    const maxResends = setting?.mfaEmailOtpMaxResends || env.MFA_EMAIL_OTP_MAX_RESENDS || 3;
+    if ((challenge.emailOtpResendCount || 0) >= maxResends) {
+      const error = new Error('Maximum email verification code requests exceeded for this session. Please log in again.');
+      error.statusCode = 429;
+      throw error;
+    }
+
+    const user = await User.findById(decoded.sub);
+    if (!user || user.status !== 'active' || !user.isActive) {
+      const error = new Error('Account is inactive, suspended, or not found.');
+      error.statusCode = 403;
+      throw error;
+    }
+
+    if (!user.mfaEnabled && !user.emailOtpEnabled) {
+      const error = new Error('MFA is not enabled for this account');
+      error.statusCode = 400;
+      throw error;
+    }
+
+    // Generate cryptographically secure 6-digit OTP
+    const code = mfaUtil.generateEmailOtp();
+    // HMAC-SHA256 hash the OTP code before database persistence
+    const hashedCode = mfaUtil.hashEmailOtp(code);
+    const expiryMinutes = setting?.mfaEmailOtpExpiryMinutes || env.MFA_EMAIL_OTP_EXPIRY_MINUTES || 5;
+    const emailOtpExpiresAt = new Date(Date.now() + expiryMinutes * 60 * 1000);
+
+    // Update challenge document: overwrite previous code (invalidation) and increment resend count
+    challenge.emailOtpHash = hashedCode;
+    challenge.emailOtpExpiresAt = emailOtpExpiresAt;
+    challenge.emailOtpSentAt = new Date();
+    challenge.emailOtpResendCount = (challenge.emailOtpResendCount || 0) + 1;
+    await challenge.save();
+
+    // Dispatch email
+    try {
+      await emailService.sendMfaEmailOtp({
+        to: user.email,
+        name: user.name,
+        code,
+        expiryMinutes,
+      });
+    } catch (mailErr) {
+      // Revert hash on mail error so user can retry safely
+      challenge.emailOtpHash = null;
+      challenge.emailOtpExpiresAt = null;
+      await challenge.save();
+      const error = new Error('Failed to deliver verification email. Please try again or use your authenticator app.');
+      error.statusCode = 500;
+      throw error;
+    }
+
+    // Record audit log (mask email, NEVER log OTP code)
+    await AuditLog.create({
+      userId: user._id,
+      action: 'MFA_EMAIL_OTP_DISPATCHED',
+      entityType: 'User',
+      entityId: user._id.toString(),
+      details: {
+        email: mfaUtil.maskEmail(user.email),
+        resendCount: challenge.emailOtpResendCount,
+      },
+      ipAddress,
+    });
+
+    return {
+      message: 'A verification code has been sent to your email.',
+      maskedEmail: mfaUtil.maskEmail(user.email),
+      expiresIn: expiryMinutes * 60,
+      resendCooldown: cooldownSeconds,
+    };
+  }
+
+  // Method to verify single-use 6-digit Email OTP and establish authenticated session
+  async verifyMfaEmailOtp({ mfaToken, code, ipAddress = null }) {
+    if (!mfaToken) {
+      const error = new Error('MFA challenge token is required');
+      error.statusCode = 400;
+      throw error;
+    }
+    if (!code) {
+      const error = new Error('Verification code is required');
+      error.statusCode = 400;
+      throw error;
+    }
+
+    const cleanCode = String(code).trim();
+    if (!/^\d{6}$/.test(cleanCode)) {
+      const error = new Error('Verification code must be exactly 6 digits');
+      error.statusCode = 400;
+      throw error;
+    }
+
+    let decoded;
+    try {
+      decoded = verifyMfaChallengeToken(mfaToken);
+    } catch {
+      const error = new Error('Invalid or expired MFA challenge token');
+      error.statusCode = 401;
+      throw error;
+    }
+
+    // Institutional security policy check
+    const setting = await SystemSetting.findOne();
+    const isEmailOtpAllowed = env.MFA_EMAIL_OTP_ENABLED && (setting ? setting.mfaEmailOtpEnabled !== false : true);
+    if (!isEmailOtpAllowed) {
+      const error = new Error('Email OTP is not authorized by institutional security policy');
+      error.statusCode = 403;
+      throw error;
+    }
+
+    const challengeHash = mfaUtil.hashMfaChallenge(decoded.jti);
+    const challenge = await MfaChallenge.findOne({ challengeHash });
+    if (!challenge || challenge.userId.toString() !== decoded.sub) {
+      const error = new Error('Invalid MFA challenge');
+      error.statusCode = 401;
+      throw error;
+    }
+
+    // Constant-time challenge verification
+    const bufStored = Buffer.from(challenge.challengeHash, 'hex');
+    const bufCandidate = Buffer.from(challengeHash, 'hex');
+    if (bufStored.length !== bufCandidate.length || !crypto.timingSafeEqual(bufStored, bufCandidate)) {
+      const error = new Error('Invalid MFA challenge');
+      error.statusCode = 401;
+      throw error;
+    }
+
+    if (challenge.expiresAt < new Date()) {
+      const error = new Error('MFA challenge has expired. Please sign in again.');
+      error.statusCode = 401;
+      throw error;
+    }
+
+    if (challenge.consumed) {
+      const error = new Error('MFA challenge has already been used. Please sign in again.');
+      error.statusCode = 401;
+      throw error;
+    }
+
+    if (challenge.attempts >= challenge.maxAttempts || (challenge.emailOtpAttempts && challenge.emailOtpAttempts >= (challenge.emailOtpMaxAttempts || 5))) {
+      const error = new Error('Maximum MFA verification attempts exceeded. Please sign in again.');
+      error.statusCode = 401;
+      throw error;
+    }
+
+    if (!challenge.emailOtpHash) {
+      const error = new Error('No email verification code has been requested. Please request a code first.');
+      error.statusCode = 400;
+      throw error;
+    }
+
+    if (challenge.emailOtpExpiresAt && challenge.emailOtpExpiresAt < new Date()) {
+      const error = new Error('Email verification code has expired. Please request a new code.');
+      error.statusCode = 401;
+      throw error;
+    }
+
+    // Verify OTP code constant-time against stored HMAC hash
+    const isValid = mfaUtil.verifyEmailOtp(cleanCode, challenge.emailOtpHash);
+    if (!isValid) {
+      challenge.attempts = (challenge.attempts || 0) + 1;
+      challenge.emailOtpAttempts = (challenge.emailOtpAttempts || 0) + 1;
+      if (challenge.attempts >= challenge.maxAttempts || challenge.emailOtpAttempts >= (challenge.emailOtpMaxAttempts || 5)) {
+        challenge.consumed = true;
+      }
+      await challenge.save();
+
+      await AuditLog.create({
+        userId: decoded.sub,
+        action: 'USER_LOGIN_MFA_FAILED',
+        entityType: 'User',
+        entityId: decoded.sub,
+        details: { method: 'email_otp', attempts: challenge.attempts },
+        ipAddress,
+      });
+
+      const remaining = Math.max(0, challenge.maxAttempts - challenge.attempts);
+      const error = new Error(
+        remaining > 0
+          ? `Invalid verification code. ${remaining} attempts remaining.`
+          : 'Maximum MFA verification attempts exceeded. Please sign in again.'
+      );
+      error.statusCode = 401;
+      throw error;
+    }
+
+    // Mark challenge consumed atomically (single use)
+    challenge.consumed = true;
+    challenge.consumedAt = new Date();
+    challenge.emailOtpHash = null;
+    await challenge.save();
+
+    const user = await User.findById(decoded.sub);
+    if (!user || user.status !== 'active' || !user.isActive) {
+      const error = new Error('Account is inactive, suspended, or revoked.');
+      error.statusCode = 403;
+      throw error;
+    }
+
+    user.lastLoginAt = new Date();
+    user.mfaLastUsedAt = new Date();
+    await user.save();
+
+    await AuditLog.create({
+      userId: user._id,
+      action: 'USER_LOGIN_MFA_SUCCESS',
+      entityType: 'User',
+      entityId: user._id.toString(),
+      details: { email: user.email, role: user.role, method: 'email_otp' },
+      ipAddress,
+    });
+
+    const tokenPayload = {
+      id: user._id.toString(),
+      role: user.role,
+      email: user.email,
+      tokenVersion: user.tokenVersion || 0,
+    };
+    const accessToken = generateAccessToken(tokenPayload);
+    const refreshToken = generateRefreshToken(tokenPayload);
+
+    await this._createSession(user, refreshToken, ipAddress);
+
+    return {
+      user: this._formatUserProfile(user),
+      accessToken,
+      refreshToken,
+    };
+  }
+
   // Method to disable two-factor authentication after verifying password or TOTP code
   async disableMfa({ userId, password, code, ipAddress = null }) {
     // Find user document by primary key ID
@@ -2418,14 +2876,346 @@ class AuthService {
     };
   }
 
+  // Method to initiate Email OTP enrollment for an authenticated user with re-verification
+  async initiateEmailOtpSetup(userId, { password, code } = {}) {
+    const user = await User.findById(userId);
+    if (!user || user.status !== 'active' || !user.isActive) {
+      const error = new Error('Active account required for Email OTP setup');
+      error.statusCode = 403;
+      throw error;
+    }
+
+    // Require password or credential re-verification
+    if (user.password) {
+      if (!password) {
+        const error = new Error('Current password is required to enable Email OTP');
+        error.statusCode = 400;
+        throw error;
+      }
+      const isMatch = await comparePassword(password, user.password);
+      if (!isMatch) {
+        const error = new Error('Invalid account password. Please re-verify your password.');
+        error.statusCode = 400;
+        throw error;
+      }
+    } else if (user.authProvider === 'google' && user.mfaEnabled && user.mfaSecret) {
+      if (!code) {
+        const error = new Error('TOTP code is required to enable Email OTP for Google accounts');
+        error.statusCode = 400;
+        throw error;
+      }
+      const secret = mfaUtil.decryptSecret(user.mfaSecret);
+      if (!mfaUtil.verifyTotp(code, secret)) {
+        const error = new Error('Invalid TOTP verification code');
+        error.statusCode = 400;
+        throw error;
+      }
+    }
+
+    // Check resend cooldown (60 seconds)
+    if (user.emailOtpPendingSentAt) {
+      const elapsedMs = Date.now() - new Date(user.emailOtpPendingSentAt).getTime();
+      if (elapsedMs < 60000) {
+        const remainingSeconds = Math.ceil((60000 - elapsedMs) / 1000);
+        const error = new Error(`Please wait ${remainingSeconds} seconds before requesting a new verification code.`);
+        error.statusCode = 429;
+        throw error;
+      }
+    }
+
+    // Check resend limit (3 resends) within active unexpired setup session
+    if (user.emailOtpPendingExpiresAt && user.emailOtpPendingExpiresAt > new Date()) {
+      if ((user.emailOtpPendingResendCount || 0) >= 3) {
+        const error = new Error('Maximum email verification code requests exceeded for this setup session. Please try again later.');
+        error.statusCode = 429;
+        throw error;
+      }
+    } else {
+      user.emailOtpPendingResendCount = 0;
+    }
+
+    // Generate cryptographically secure 6-digit OTP and HMAC hash
+    const otpCode = mfaUtil.generateEmailOtp();
+    const hashedCode = mfaUtil.hashEmailOtp(otpCode);
+    const expiryMinutes = 5;
+
+    user.emailOtpPendingHash = hashedCode;
+    user.emailOtpPendingExpiresAt = new Date(Date.now() + expiryMinutes * 60 * 1000);
+    user.emailOtpPendingSentAt = new Date();
+    user.emailOtpPendingAttempts = 0;
+    user.emailOtpPendingResendCount = (user.emailOtpPendingResendCount || 0) + 1;
+    await user.save();
+
+    // Dispatch email
+    try {
+      const emailResult = await emailService.sendMfaEmailOtp({
+        to: user.email,
+        name: user.name,
+        code: otpCode,
+        expiryMinutes,
+      });
+
+      if (!emailResult || !emailResult.success) {
+        throw new Error(emailResult?.error || 'Email dispatch failed');
+      }
+    } catch (err) {
+      user.emailOtpPendingHash = null;
+      user.emailOtpPendingExpiresAt = null;
+      user.emailOtpPendingSentAt = null;
+      if (user.emailOtpPendingResendCount > 0) {
+        user.emailOtpPendingResendCount -= 1;
+      }
+      await user.save();
+      const error = new Error(`Email delivery failed: ${err.message}`);
+      error.statusCode = 502;
+      throw error;
+    }
+
+    await AuditLog.create({
+      userId: user._id,
+      action: 'MFA_EMAIL_OTP_SETUP_INITIATED',
+      entityType: 'User',
+      entityId: user._id.toString(),
+      details: { email: user.email },
+    });
+
+    return {
+      message: `Verification code sent to ${mfaUtil.maskEmail(user.email)}`,
+      maskedEmail: mfaUtil.maskEmail(user.email),
+      resendCooldown: 60,
+    };
+  }
+
+  // Method to confirm and activate Email OTP by verifying the 6-digit code
+  async confirmEmailOtpSetup(userId, code) {
+    const user = await User.findById(userId);
+    if (!user || user.status !== 'active' || !user.isActive) {
+      const error = new Error('Active account required for Email OTP setup');
+      error.statusCode = 403;
+      throw error;
+    }
+
+    if (!user.emailOtpPendingHash) {
+      const error = new Error('No pending Email OTP setup found. Please initiate setup first.');
+      error.statusCode = 400;
+      throw error;
+    }
+
+    if (user.emailOtpPendingExpiresAt && user.emailOtpPendingExpiresAt < new Date()) {
+      user.emailOtpPendingHash = null;
+      user.emailOtpPendingExpiresAt = null;
+      user.emailOtpPendingSentAt = null;
+      await user.save();
+      const error = new Error('Email verification code has expired. Please initiate setup again.');
+      error.statusCode = 400;
+      throw error;
+    }
+
+    if ((user.emailOtpPendingAttempts || 0) >= 5) {
+      user.emailOtpPendingHash = null;
+      user.emailOtpPendingExpiresAt = null;
+      user.emailOtpPendingSentAt = null;
+      await user.save();
+      const error = new Error('Maximum verification attempts exceeded. Please initiate setup again.');
+      error.statusCode = 400;
+      throw error;
+    }
+
+    const isValid = mfaUtil.verifyEmailOtp(code, user.emailOtpPendingHash);
+    if (!isValid) {
+      user.emailOtpPendingAttempts = (user.emailOtpPendingAttempts || 0) + 1;
+      if (user.emailOtpPendingAttempts >= 5) {
+        user.emailOtpPendingHash = null;
+        user.emailOtpPendingExpiresAt = null;
+        user.emailOtpPendingSentAt = null;
+      }
+      await user.save();
+
+      await AuditLog.create({
+        userId: user._id,
+        action: 'MFA_EMAIL_OTP_SETUP_FAILED',
+        entityType: 'User',
+        entityId: user._id.toString(),
+        details: { attempts: user.emailOtpPendingAttempts },
+      });
+
+      const remaining = Math.max(0, 5 - user.emailOtpPendingAttempts);
+      const error = new Error(
+        remaining > 0
+          ? `Invalid verification code. ${remaining} attempt(s) remaining.`
+          : 'Maximum verification attempts exceeded. Please initiate setup again.'
+      );
+      error.statusCode = 400;
+      throw error;
+    }
+
+    // Successfully verified! Enable email OTP independently
+    user.emailOtpEnabled = true;
+    user.emailOtpEnrolledAt = new Date();
+    user.emailOtpPendingHash = null;
+    user.emailOtpPendingExpiresAt = null;
+    user.emailOtpPendingSentAt = null;
+    user.emailOtpPendingAttempts = 0;
+    user.emailOtpPendingResendCount = 0;
+    await user.save();
+
+    await AuditLog.create({
+      userId: user._id,
+      action: 'MFA_EMAIL_OTP_ENABLED',
+      entityType: 'User',
+      entityId: user._id.toString(),
+      details: { email: user.email },
+    });
+
+    return {
+      message: 'Email OTP has been enabled successfully.',
+      emailOtpEnabled: true,
+      user: user.toJSON(),
+    };
+  }
+
+  // Method to disable Email OTP independently without disabling TOTP
+  async disableEmailOtp({ userId, password, code, ipAddress = null }) {
+    const user = await User.findById(userId);
+    if (!user) {
+      const error = new Error('User not found');
+      error.statusCode = 404;
+      throw error;
+    }
+
+    if (!user.emailOtpEnabled) {
+      const error = new Error('Email OTP is not enabled for this account');
+      error.statusCode = 400;
+      throw error;
+    }
+
+    // Mandatory student MFA check: student cannot disable their only MFA factor
+    if (user.role === 'student' && !user.mfaEnabled) {
+      const error = new Error('MFA is mandatory for student accounts. You must have Authenticator App active before disabling Email OTP.');
+      error.statusCode = 403;
+      throw error;
+    }
+
+    // Require password or credential re-verification
+    if (user.password) {
+      if (!password) {
+        const error = new Error('Current password is required to disable Email OTP');
+        error.statusCode = 400;
+        throw error;
+      }
+      const isMatch = await comparePassword(password, user.password);
+      if (!isMatch) {
+        const error = new Error('Invalid account password');
+        error.statusCode = 401;
+        throw error;
+      }
+    } else if (user.authProvider === 'google' && user.mfaEnabled && user.mfaSecret) {
+      if (!code) {
+        const error = new Error('TOTP code is required to disable Email OTP for Google accounts');
+        error.statusCode = 400;
+        throw error;
+      }
+      const secret = mfaUtil.decryptSecret(user.mfaSecret);
+      if (!mfaUtil.verifyTotp(code, secret)) {
+        const error = new Error('Invalid TOTP verification code');
+        error.statusCode = 401;
+        throw error;
+      }
+    }
+
+    user.emailOtpEnabled = false;
+    user.emailOtpEnrolledAt = null;
+    user.emailOtpPendingHash = null;
+    user.emailOtpPendingExpiresAt = null;
+    user.emailOtpPendingSentAt = null;
+    await user.save();
+
+    await AuditLog.create({
+      userId: user._id,
+      action: 'MFA_EMAIL_OTP_DISABLED',
+      entityType: 'User',
+      entityId: user._id.toString(),
+      details: { email: user.email },
+      ipAddress,
+    });
+
+    return {
+      message: 'Email OTP has been disabled successfully.',
+      emailOtpEnabled: false,
+      user: user.toJSON(),
+    };
+  }
+
+  // Method to dispatch a test verification code to the registered email address
+  async sendEmailOtpTest({ userId, ipAddress = null }) {
+    const user = await User.findById(userId);
+    if (!user || user.status !== 'active' || !user.isActive) {
+      const error = new Error('Active account required to send test code');
+      error.statusCode = 403;
+      throw error;
+    }
+
+    if (!user.emailOtpEnabled) {
+      const error = new Error('Email OTP must be enabled before sending a test code');
+      error.statusCode = 400;
+      throw error;
+    }
+
+    // Cooldown check (60 seconds)
+    if (user.emailOtpPendingSentAt) {
+      const elapsedMs = Date.now() - new Date(user.emailOtpPendingSentAt).getTime();
+      if (elapsedMs < 60000) {
+        const remainingSeconds = Math.ceil((60000 - elapsedMs) / 1000);
+        const error = new Error(`Please wait ${remainingSeconds} seconds before sending another test code.`);
+        error.statusCode = 429;
+        throw error;
+      }
+    }
+
+    const testCode = mfaUtil.generateEmailOtp();
+    user.emailOtpPendingSentAt = new Date();
+    await user.save();
+
+    try {
+      const emailResult = await emailService.sendMfaEmailOtp({
+        to: user.email,
+        name: user.name,
+        code: testCode,
+        expiryMinutes: 5,
+      });
+
+      if (!emailResult || !emailResult.success) {
+        throw new Error(emailResult?.error || 'Email dispatch failed');
+      }
+    } catch (err) {
+      const error = new Error(`Email delivery failed: ${err.message}`);
+      error.statusCode = 502;
+      throw error;
+    }
+
+    await AuditLog.create({
+      userId: user._id,
+      action: 'MFA_EMAIL_OTP_TEST_SENT',
+      entityType: 'User',
+      entityId: user._id.toString(),
+      details: { email: user.email },
+      ipAddress,
+    });
+
+    return {
+      message: `Test verification code successfully delivered to ${mfaUtil.maskEmail(user.email)}`,
+      maskedEmail: mfaUtil.maskEmail(user.email),
+    };
+  }
+
   // Method to issue new access token using a valid refresh token with atomic CAS rotation and recovery
   async refreshAccessToken({ refreshToken, ipAddress = null, userAgent = null }) {
     // Validate presence of refresh token
     if (!refreshToken) {
-      // Create bad request error for missing refresh token
+      // Create unauthorized error for missing refresh token
       const error = new Error('Refresh token is required');
-      // Set HTTP status code 400 Bad Request
-      error.statusCode = 400;
+      // Set HTTP status code 401 Unauthorized (expected unauthenticated state)
+      error.statusCode = 401;
       // Throw the error
       throw error;
     }

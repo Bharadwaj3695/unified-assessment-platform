@@ -1,5 +1,35 @@
 // Import Mongoose ODM library for schema definition and database interactions
 const mongoose = require('mongoose');
+const { DEFAULT_GRADING_SCHEME } = require('../utils/gradingScheme');
+
+// Sub-schema representing individual letter grade boundary bands
+const gradeBandSchema = new mongoose.Schema(
+  {
+    grade: {
+      type: String,
+      required: true,
+      trim: true,
+    },
+    minPercentage: {
+      type: Number,
+      required: true,
+      min: 0,
+      max: 100,
+    },
+    maxPercentage: {
+      type: Number,
+      required: true,
+      min: 0,
+      max: 100,
+    },
+    label: {
+      type: String,
+      default: '',
+      trim: true,
+    },
+  },
+  { _id: false }
+);
 
 // Mongoose schema definition representing an institutional exam, test, or quiz
 const assessmentSchema = new mongoose.Schema(
@@ -167,6 +197,50 @@ const assessmentSchema = new mongoose.Schema(
         default: false,
       },
     },
+    // Certification and grading scheme configuration (Phase 2)
+    certification: {
+      // Toggle indicating whether successful completion qualifies for a certificate award
+      enabled: {
+        type: Boolean,
+        default: false,
+      },
+      // Percentage required to qualify for certificate issuance (defaults to 50%)
+      passingPercentage: {
+        type: Number,
+        default: 50,
+        min: [0, 'Passing percentage cannot be negative'],
+        max: [100, 'Passing percentage cannot exceed 100'],
+      },
+      // Configurable grading scheme with contiguous non-overlapping bands
+      gradingScheme: {
+        type: [gradeBandSchema],
+        default: () => DEFAULT_GRADING_SCHEME.map((b) => ({ ...b })),
+      },
+      // Optional reference to an approved institutional certificate template
+      templateId: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'CertificateTemplate',
+        default: null,
+      },
+      // Optional assessment-specific certificate title override
+      certificateTitle: {
+        type: String,
+        trim: true,
+        default: '',
+      },
+      // Authorized signatory name displayed on issued certificate
+      signatoryName: {
+        type: String,
+        trim: true,
+        default: '',
+      },
+      // Authorized signatory title displayed on issued certificate
+      signatoryTitle: {
+        type: String,
+        trim: true,
+        default: 'Dean of Academic Affairs',
+      },
+    },
   },
   {
     // Automatically manage createdAt and updatedAt timestamps
@@ -180,6 +254,7 @@ const assessmentSchema = new mongoose.Schema(
 
 // Phase 6 Category analytics index optimizing aggregated queries by category and status
 assessmentSchema.index({ category: 1, status: 1 });
+assessmentSchema.index({ 'certification.enabled': 1 });
 
 // Virtual relationship populating associated Question records referencing this assessment
 assessmentSchema.virtual('questions', {

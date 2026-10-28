@@ -836,6 +836,52 @@ Unified Assessment Platform
   // End sendPasswordResetEmail method
   }
 
+  // 10. Multi-Factor Authentication Email OTP
+  // Dispatches an ephemeral 6-digit verification code to user's registered email address for two-factor login
+  async sendMfaEmailOtp({ to, name, code, expiryMinutes = 5 }) {
+    // Generate styled HTML email notification with distinct verification code display card
+    const html = this.buildHtmlTemplate({
+      title: 'Your Verification Code',
+      recipientName: name || 'there',
+      messageHtml: `
+        <p>A sign-in attempt requires your secondary verification code.</p>
+        <p>Enter the 6-digit code below to complete your login to the <strong>Unified Assessment Platform</strong>:</p>
+        <div style="margin: 24px 0; text-align: center;">
+          <div style="display: inline-block; padding: 16px 32px; background-color: #f1f5f9; border: 2px dashed #3D8A78; border-radius: 12px; font-family: monospace, Courier, sans-serif; font-size: 32px; font-weight: 700; letter-spacing: 8px; color: #0f172a;">
+            ${code}
+          </div>
+        </div>
+        <p style="font-size: 13px; color: #64748b;">
+          This code is single-use and will expire in <strong>${expiryMinutes} minutes</strong>.
+        </p>
+        <div style="margin-top: 20px; padding: 12px 16px; background-color: #fef2f2; border-left: 4px solid #ef4444; border-radius: 6px; font-size: 13px; color: #991b1b;">
+          <strong>Security Warning:</strong> Never share this code with anyone. Platform administrators and instructors will never ask for your verification code. If you did not initiate this login request, please secure your account immediately.
+        </div>
+      `,
+    });
+
+    const text = `
+Hello ${name || 'there'},
+
+Your Unified Assessment Platform verification code is: ${code}
+
+This code is valid for ${expiryMinutes} minutes and can only be used once.
+
+Security Notice: Never share this code with anyone. If you did not attempt to sign in, please secure your account credentials immediately.
+
+Regards,
+Unified Assessment Platform
+    `.trim();
+
+    return this.sendMail({
+      to,
+      subject: 'Your Two-Factor Verification Code — Unified Assessment Platform',
+      text,
+      html,
+    });
+  // End sendMfaEmailOtp method
+  }
+
   // Test Inspection Helpers
   // Retrieve list of all dispatched email records stored in memory
   getSentEmails() {

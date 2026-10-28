@@ -1,6 +1,7 @@
 const mongoose = require('mongoose');
 const { Assessment, Question, User, Notification } = require('../models');
 const emailService = require('./email.service');
+const { validateGradingScheme, DEFAULT_GRADING_SCHEME } = require('../utils/gradingScheme');
 
 class AssessmentService {
   async validateAssignedStudents(assignedStudents) {
@@ -48,7 +49,42 @@ class AssessmentService {
       proctoringEnabled = false,
       cameraRequired = false,
       randomization = { enabled: false },
+      certification,
     } = assessmentData;
+
+    let validatedCertification = { enabled: false };
+    if (certification && typeof certification === 'object') {
+      const enabled = Boolean(certification.enabled);
+      const passingPercentage = certification.passingPercentage !== undefined
+        ? Number(certification.passingPercentage)
+        : 50;
+      if (isNaN(passingPercentage) || passingPercentage < 0 || passingPercentage > 100) {
+        const error = new Error('Certification passing percentage must be between 0 and 100');
+        error.statusCode = 400;
+        throw error;
+      }
+
+      let gradingScheme = DEFAULT_GRADING_SCHEME;
+      if (certification.gradingScheme && Array.isArray(certification.gradingScheme)) {
+        const schemeVal = validateGradingScheme(certification.gradingScheme);
+        if (!schemeVal.valid) {
+          const error = new Error(schemeVal.error);
+          error.statusCode = 400;
+          throw error;
+        }
+        gradingScheme = schemeVal.normalizedScheme;
+      }
+
+      validatedCertification = {
+        enabled,
+        passingPercentage,
+        gradingScheme,
+        templateId: certification.templateId || null,
+        certificateTitle: (certification.certificateTitle || '').trim(),
+        signatoryName: (certification.signatoryName || '').trim(),
+        signatoryTitle: (certification.signatoryTitle || 'Dean of Academic Affairs').trim(),
+      };
+    }
 
     let validatedStudents = [];
     if (accessType === 'restricted') {
@@ -83,6 +119,7 @@ class AssessmentService {
       proctoringEnabled: Boolean(proctoringEnabled),
       cameraRequired: Boolean(cameraRequired),
       randomization: randomization || { enabled: false },
+      certification: validatedCertification,
     });
 
     if (questions && questions.length > 0) {
@@ -141,7 +178,7 @@ class AssessmentService {
       throw error;
     }
 
-    const { questions, instructorId: ignoredInstructorId, assignedStudents, accessType, ...fields } = updateData;
+    const { questions, instructorId: ignoredInstructorId, assignedStudents, accessType, certification, ...fields } = updateData;
     
     const effectiveScheduled = fields.scheduledAt !== undefined ? fields.scheduledAt : assessment.scheduledAt;
     const effectiveDeadline = fields.deadlineAt !== undefined ? fields.deadlineAt : assessment.deadlineAt;
@@ -149,6 +186,41 @@ class AssessmentService {
       const error = new Error('Assessment deadline must be after scheduled start time');
       error.statusCode = 400;
       throw error;
+    }
+
+    if (certification && typeof certification === 'object') {
+      const currentCert = assessment.certification || { enabled: false, passingPercentage: 50 };
+      const enabled = certification.enabled !== undefined ? Boolean(certification.enabled) : currentCert.enabled;
+      const passingPercentage = certification.passingPercentage !== undefined
+        ? Number(certification.passingPercentage)
+        : currentCert.passingPercentage;
+
+      if (isNaN(passingPercentage) || passingPercentage < 0 || passingPercentage > 100) {
+        const error = new Error('Certification passing percentage must be between 0 and 100');
+        error.statusCode = 400;
+        throw error;
+      }
+
+      let gradingScheme = currentCert.gradingScheme || DEFAULT_GRADING_SCHEME;
+      if (certification.gradingScheme && Array.isArray(certification.gradingScheme)) {
+        const schemeVal = validateGradingScheme(certification.gradingScheme);
+        if (!schemeVal.valid) {
+          const error = new Error(schemeVal.error);
+          error.statusCode = 400;
+          throw error;
+        }
+        gradingScheme = schemeVal.normalizedScheme;
+      }
+
+      assessment.certification = {
+        enabled,
+        passingPercentage,
+        gradingScheme,
+        templateId: certification.templateId !== undefined ? certification.templateId : currentCert.templateId,
+        certificateTitle: certification.certificateTitle !== undefined ? String(certification.certificateTitle).trim() : currentCert.certificateTitle,
+        signatoryName: certification.signatoryName !== undefined ? String(certification.signatoryName).trim() : currentCert.signatoryName,
+        signatoryTitle: certification.signatoryTitle !== undefined ? String(certification.signatoryTitle).trim() : currentCert.signatoryTitle,
+      };
     }
 
     Object.assign(assessment, fields);
@@ -218,7 +290,7 @@ class AssessmentService {
     return this.getAssessmentById(assessmentId, { id: instructorId, role: isAdmin ? 'admin' : 'instructor' });
   }
 
-  async getAssessments({ role, userId, status, category, search, dateFilter, page = 1, limit = 10 }) {
+  async getAssessments({ role, userId, status, category, search, dateFilter, page = 1, limit = 10, includePast = false }) {
     const query = {};
 
     if (dateFilter) {
@@ -246,12 +318,16 @@ class AssessmentService {
         { accessType: { $exists: false } },
         { accessType: 'restricted', assignedStudents: { $in: [userObjId, userId.toString()] } },
       ];
-      const deadlineConditions = [
-        { deadlineAt: null },
-        { deadlineAt: { $exists: false } },
-        { deadlineAt: { $gt: new Date() } },
-      ];
-      query.$and = [{ $or: accessConditions }, { $or: deadlineConditions }];
+      if (includePast) {
+        query.$and = [{ $or: accessConditions }];
+      } else {
+        const deadlineConditions = [
+          { deadlineAt: null },
+          { deadlineAt: { $exists: false } },
+          { deadlineAt: { $gt: new Date() } },
+        ];
+        query.$and = [{ $or: accessConditions }, { $or: deadlineConditions }];
+      }
     } else if (role === 'instructor') {
       query.instructorId = userId;
       if (status) query.status = status;
@@ -390,6 +466,15 @@ class AssessmentService {
     await Question.deleteMany({ assessmentId });
     await Assessment.findByIdAndDelete(assessmentId);
     return { message: 'Assessment and associated questions deleted successfully' };
+  }
+
+  async getApprovedTemplates() {
+    const { CertificateTemplate } = require('../models');
+    return await CertificateTemplate.find({
+      status: 'published',
+    })
+      .select('_id title name description orientation pageSize isDefault version')
+      .sort({ isDefault: -1, title: 1 });
   }
 }
 

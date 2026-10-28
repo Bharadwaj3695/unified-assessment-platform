@@ -70,7 +70,45 @@ const authenticate = async (req, res, next) => {
   }
 };
 
-// Export authentication middleware function
+// Middleware verifying presence of refresh token credentials, returning 401 unauthenticated state
+const requireRefreshToken = (req, res, next) => {
+  const hasAuth = req.headers.authorization && req.headers.authorization.startsWith('Bearer ');
+  const token =
+    req.cookies?.uap_refresh ||
+    req.body?.refreshToken ||
+    (hasAuth ? req.headers.authorization.split(' ')[1] : null);
+
+  if (!token || typeof token !== 'string' || !token.trim()) {
+    return errorResponse(res, 'Refresh token is required', 401);
+  }
+
+  next();
+};
+
+// Optional authentication middleware: attaches req.user if valid bearer token is present, continues otherwise
+const optionalAuthenticate = async (req, res, next) => {
+  try {
+    const authHeader = req.headers.authorization;
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+      const token = authHeader.split(' ')[1];
+      const decoded = verifyAccessToken(token);
+      if (decoded && decoded.type !== 'mfa_challenge' && decoded.type !== 'refresh') {
+        const userId = decoded.id || decoded.sub;
+        const user = await User.findById(userId);
+        if (user && user.status === 'active' && user.isActive) {
+          req.user = user;
+        }
+      }
+    }
+  } catch (err) {
+    // Proceed as unauthenticated for optional auth
+  }
+  return next();
+};
+
+// Export authentication middleware functions
 module.exports = {
   authenticate,
+  requireRefreshToken,
+  optionalAuthenticate,
 };

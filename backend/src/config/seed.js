@@ -1,5 +1,5 @@
 // Destructure and import the database models required for seeding accounts, assessments, submissions, and audit records
-const { User, Assessment, Question, Submission, Evaluation, Notification, AuditLog, BankQuestion, StudentRegistry } = require('../models');
+const { User, Assessment, Question, Submission, Evaluation, Notification, AuditLog, BankQuestion, StudentRegistry, FacultyRegistry } = require('../models');
 // Import password hashing utility to secure seed account credentials using bcrypt
 const { hashPassword } = require('../utils/password');
 // Import migration helper to generate standardized academic identifiers for users lacking them
@@ -420,6 +420,42 @@ const seedStandardizedDemoAccounts = async () => {
       existingSmtpUser.status = 'active';
       existingSmtpUser.isActive = true;
       await existingSmtpUser.save();
+    }
+  }
+
+  // If ADMIN_PROVISION_EMAIL is configured (or default admin.uap.edu@gmail.com), ensure an active administrator account exists
+  const targetAdminEmail = (process.env.ADMIN_PROVISION_EMAIL || 'admin.uap.edu@gmail.com').trim().toLowerCase();
+  if (targetAdminEmail && targetAdminEmail.includes('@')) {
+    const existingTargetAdmin = await User.findOne({ email: targetAdminEmail });
+    if (!existingTargetAdmin) {
+      await User.create({
+        name: process.env.ADMIN_PROVISION_NAME || 'Institutional Administrator',
+        email: targetAdminEmail,
+        password: adminPassword,
+        role: 'admin',
+        adminId: process.env.ADMIN_PROVISION_ADMIN_ID || 'ADM-INST-001',
+        department: process.env.ADMIN_PROVISION_DEPT || 'Institutional Administration',
+        status: 'active',
+        isActive: true,
+        approvedAt: new Date(),
+        bio: 'Authoritative Institutional Administrator account for Unified Assessment Platform.',
+      });
+      console.log('[Seed] Seeded active account for target institutional administrator.');
+    } else if (existingTargetAdmin.role !== 'admin' || existingTargetAdmin.status !== 'active' || !existingTargetAdmin.isActive) {
+      const updateFields = {
+        role: 'admin',
+        status: 'active',
+        isActive: true,
+        adminId: existingTargetAdmin.adminId || process.env.ADMIN_PROVISION_ADMIN_ID || 'ADM-INST-001',
+        department: existingTargetAdmin.department || 'Institutional Administration',
+        approvedAt: existingTargetAdmin.approvedAt || new Date(),
+      };
+      const updateOp = { $set: updateFields };
+      if (existingTargetAdmin.studentId) {
+        updateOp.$unset = { studentId: 1 };
+      }
+      await User.updateOne({ _id: existingTargetAdmin._id }, updateOp);
+      console.log('[Seed] Elevated existing target account to active administrator.');
     }
   }
 
@@ -1712,6 +1748,14 @@ const seedDatabase = async () => {
       // Log confirmation that institutional registry was seeded
       console.log('[Seed] Seeded authoritative Institution Student Registry records.');
     // End registry count check
+    }
+
+    // 8B. Authoritative Institution Faculty Registry Records
+    const existingFacultyRegistryCount = await FacultyRegistry.countDocuments();
+    if (existingFacultyRegistryCount === 0) {
+      const adminRegistryService = require('../services/adminRegistry.service');
+      await adminRegistryService.syncExistingFacultyToRegistry();
+      console.log('[Seed] Seeded authoritative Institution Faculty Registry records.');
     }
 
     // 9. Audit Log

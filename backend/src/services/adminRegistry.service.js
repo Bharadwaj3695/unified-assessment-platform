@@ -966,8 +966,99 @@ class AdminRegistryService {
   // 3. Faculty Registry CRUD
   // =========================================================================
 
+  /**
+   * Synchronizes an individual instructor User account into the FacultyRegistry collection.
+   * Ensures facultyId exists, avoids duplicate entries, and reflects active/inactive standing.
+   */
+  async syncFacultyMemberToRegistry(user) {
+    if (!user || user.role !== 'instructor') return null;
+
+    let facultyId = user.facultyId;
+    if (!facultyId) {
+      const { generateFacultyId } = require('../utils/idGenerator');
+      facultyId = await generateFacultyId();
+      user.facultyId = facultyId;
+      if (typeof user.save === 'function') {
+        await user.save();
+      }
+    }
+
+    const normFacultyId = normalizeId(facultyId);
+    const normEmail = normalizeEmail(user.email);
+    const normName = normalizeName(user.name);
+    const desiredStatus = (user.status === 'inactive' || user.isActive === false) ? 'inactive' : 'active';
+
+    let record = await FacultyRegistry.findOne({
+      $or: [{ facultyId: normFacultyId }, { email: normEmail }],
+    });
+
+    if (record) {
+      let changed = false;
+      if (record.status !== desiredStatus) {
+        record.status = desiredStatus;
+        changed = true;
+      }
+      if (normFacultyId && record.facultyId !== normFacultyId) {
+        record.facultyId = normFacultyId;
+        changed = true;
+      }
+      if (normName && record.name !== normName) {
+        record.name = normName;
+        changed = true;
+      }
+      if (normEmail && record.email !== normEmail) {
+        record.email = normEmail;
+        changed = true;
+      }
+      if (changed) {
+        await record.save();
+      }
+      return record;
+    }
+
+    if (normFacultyId && normEmail && normName) {
+      record = await FacultyRegistry.create({
+        facultyId: normFacultyId,
+        name: normName,
+        email: normEmail,
+        status: desiredStatus,
+      });
+      return record;
+    }
+
+    return null;
+  }
+
+  /**
+   * Idempotently synchronizes all active and inactive instructor accounts
+   * from the User collection into the authoritative FacultyRegistry collection.
+   */
+  async syncExistingFacultyToRegistry() {
+    try {
+      const instructors = await User.find({
+        role: 'instructor',
+        status: { $in: ['active', 'inactive'] },
+      });
+      let syncedCount = 0;
+      for (const inst of instructors) {
+        const synced = await this.syncFacultyMemberToRegistry(inst);
+        if (synced) syncedCount++;
+      }
+      return { syncedCount };
+    } catch (err) {
+      logger.warn(`[AdminRegistryService] Error syncing existing faculty to registry: ${err.message}`);
+      return { syncedCount: 0 };
+    }
+  }
+
   // Method to list faculty registry records with optional search, status filtering, and pagination
   async getFacultyRegistry({ page = 1, limit = 10, search = '', status = '' }) {
+    // If FacultyRegistry collection is completely empty, backfill from active/inactive instructors
+    const totalExisting = await FacultyRegistry.countDocuments();
+    if (totalExisting === 0) {
+      await this.syncExistingFacultyToRegistry();
+    }
+
     // Initialize empty query filter object
     const query = {};
     // If status filter provided, append status to query
@@ -1173,6 +1264,26 @@ class AdminRegistryService {
 
     // Save modifications to the database
     await record.save();
+
+    // Synchronize status back to linked User account if present
+    if (status && (status === 'active' || status === 'inactive')) {
+      const targetUser = await User.findOne({
+        $or: [{ email: record.email }, { facultyId: record.facultyId }],
+        role: 'instructor',
+      });
+      if (targetUser) {
+        targetUser.status = status;
+        targetUser.isActive = status === 'active';
+        if (status === 'inactive') {
+          targetUser.revokedAt = new Date();
+          targetUser.revokedBy = adminUser?._id || null;
+        } else {
+          targetUser.revokedAt = null;
+          targetUser.revokedBy = null;
+        }
+        await targetUser.save();
+      }
+    }
 
     // Record audit log for registry record update
     await AuditLog.create({

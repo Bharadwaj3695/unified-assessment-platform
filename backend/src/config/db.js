@@ -8,9 +8,37 @@ let mongoMemoryServer = null;
 
 // Asynchronous connection manager establishing database connection with automatic fallback in non-production environments
 const connectDB = async () => {
+  // If already connected, reuse active connection
+  if (mongoose.connection.readyState === 1) {
+    return;
+  }
+
+  // In test mode or when in-memory database is explicitly requested with an unreachable remote URI, start local instance directly
+  const useInMemoryDirectly = env.NODE_ENV === 'test' || (env.ALLOW_IN_MEMORY_DB === 'true' && env.MONGODB_URI.includes('mongodb+srv'));
+
+  if (useInMemoryDirectly) {
+    try {
+      if (!mongoMemoryServer) {
+        console.log('[Database] Starting local MongoDB instance for seamless testing/development...');
+        const { MongoMemoryServer } = require('mongodb-memory-server');
+        mongoMemoryServer = await MongoMemoryServer.create({
+          instance: {
+            args: ['--setParameter', 'diagnosticDataCollectionEnabled=false'],
+          },
+        });
+      }
+      const uri = mongoMemoryServer.getUri();
+      await mongoose.connect(uri);
+      console.log(`[Database] Local MongoDB instance connected: ${uri}`);
+      return;
+    } catch (innerErr) {
+      console.error('[Database] Failed to start local MongoDB instance:', innerErr.message);
+      throw innerErr;
+    }
+  }
+
   // Attempt connection to the primary configured MongoDB database instance
   try {
-    // Connect using Mongoose with a 4-second timeout to quickly catch unreachable clusters
     const conn = await mongoose.connect(env.MONGODB_URI, {
       serverSelectionTimeoutMS: 4000,
     });
@@ -22,15 +50,19 @@ const connectDB = async () => {
     console.warn(`[Database] Could not connect to primary MongoDB URI (${err.message}).`);
     
     // In local development / test without active mongod daemon, initialize embedded MongoDB engine
-    if (env.NODE_ENV !== 'production') {
+    if (env.NODE_ENV !== 'production' || env.ALLOW_IN_MEMORY_DB === 'true') {
       // Begin fallback initialization of in-memory MongoDB server
       try {
         // Notify developer that embedded MongoDB memory instance is spinning up
         console.log('[Database] Starting local MongoDB instance for seamless development/testing...');
         // Dynamically require mongodb-memory-server so it is not bundled or loaded in production
         const { MongoMemoryServer } = require('mongodb-memory-server');
-        // Instantiate the ephemeral in-memory MongoDB daemon
-        mongoMemoryServer = await MongoMemoryServer.create();
+        // Instantiate the ephemeral in-memory MongoDB daemon with ftdc disabled to prevent signal 6 crash on WSL2/Linux
+        mongoMemoryServer = await MongoMemoryServer.create({
+          instance: {
+            args: ['--setParameter', 'diagnosticDataCollectionEnabled=false'],
+          },
+        });
         // Retrieve the generated dynamic connection URI for the memory database
         const uri = mongoMemoryServer.getUri();
         // Cleanly disconnect failed connection attempt before connecting to in-memory instance
@@ -61,7 +93,8 @@ const disconnectDB = async () => {
   // Check if an ephemeral in-memory server was launched during this process lifecycle
   if (mongoMemoryServer) {
     // Terminate the in-memory MongoDB server process and delete temporary database files
-    await mongoMemoryServer.stop();
+    await mongoMemoryServer.stop({ doCleanup: true, force: true });
+    mongoMemoryServer = null;
   }
 };
 

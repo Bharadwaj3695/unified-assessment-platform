@@ -1,5 +1,6 @@
 const { Evaluation, Submission, Assessment, Question, User, Notification } = require('../models');
 const emailService = require('./email.service');
+const { resolveGrade } = require('../utils/gradingScheme');
 
 class EvaluationService {
   async getSubmissionsForInstructor(instructorId, { assessmentId, status, search, page = 1, limit = 10 }) {
@@ -38,12 +39,39 @@ class EvaluationService {
     const total = await Submission.countDocuments(submissionQuery);
 
     const rows = await Submission.find(submissionQuery)
-      .populate('assessmentId', 'title category totalPoints passingScore')
+      .populate('assessmentId', 'title category totalPoints passingScore certification')
       .populate('studentId', 'name email avatar studentId department')
       .populate('evaluation')
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(parseInt(limit, 10));
+
+    // Look up certificates for these submissions
+    const { Certificate } = require('../models');
+    const studentIds = rows.map((r) => r.studentId?._id || r.studentId).filter(Boolean);
+    const asmtIds = rows.map((r) => r.assessmentId?._id || r.assessmentId).filter(Boolean);
+    const certMap = new Map();
+    try {
+      const certificates = await Certificate.find({
+        studentId: { $in: studentIds },
+        assessmentId: { $in: asmtIds },
+      }).select('_id certificateId studentId assessmentId status issuedAt verificationCode');
+
+      for (const c of certificates) {
+        if (c.studentId && c.assessmentId) {
+          certMap.set(`${c.studentId.toString()}_${c.assessmentId.toString()}`, {
+            id: c._id.toString(),
+            _id: c._id.toString(),
+            certificateId: c.certificateId,
+            status: c.status,
+            issuedAt: c.issuedAt,
+            verificationCode: c.verificationCode,
+          });
+        }
+      }
+    } catch (cErr) {
+      console.warn('[EvaluationService] Non-fatal certificate lookup error:', cErr.message);
+    }
 
     const submissions = rows.map((sub) => {
       const json = sub.toJSON();
@@ -51,6 +79,9 @@ class EvaluationService {
       json.student = json.studentId;
       delete json.assessmentId;
       delete json.studentId;
+      const sId = (json.student?._id || json.student)?.toString();
+      const aId = (json.assessment?._id || json.assessment)?.toString();
+      json.certificate = (sId && aId) ? (certMap.get(`${sId}_${aId}`) || null) : null;
       return json;
     });
 
@@ -145,10 +176,34 @@ class EvaluationService {
     const totalPoints = submission.totalPoints || assessment.totalPoints || 100;
     const computedFinalScore = autoScore + calculatedManualScore;
 
+    let percentage = 0;
+    let gradeResolution = null;
+    let passed = false;
+    let certificateEligible = false;
+
     if (allSubjectiveEvaluated) {
-      const percentage =
+      percentage =
         totalPoints > 0 ? Math.round((computedFinalScore / totalPoints) * 100 * 100) / 100 : 0;
-      const passed = percentage >= (assessment.passingScore || 60);
+      
+      // Distinguish assessment passing score from certification eligibility threshold
+      const assessmentPassingScore = typeof assessment.passingScore === 'number'
+        ? assessment.passingScore
+        : 60;
+      passed = percentage >= assessmentPassingScore;
+
+      // Certification eligibility evaluated strictly against explicit certification rules
+      const certEnabled = Boolean(assessment.certification && assessment.certification.enabled);
+      const certPassingPercentage = (assessment.certification && typeof assessment.certification.passingPercentage === 'number')
+        ? assessment.certification.passingPercentage
+        : 50;
+      certificateEligible = certEnabled && (percentage >= certPassingPercentage);
+
+      // Authoritative grade resolution against configured grading scheme and assessment threshold
+      gradeResolution = resolveGrade(
+        percentage,
+        assessment.certification?.gradingScheme,
+        assessmentPassingScore
+      );
 
       submission.manualScore = calculatedManualScore;
       submission.finalScore = computedFinalScore;
@@ -182,6 +237,14 @@ class EvaluationService {
       evaluation.finalScore = computedFinalScore;
       evaluation.status = evalStatus;
       evaluation.gradedAt = new Date();
+      if (allSubjectiveEvaluated && gradeResolution) {
+        evaluation.percentage = percentage;
+        evaluation.grade = gradeResolution.grade;
+        evaluation.gradeLabel = gradeResolution.label;
+        evaluation.passed = passed;
+        evaluation.certificateEligible = certificateEligible;
+        evaluation.outcomeFeedback = gradeResolution.outcomeFeedback;
+      }
       await evaluation.save();
     } else {
       evaluation = await Evaluation.create({
@@ -192,10 +255,34 @@ class EvaluationService {
         finalScore: computedFinalScore,
         status: evalStatus,
         gradedAt: new Date(),
+        ...(allSubjectiveEvaluated && gradeResolution ? {
+          percentage,
+          grade: gradeResolution.grade,
+          gradeLabel: gradeResolution.label,
+          passed,
+          certificateEligible,
+          outcomeFeedback: gradeResolution.outcomeFeedback,
+        } : {}),
       });
     }
 
     if (allSubjectiveEvaluated) {
+      // Automatically issue certificate if eligible
+      if (certificateEligible) {
+        try {
+          const certificateService = require('./certificate.service');
+          const studentUser = await User.findById(submission.studentId);
+          await certificateService.issueCertificateForEvaluation(
+            evaluation,
+            submission,
+            assessment,
+            studentUser
+          );
+        } catch (certErr) {
+          console.warn('[EvaluationService] Non-fatal certificate issuance error:', certErr.message);
+        }
+      }
+
       // Notify Student of completed evaluation
       await Notification.create({
         userId: submission.studentId,

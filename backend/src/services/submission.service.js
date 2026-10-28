@@ -3,6 +3,7 @@ const { Submission, Assessment, Question, User, Evaluation, Notification, Procto
 const emailService = require('./email.service');
 const proctoringService = require('./proctoring.service');
 const storageService = require('./storage.service');
+const { resolveGrade } = require('../utils/gradingScheme');
 
 class SubmissionService {
   async startAttempt(studentId, assessmentId) {
@@ -332,18 +333,29 @@ class SubmissionService {
   }
 
   async submitAssessment(submissionId, studentId, answers = null) {
-    const submission = await Submission.findOne({
-      _id: submissionId,
-      studentId,
-    });
+    // Atomic CAS transition: ensure only ONE concurrent request can transition and submit this attempt
+    const submission = await Submission.findOneAndUpdate(
+      {
+        _id: submissionId,
+        studentId,
+        status: 'in_progress',
+      },
+      {
+        $set: {
+          status: 'submitted',
+          submittedAt: new Date(),
+        },
+      },
+      { new: true }
+    );
 
     if (!submission) {
-      const error = new Error('Submission not found');
-      error.statusCode = 404;
-      throw error;
-    }
-
-    if (submission.status !== 'in_progress') {
+      const existing = await Submission.findOne({ _id: submissionId, studentId });
+      if (!existing) {
+        const error = new Error('Submission not found');
+        error.statusCode = 404;
+        throw error;
+      }
       const error = new Error('This assessment has already been submitted');
       error.statusCode = 400;
       throw error;
@@ -409,7 +421,26 @@ class SubmissionService {
       const finalPercentage = submission.totalPoints > 0
         ? Math.round((autoScore / submission.totalPoints) * 100 * 100) / 100
         : 0;
-      const passed = finalPercentage >= (assessment.passingScore || 60);
+
+      // Distinguish assessment passing score from certification eligibility threshold
+      const assessmentPassingScore = typeof assessment.passingScore === 'number'
+        ? assessment.passingScore
+        : 60;
+      const passed = finalPercentage >= assessmentPassingScore;
+
+      // Certification eligibility evaluated strictly against explicit certification rules
+      const certEnabled = Boolean(assessment.certification && assessment.certification.enabled);
+      const certPassingPercentage = (assessment.certification && typeof assessment.certification.passingPercentage === 'number')
+        ? assessment.certification.passingPercentage
+        : 50;
+      const certificateEligible = certEnabled && (finalPercentage >= certPassingPercentage);
+
+      // Authoritative grade resolution against configured grading scheme and assessment threshold
+      const gradeResolution = resolveGrade(
+        finalPercentage,
+        assessment.certification?.gradingScheme,
+        assessmentPassingScore
+      );
 
       submission.manualScore = 0;
       submission.score = autoScore;
@@ -421,15 +452,37 @@ class SubmissionService {
       submission.evaluationStatus = 'completed';
 
       // Create automatic evaluation record
-      await Evaluation.create({
+      const evaluation = await Evaluation.create({
         submissionId: submission._id,
         evaluatorId: assessment.instructorId,
         questionFeedback: {},
         generalFeedback: 'Automated objective evaluation completed.',
         finalScore: autoScore,
+        percentage: finalPercentage,
+        grade: gradeResolution.grade,
+        gradeLabel: gradeResolution.label,
+        passed,
+        certificateEligible,
+        outcomeFeedback: gradeResolution.outcomeFeedback,
         status: 'completed',
         gradedAt: new Date(),
       });
+
+      // Automatically issue certificate if eligible
+      if (certificateEligible) {
+        try {
+          const certificateService = require('./certificate.service');
+          const studentUser = await User.findById(studentId);
+          await certificateService.issueCertificateForEvaluation(
+            evaluation,
+            submission,
+            assessment,
+            studentUser
+          );
+        } catch (certErr) {
+          console.warn('[SubmissionService] Non-fatal certificate issuance error:', certErr.message);
+        }
+      }
     }
 
     await submission.save();
@@ -485,7 +538,7 @@ class SubmissionService {
 
   async getStudentSubmissions(studentId) {
     const submissions = await Submission.find({ studentId })
-      .populate('assessmentId', 'title category totalPoints passingScore durationMinutes')
+      .populate('assessmentId', 'title category totalPoints passingScore durationMinutes deadlineAt scheduledAt status accessType certification')
       .populate('evaluation')
       .sort({ createdAt: -1 });
 
@@ -518,10 +571,35 @@ class SubmissionService {
       }
     }
 
+    // Attach any earned certificates for this student
+    const { Certificate } = require('../models');
+    let certMap = new Map();
+    try {
+      const certificates = await Certificate.find({ studentId }).select(
+        '_id certificateId assessmentId status issuedAt verificationCode'
+      );
+      for (const c of certificates) {
+        if (c.assessmentId) {
+          certMap.set(c.assessmentId.toString(), {
+            id: c._id.toString(),
+            _id: c._id.toString(),
+            certificateId: c.certificateId,
+            status: c.status,
+            issuedAt: c.issuedAt,
+            verificationCode: c.verificationCode,
+          });
+        }
+      }
+    } catch (cErr) {
+      console.warn('[SubmissionService] Non-fatal certificate lookup error:', cErr.message);
+    }
+
     return submissions.map((sub) => {
       const json = sub.toJSON();
       json.assessment = json.assessmentId;
       delete json.assessmentId;
+      const asmtId = (json.assessment?._id || json.assessment?.id || json.assessment)?.toString();
+      json.certificate = asmtId ? (certMap.get(asmtId) || null) : null;
       return json;
     });
   }

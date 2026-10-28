@@ -54,7 +54,7 @@ class AssessmentController {
     // Begin try block
     try {
       // Destructure query parameters with fallback defaults (page 1, limit 200)
-      const { status, category, search, page = 1, limit = 200, dateFilter } = req.query;
+      const { status, category, search, page = 1, limit = 200, dateFilter, includePast } = req.query;
       // Query assessments through service applying role-specific visibility rules
       const { total, assessments } = await assessmentService.getAssessments({
         // User role (student, instructor, or admin)
@@ -73,6 +73,8 @@ class AssessmentController {
         limit,
         // Date range filter option
         dateFilter,
+        // Flag to include assessments whose deadlines have passed (for student viewing missed assessments)
+        includePast: includePast === 'true' || includePast === true,
       });
       // Return paginated response envelope with assessments array and paging metadata
       return paginatedResponse(res, 'Assessments retrieved successfully', assessments, page, limit, total);
@@ -111,6 +113,16 @@ class AssessmentController {
     // Forward errors
     } catch (err) {
       // Pass error to centralized error middleware
+      next(err);
+    }
+  }
+
+  // Retrieves published / approved certificate templates for assessment configuration
+  async getCertificateTemplates(req, res, next) {
+    try {
+      const templates = await assessmentService.getApprovedTemplates();
+      return successResponse(res, 'Certificate templates retrieved successfully', templates);
+    } catch (err) {
       next(err);
     }
   }

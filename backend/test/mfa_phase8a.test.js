@@ -675,8 +675,8 @@ describe('Phase 8A: Multi-Factor Authentication (MFA / 2FA) Backend Foundation',
     instructorUser.mfaEnabled = true;
     if (!instructorUser.facultyId) {
       instructorUser.facultyId = 'FAC-TEST-001';
-      instructorUser.subjectId = 'CS-101';
     }
+    instructorUser.subjectId = 'CS-101';
     await instructorUser.save();
 
     const loginRes = await authService.login({

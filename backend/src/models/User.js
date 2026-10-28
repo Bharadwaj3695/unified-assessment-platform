@@ -103,8 +103,8 @@ const userSchema = new mongoose.Schema(
     status: {
       // Set the data type to String
       type: String,
-      // Restrict status to pending, active, rejected, or revoked
-      enum: ['pending', 'active', 'rejected', 'revoked'],
+      // Restrict status to pending, active, rejected, revoked, or inactive
+      enum: ['pending', 'active', 'rejected', 'revoked', 'inactive'],
       // Default new user status to pending awaiting administrator approval
       default: 'pending',
       // Create index to accelerate filtering users by status
@@ -287,6 +287,14 @@ const userSchema = new mongoose.Schema(
       default: null,
     // Close mfaPendingSecret property configuration
     },
+    // Expiration timestamp for pending MFA enrollment session (e.g. 10 minutes)
+    mfaPendingExpiresAt: {
+      // Set the data type to Date
+      type: Date,
+      // Default to null when not in active MFA setup
+      default: null,
+    // Close mfaPendingExpiresAt property configuration
+    },
     // Define array of hashed one-time backup recovery codes for MFA account recovery
     mfaRecoveryCodes: [
       // Schema definition for each recovery code entry
@@ -342,6 +350,64 @@ const userSchema = new mongoose.Schema(
       // Default to null prior to first MFA login
       default: null,
     // Close mfaLastUsedAt property configuration
+    },
+    // Define boolean flag indicating whether email OTP verification is active
+    emailOtpEnabled: {
+      // Set the data type to Boolean
+      type: Boolean,
+      // Default email OTP to disabled until enrolled
+      default: false,
+      // Index email OTP status field
+      index: true,
+    // Close emailOtpEnabled property configuration
+    },
+    // Define timestamp when the user completed Email OTP enrollment
+    emailOtpEnrolledAt: {
+      // Set the data type to Date
+      type: Date,
+      // Default to null prior to Email OTP enrollment
+      default: null,
+    // Close emailOtpEnrolledAt property configuration
+    },
+    // Define HMAC-SHA256 hash of temporary unconfirmed Email OTP during setup
+    emailOtpPendingHash: {
+      // Set the data type to String
+      type: String,
+      // Default to null when not in active Email OTP setup
+      default: null,
+    // Close emailOtpPendingHash property configuration
+    },
+    // Expiration timestamp for pending Email OTP setup session (5 minutes)
+    emailOtpPendingExpiresAt: {
+      // Set the data type to Date
+      type: Date,
+      // Default to null when not in active Email OTP setup
+      default: null,
+    // Close emailOtpPendingExpiresAt property configuration
+    },
+    // Timestamp when the Email OTP code was last dispatched during setup (cooldown enforcement)
+    emailOtpPendingSentAt: {
+      // Set the data type to Date
+      type: Date,
+      // Default to null when not in active Email OTP setup
+      default: null,
+    // Close emailOtpPendingSentAt property configuration
+    },
+    // Counter tracking failed verification attempts during Email OTP setup
+    emailOtpPendingAttempts: {
+      // Set the data type to Number
+      type: Number,
+      // Default to 0 failed attempts
+      default: 0,
+    // Close emailOtpPendingAttempts property configuration
+    },
+    // Counter tracking how many times setup code was requested
+    emailOtpPendingResendCount: {
+      // Set the data type to Number
+      type: Number,
+      // Default to 0 resends
+      default: 0,
+    // Close emailOtpPendingResendCount property configuration
     },
   // Close schema attributes definition
   },
@@ -477,10 +543,19 @@ userSchema.set('toJSON', {
     delete ret.mfaSecret;
     // Exclude sensitive pending MFA secret key from JSON output
     delete ret.mfaPendingSecret;
+    delete ret.mfaPendingExpiresAt;
     // Exclude hashed MFA backup recovery codes from JSON output
     delete ret.mfaRecoveryCodes;
+    // Exclude sensitive pending Email OTP verifiers and setup metadata from JSON output
+    delete ret.emailOtpPendingHash;
+    delete ret.emailOtpPendingExpiresAt;
+    delete ret.emailOtpPendingSentAt;
+    delete ret.emailOtpPendingAttempts;
+    delete ret.emailOtpPendingResendCount;
     // Cast mfaEnabled to explicit boolean primitive in serialized output
     ret.mfaEnabled = Boolean(ret.mfaEnabled);
+    ret.totpEnabled = Boolean(ret.mfaEnabled);
+    ret.emailOtpEnabled = Boolean(ret.emailOtpEnabled);
     // Return sanitized plain JavaScript object
     return ret;
   // Close transform callback

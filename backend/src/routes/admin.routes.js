@@ -6,6 +6,8 @@ const router = express.Router();
 const adminController = require('../controllers/admin.controller');
 // Import the admin registry controller handling student and faculty registry management
 const adminRegistryController = require('../controllers/adminRegistry.controller');
+// Import the announcement controller handling broadcast banner management
+const announcementController = require('../controllers/announcement.controller');
 // Import authentication middleware to verify JWT identity
 const { authenticate } = require('../middleware/auth.middleware');
 // Import authorization middleware to enforce role-based access control
@@ -28,6 +30,12 @@ const {
   confirmBulkImportValidator,
 // End of admin registry validator destructuring
 } = require('../validators/adminRegistry.validator');
+// Destructure validation rules for announcement requests
+const {
+  saveDraftValidator,
+  publishAnnouncementValidator,
+  scheduleAnnouncementValidator,
+} = require('../validators/announcement.validator');
 
 // Protect all router endpoints requiring authentication and admin role authorization
 router.use(authenticate, authorize('admin'));
@@ -42,17 +50,25 @@ router.get('/users/pending', adminController.getPendingUsers);
 router.post('/users/bulk-approve', adminController.bulkApproveUsers);
 // Route to bulk reject pending user registrations
 router.post('/users/bulk-reject', adminController.bulkRejectUsers);
-// Route to bulk revoke active user accounts
+// Route to bulk revoke active user accounts (backward compatibility)
 router.post('/users/bulk-revoke', adminController.bulkRevokeUsers);
+// Route to bulk deactivate active user accounts
+router.post('/users/bulk-deactivate', adminController.bulkDeactivateUsers);
+// Route to bulk activate inactive user accounts
+router.post('/users/bulk-activate', adminController.bulkActivateUsers);
 // Route to retrieve detailed profile and activity for a specific user ID
 router.get('/users/:id', adminController.getUserDetails);
 // Route to approve a pending user account registration
 router.put('/users/:id/approve', adminController.approveUser);
 // Route to reject a pending user account registration
 router.put('/users/:id/reject', adminController.rejectUser);
-// Route to revoke access for an active user account
+// Route to activate an inactive user account
+router.put('/users/:id/activate', adminController.activateUser);
+// Route to deactivate an active user account
+router.put('/users/:id/deactivate', adminController.deactivateUser);
+// Route to revoke access for an active user account (backward compatibility)
 router.put('/users/:id/revoke', adminController.revokeUser);
-// Route to restore a revoked or deactivated user account
+// Route to restore a revoked or deactivated user account (backward compatibility)
 router.put('/users/:id/restore', adminController.restoreUser);
 // Route to toggle active/inactive status of a user account
 router.put('/users/:id/toggle-status', adminController.toggleUserStatus);
@@ -68,6 +84,22 @@ router.get('/alerts', adminController.getOperationalAlerts);
 router.get('/settings', adminController.getSettings);
 // Route to update platform configuration system settings
 router.put('/settings', adminController.updateSettings);
+
+// Announcement Management routes
+// Route to retrieve current announcement configuration and server-time status
+router.get('/announcements/current', announcementController.getCurrent);
+// Route to retrieve announcement history
+router.get('/announcements', announcementController.getHistory);
+// Route to save an announcement draft
+router.post('/announcements/draft', saveDraftValidator, validate, announcementController.saveDraft);
+// Route to publish an announcement immediately
+router.post('/announcements/publish', publishAnnouncementValidator, validate, announcementController.publishImmediate);
+// Route to schedule an announcement for future publication
+router.post('/announcements/schedule', scheduleAnnouncementValidator, validate, announcementController.schedule);
+// Route to cancel/unpublish current active announcement
+router.put('/announcements/cancel', announcementController.cancel);
+// Route to cancel/unpublish an announcement by ID
+router.put('/announcements/:id/cancel', announcementController.cancel);
 
 // Master Student Registry routes
 // Route to list and search records in the master student registry

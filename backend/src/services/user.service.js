@@ -137,6 +137,9 @@ class UserService {
       department: user.department || (user.role === 'student' ? 'Computer Science' : 'Computer Science & Engineering'),
       mfaEnabled: Boolean(user.mfaEnabled),
       mfaEnrolledAt: user.mfaEnrolledAt || null,
+      totpEnabled: Boolean(user.mfaEnabled),
+      emailOtpEnabled: Boolean(user.emailOtpEnabled),
+      emailOtpEnrolledAt: user.emailOtpEnrolledAt || null,
       createdAt: user.createdAt,
     };
 

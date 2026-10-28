@@ -1,5 +1,6 @@
 // Import body validator builder from express-validator
 const { body } = require('express-validator');
+const { validateGradingScheme } = require('../utils/gradingScheme');
 
 // Validation rules array for assessment creation (POST /api/assessments)
 const createAssessmentValidator = [
@@ -33,6 +34,30 @@ const createAssessmentValidator = [
   body('proctoringEnabled').optional().isBoolean().withMessage('proctoringEnabled must be a boolean'),
   // Validate that cameraRequired is boolean
   body('cameraRequired').optional().isBoolean().withMessage('cameraRequired must be a boolean'),
+  // Validate certification configuration
+  body('certification').optional().isObject().withMessage('certification must be an object'),
+  body('certification.enabled').optional().isBoolean().withMessage('certification.enabled must be a boolean'),
+  body('certification.passingPercentage').optional().isFloat({ min: 0, max: 100 }).withMessage('certification.passingPercentage must be between 0 and 100'),
+  body('certification.gradingScheme').optional().isArray().withMessage('certification.gradingScheme must be an array of grade bands').custom((scheme) => {
+    if (scheme !== undefined && scheme !== null) {
+      const result = validateGradingScheme(scheme);
+      if (!result.valid) {
+        throw new Error(result.error);
+      }
+    }
+    return true;
+  }),
+  body('certification.templateId').optional({ nullable: true }).custom((val) => {
+    if (val === null || val === '' || val === undefined) return true;
+    const mongoose = require('mongoose');
+    if (!mongoose.Types.ObjectId.isValid(val)) {
+      throw new Error('certification.templateId must be a valid MongoDB ObjectId');
+    }
+    return true;
+  }),
+  body('certification.certificateTitle').optional().isString().trim(),
+  body('certification.signatoryName').optional().isString().trim(),
+  body('certification.signatoryTitle').optional().isString().trim(),
 ];
 
 // Validation rules array for assessment updates (PUT /api/assessments/:id)
@@ -67,6 +92,30 @@ const updateAssessmentValidator = [
   body('proctoringEnabled').optional().isBoolean().withMessage('proctoringEnabled must be a boolean'),
   // Validate that cameraRequired is boolean
   body('cameraRequired').optional().isBoolean().withMessage('cameraRequired must be a boolean'),
+  // Validate certification configuration
+  body('certification').optional().isObject().withMessage('certification must be an object'),
+  body('certification.enabled').optional().isBoolean().withMessage('certification.enabled must be a boolean'),
+  body('certification.passingPercentage').optional().isFloat({ min: 0, max: 100 }).withMessage('certification.passingPercentage must be between 0 and 100'),
+  body('certification.gradingScheme').optional().isArray().withMessage('certification.gradingScheme must be an array of grade bands').custom((scheme) => {
+    if (scheme !== undefined && scheme !== null) {
+      const result = validateGradingScheme(scheme);
+      if (!result.valid) {
+        throw new Error(result.error);
+      }
+    }
+    return true;
+  }),
+  body('certification.templateId').optional({ nullable: true }).custom((val) => {
+    if (val === null || val === '' || val === undefined) return true;
+    const mongoose = require('mongoose');
+    if (!mongoose.Types.ObjectId.isValid(val)) {
+      throw new Error('certification.templateId must be a valid MongoDB ObjectId');
+    }
+    return true;
+  }),
+  body('certification.certificateTitle').optional().isString().trim(),
+  body('certification.signatoryName').optional().isString().trim(),
+  body('certification.signatoryTitle').optional().isString().trim(),
 ];
 
 // Export assessment validation chains

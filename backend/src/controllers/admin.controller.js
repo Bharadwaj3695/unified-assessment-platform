@@ -1,9 +1,12 @@
 // Destructure Mongoose models required for admin dashboard statistics, user management, audit logging, and registry operations
-const { User, Assessment, Submission, AuditLog, Notification, SystemSetting, StudentRegistry, Session } = require('../models');
+const { User, Assessment, Submission, AuditLog, Notification, SystemSetting, StudentRegistry, FacultyRegistry, Session } = require('../models');
 // Destructure standardized JSON response formatting utility methods for success, pagination, and error responses
 const { successResponse, paginatedResponse, errorResponse } = require('../utils/response');
 // Import email service for dispatching administrative notification emails (approval, rejection, revocation)
 const emailService = require('../services/email.service');
+// Import admin registry service and ID generator for student and faculty master registry operations
+const adminRegistryService = require('../services/adminRegistry.service');
+const { generateFacultyId } = require('../utils/idGenerator');
 
 // Define AdminController class handling system administration, user approval lifecycles, platform settings, and audit logs
 class AdminController {
@@ -179,26 +182,37 @@ class AdminController {
     try {
       // Destructure query parameters for filtering, search, and pagination with defaults
       const { role, status, search, page = 1, limit = 10 } = req.query;
-      // Initialize empty MongoDB query filter object
-      const query = {};
+      const conditions = [];
+
       // Filter by role if specified in query
-      if (role) query.role = role;
+      if (role) conditions.push({ role });
+
       // Filter by status if specified in query
-      if (status) query.status = status;
-      // Build case-insensitive regex search across name, email, and instituteCode if search query exists
-      if (search) {
-        // Assign $or array to match search pattern against user fields
-        query.$or = [
-          // Case-insensitive regex match on user name
-          { name: { $regex: search, $options: 'i' } },
-          // Case-insensitive regex match on user email
-          { email: { $regex: search, $options: 'i' } },
-          // Case-insensitive regex match on institute code
-          { instituteCode: { $regex: search, $options: 'i' } },
-        // Terminate $or array
-        ];
-      // Terminate search condition check
+      if (status) {
+        if (status === 'inactive') {
+          conditions.push({
+            $or: [{ status: 'inactive' }, { status: 'revoked' }, { isActive: false }],
+          });
+        } else if (status === 'active') {
+          conditions.push({ status: 'active', isActive: true });
+        } else {
+          conditions.push({ status });
+        }
       }
+
+      // Build case-insensitive regex search across name, email, and instituteCode if search query exists
+      if (search && search.trim()) {
+        const searchRegex = { $regex: search.trim(), $options: 'i' };
+        conditions.push({
+          $or: [
+            { name: searchRegex },
+            { email: searchRegex },
+            { instituteCode: searchRegex },
+          ],
+        });
+      }
+
+      const query = conditions.length === 0 ? {} : conditions.length === 1 ? conditions[0] : { $and: conditions };
 
       // Compute number of documents to skip for pagination
       const skip = (page - 1) * limit;
@@ -351,6 +365,15 @@ class AdminController {
         user.revokedAt = null;
         user.revokedBy = null;
         await user.save();
+
+        // Synchronize approved faculty members into authoritative FacultyRegistry
+        if (user.role === 'instructor') {
+          if (!user.facultyId) {
+            user.facultyId = await generateFacultyId();
+            await user.save();
+          }
+          await adminRegistryService.syncFacultyMemberToRegistry(user);
+        }
 
         // 1. Create audit log entry conforming to existing audit schema
         try {
@@ -770,7 +793,7 @@ class AdminController {
       }
 
       // Extract optional override role from request body
-      const { role } = req.body;
+      const { role } = req.body || {};
       // If a valid role was provided, assign it to the user
       if (role && ['student', 'instructor'].includes(role)) {
         // Update user's system role
@@ -794,6 +817,15 @@ class AdminController {
       user.revokedBy = null;
       // Persist user updates to database
       await user.save();
+
+      // If approved user is an instructor/faculty member, synchronize with FacultyRegistry
+      if (user.role === 'instructor') {
+        if (!user.facultyId) {
+          user.facultyId = await generateFacultyId();
+          await user.save();
+        }
+        await adminRegistryService.syncFacultyMemberToRegistry(user);
+      }
 
       // Create an audit log entry documenting user approval
       await AuditLog.create({
@@ -1211,6 +1243,20 @@ class AdminController {
         user.revokedBy = req.user._id;
         // Invalidate active sessions upon deactivation
         user.tokenVersion = (user.tokenVersion || 0) + 1;
+
+        // Revoke all active sessions in MongoDB
+        await Session.updateMany(
+          { userId: user._id, status: 'active' },
+          {
+            $set: {
+              status: 'revoked',
+              revokedAt: new Date(),
+              revocationReason: 'admin_deactivation: Account deactivated by administrator',
+            },
+          }
+        ).catch((err) => {
+          console.warn('[AdminController] Error revoking sessions for user:', err.message);
+        });
       // Terminate deactivation timestamp conditional
       } else {
         // Increment tokenVersion upon reactivation so old tokens cannot be reused
@@ -1261,6 +1307,419 @@ class AdminController {
     // Terminate try-catch block
     }
   // Terminate toggleUserStatus method definition
+  }
+
+  // Controller action to activate a user account
+  async activateUser(req, res, next) {
+    try {
+      if (!req.user || req.user.role !== 'admin') {
+        return errorResponse(res, 'Access denied. Administrator privileges required.', 403);
+      }
+
+      const user = await User.findById(req.params.id);
+      if (!user) {
+        return errorResponse(res, 'User not found', 404);
+      }
+
+      if (user.isActive && user.status === 'active') {
+        return errorResponse(res, 'User account is already active', 400);
+      }
+
+      user.isActive = true;
+      user.status = 'active';
+      user.revokedAt = null;
+      user.revokedBy = null;
+      user.rejectionReason = null;
+      user.tokenVersion = (user.tokenVersion || 0) + 1;
+      await user.save();
+
+      // Synchronize activated status to FacultyRegistry if user is an instructor
+      if (user.role === 'instructor') {
+        if (!user.facultyId) {
+          user.facultyId = await generateFacultyId();
+          await user.save();
+        }
+        await adminRegistryService.syncFacultyMemberToRegistry(user);
+      }
+
+      try {
+        await AuditLog.create({
+          userId: req.user._id,
+          action: 'USER_ACTIVATED',
+          entityType: 'User',
+          entityId: user._id.toString(),
+          details: { targetEmail: user.email, status: user.status },
+          ipAddress: req.ip,
+        });
+      } catch (auditErr) {
+        console.warn('[AdminController] Audit log creation failed for activate:', auditErr.message);
+      }
+
+      try {
+        await Notification.create({
+          userId: user._id,
+          title: 'Account Access Activated',
+          message: 'Your account access has been activated by an administrator.',
+          type: 'system',
+        });
+      } catch (notifErr) {
+        console.warn('[AdminController] In-app notification error on activate:', notifErr.message);
+      }
+
+      return successResponse(res, `Account activated for ${user.name}`, {
+        id: user._id.toString(),
+        isActive: user.isActive,
+        status: user.status,
+      });
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  // Controller action to deactivate an active user account
+  async deactivateUser(req, res, next) {
+    try {
+      if (!req.user || req.user.role !== 'admin') {
+        return errorResponse(res, 'Access denied. Administrator privileges required.', 403);
+      }
+
+      const user = await User.findById(req.params.id);
+      if (!user) {
+        return errorResponse(res, 'User not found', 404);
+      }
+
+      if (user._id.toString() === req.user._id.toString()) {
+        return errorResponse(res, 'You cannot deactivate your own administrator account', 400);
+      }
+
+      if (!user.isActive && (user.status === 'inactive' || user.status === 'revoked')) {
+        return errorResponse(res, 'User account is already inactive', 400);
+      }
+
+      const reason = (req.body?.reason && typeof req.body.reason === 'string' && req.body.reason.trim())
+        ? req.body.reason.trim()
+        : 'Account deactivated by administrator';
+
+      user.isActive = false;
+      user.status = 'inactive';
+      user.revokedAt = new Date();
+      user.revokedBy = req.user._id;
+      user.rejectionReason = reason;
+      user.tokenVersion = (user.tokenVersion || 0) + 1;
+      await user.save();
+
+      // Synchronize inactive status to FacultyRegistry if user is an instructor
+      if (user.role === 'instructor') {
+        await FacultyRegistry.updateOne(
+          { $or: [{ email: user.email }, { facultyId: user.facultyId }] },
+          { $set: { status: 'inactive' } }
+        );
+      }
+
+      // Invalidate all active sessions in MongoDB
+      await Session.updateMany(
+        { userId: user._id, status: 'active' },
+        {
+          $set: {
+            status: 'revoked',
+            revokedAt: new Date(),
+            revocationReason: `admin_deactivation: ${reason}`,
+          },
+        }
+      ).catch((err) => {
+        console.warn('[AdminController] Error revoking sessions on deactivation:', err.message);
+      });
+
+      try {
+        await AuditLog.create({
+          userId: req.user._id,
+          action: 'USER_DEACTIVATED',
+          entityType: 'User',
+          entityId: user._id.toString(),
+          details: { targetEmail: user.email, status: user.status, reason },
+          ipAddress: req.ip,
+        });
+      } catch (auditErr) {
+        console.warn('[AdminController] Audit log creation failed for deactivation:', auditErr.message);
+      }
+
+      try {
+        await Notification.create({
+          userId: user._id,
+          title: 'Account Access Deactivated',
+          message: `Your account access has been deactivated: ${reason}`,
+          type: 'system',
+        });
+      } catch (notifErr) {
+        console.warn('[AdminController] In-app notification error on deactivate:', notifErr.message);
+      }
+
+      return successResponse(res, `Account deactivated for ${user.name}`, {
+        id: user._id.toString(),
+        isActive: user.isActive,
+        status: user.status,
+      });
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  // Controller action to bulk deactivate multiple active user accounts
+  async bulkDeactivateUsers(req, res, next) {
+    try {
+      if (!req.user || req.user.role !== 'admin') {
+        return errorResponse(res, 'Access denied. Administrator privileges required.', 403);
+      }
+
+      const { userIds, reason: providedReason } = req.body;
+      if (!userIds || !Array.isArray(userIds) || userIds.length === 0) {
+        return errorResponse(res, 'Please provide an array of user IDs to deactivate', 400);
+      }
+
+      const defaultReason = 'Account access deactivated by administrator';
+      const deactivationReason = (providedReason && typeof providedReason === 'string' && providedReason.trim())
+        ? providedReason.trim()
+        : defaultReason;
+
+      const deactivated = [];
+      const skipped = [];
+
+      for (const id of userIds) {
+        if (!id || (typeof id !== 'string' && typeof id !== 'object')) {
+          skipped.push({ id: String(id), reason: 'Invalid user ID format' });
+          continue;
+        }
+
+        let user;
+        try {
+          user = await User.findById(id);
+        } catch (idErr) {
+          skipped.push({ id: String(id), reason: 'Invalid user identifier' });
+          continue;
+        }
+
+        if (!user) {
+          skipped.push({ id: String(id), reason: 'User not found' });
+          continue;
+        }
+
+        const userIdStr = user._id.toString();
+
+        if (userIdStr === req.user._id.toString()) {
+          skipped.push({
+            id: userIdStr,
+            email: user.email,
+            reason: 'You cannot deactivate your own administrator account',
+          });
+          continue;
+        }
+
+        if (user.role === 'admin') {
+          skipped.push({
+            id: userIdStr,
+            email: user.email,
+            reason: 'Cannot deactivate administrator accounts via bulk operation',
+          });
+          continue;
+        }
+
+        if (user.status !== 'active' || !user.isActive) {
+          skipped.push({
+            id: userIdStr,
+            email: user.email,
+            status: user.status,
+            reason: `User is not in active status (currently "${user.status}"). Only active users can be deactivated.`,
+          });
+          continue;
+        }
+
+        user.status = 'inactive';
+        user.isActive = false;
+        user.revokedAt = new Date();
+        user.revokedBy = req.user._id;
+        user.rejectionReason = deactivationReason;
+        user.tokenVersion = (user.tokenVersion || 0) + 1;
+        await user.save();
+
+        // Synchronize inactive status to FacultyRegistry if user is an instructor
+        if (user.role === 'instructor') {
+          await FacultyRegistry.updateOne(
+            { $or: [{ email: user.email }, { facultyId: user.facultyId }] },
+            { $set: { status: 'inactive' } }
+          );
+        }
+
+        await Session.updateMany(
+          { userId: user._id, status: 'active' },
+          {
+            $set: {
+              status: 'revoked',
+              revokedAt: new Date(),
+              revocationReason: `admin_bulk_deactivation: ${deactivationReason}`,
+            },
+          }
+        ).catch((err) => {
+          console.warn('[AdminController] Error revoking sessions on bulk deactivation:', err.message);
+        });
+
+        try {
+          await AuditLog.create({
+            userId: req.user._id,
+            action: 'USER_DEACTIVATED',
+            entityType: 'User',
+            entityId: userIdStr,
+            details: {
+              targetName: user.name,
+              targetEmail: user.email,
+              assignedRole: user.role,
+              reason: deactivationReason,
+              bulk: true,
+            },
+            ipAddress: req.ip,
+          });
+        } catch (auditErr) {
+          console.warn('[AdminController] Audit log creation failed for bulk deactivate:', auditErr.message);
+        }
+
+        try {
+          await Notification.create({
+            userId: user._id,
+            title: 'Account Access Deactivated',
+            message: `Your account access has been deactivated: ${deactivationReason}`,
+            type: 'system',
+          });
+        } catch (notifErr) {
+          console.warn('[AdminController] In-app notification creation error on bulk deactivate:', notifErr.message);
+        }
+
+        deactivated.push({
+          id: userIdStr,
+          name: user.name,
+          email: user.email,
+          role: user.role,
+          status: user.status,
+        });
+      }
+
+      const deactivatedCount = deactivated.length;
+      const skippedCount = skipped.length;
+      const message = `${deactivatedCount} account${deactivatedCount === 1 ? '' : 's'} deactivated, ${skippedCount} skipped.`;
+
+      return successResponse(res, message, {
+        deactivatedCount,
+        skippedCount,
+        deactivated,
+        skipped,
+      });
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  // Controller action to bulk activate multiple inactive user accounts
+  async bulkActivateUsers(req, res, next) {
+    try {
+      if (!req.user || req.user.role !== 'admin') {
+        return errorResponse(res, 'Access denied. Administrator privileges required.', 403);
+      }
+
+      const { userIds } = req.body;
+      if (!userIds || !Array.isArray(userIds) || userIds.length === 0) {
+        return errorResponse(res, 'Please provide an array of user IDs to activate', 400);
+      }
+
+      const activated = [];
+      const skipped = [];
+
+      for (const id of userIds) {
+        if (!id || (typeof id !== 'string' && typeof id !== 'object')) {
+          skipped.push({ id: String(id), reason: 'Invalid user ID format' });
+          continue;
+        }
+
+        let user;
+        try {
+          user = await User.findById(id);
+        } catch (idErr) {
+          skipped.push({ id: String(id), reason: 'Invalid user identifier' });
+          continue;
+        }
+
+        if (!user) {
+          skipped.push({ id: String(id), reason: 'User not found' });
+          continue;
+        }
+
+        const userIdStr = user._id.toString();
+
+        if (user.isActive && user.status === 'active') {
+          skipped.push({
+            id: userIdStr,
+            email: user.email,
+            reason: 'User account is already active',
+          });
+          continue;
+        }
+
+        user.status = 'active';
+        user.isActive = true;
+        user.revokedAt = null;
+        user.revokedBy = null;
+        user.rejectionReason = null;
+        user.tokenVersion = (user.tokenVersion || 0) + 1;
+        await user.save();
+
+        try {
+          await AuditLog.create({
+            userId: req.user._id,
+            action: 'USER_ACTIVATED',
+            entityType: 'User',
+            entityId: userIdStr,
+            details: {
+              targetName: user.name,
+              targetEmail: user.email,
+              assignedRole: user.role,
+              bulk: true,
+            },
+            ipAddress: req.ip,
+          });
+        } catch (auditErr) {
+          console.warn('[AdminController] Audit log creation failed for bulk activate:', auditErr.message);
+        }
+
+        try {
+          await Notification.create({
+            userId: user._id,
+            title: 'Account Access Activated',
+            message: 'Your account access has been activated by an administrator.',
+            type: 'system',
+          });
+        } catch (notifErr) {
+          console.warn('[AdminController] Notification error on bulk activate:', notifErr.message);
+        }
+
+        activated.push({
+          id: userIdStr,
+          name: user.name,
+          email: user.email,
+          role: user.role,
+          status: user.status,
+        });
+      }
+
+      const activatedCount = activated.length;
+      const skippedCount = skipped.length;
+      const message = `${activatedCount} account${activatedCount === 1 ? '' : 's'} activated, ${skippedCount} skipped.`;
+
+      return successResponse(res, message, {
+        activatedCount,
+        skippedCount,
+        activated,
+        skipped,
+      });
+    } catch (err) {
+      next(err);
+    }
   }
 
   // Controller action to retrieve paginated audit logs with optional action filtering
@@ -1386,7 +1845,46 @@ class AdminController {
       // Update maintenanceMode flag as boolean if specified
       if (maintenanceMode !== undefined) settings.maintenanceMode = Boolean(maintenanceMode);
       // Update announcementBanner text if specified
-      if (announcementBanner !== undefined) settings.announcementBanner = announcementBanner;
+      if (announcementBanner !== undefined) {
+        settings.announcementBanner = announcementBanner ? announcementBanner.trim() : '';
+        try {
+          const { Announcement } = require('../models');
+          if (!announcementBanner || !announcementBanner.trim()) {
+            await Announcement.updateMany(
+              { status: { $in: ['published', 'scheduled'] }, cancelledAt: null },
+              { status: 'cancelled', cancelledAt: new Date(), updatedBy: req.user._id }
+            );
+          } else {
+            const now = new Date();
+            const existingActive = await Announcement.findOne({
+              status: 'published',
+              cancelledAt: null,
+              expiryDate: { $gt: now },
+            });
+            if (existingActive) {
+              existingActive.message = announcementBanner.trim();
+              existingActive.updatedBy = req.user._id;
+              await existingActive.save();
+            } else {
+              await Announcement.create({
+                message: announcementBanner.trim(),
+                status: 'published',
+                startDate: now,
+                expiryDate: new Date(now.getTime() + 24 * 60 * 60 * 1000),
+                durationDays: 1,
+                durationHours: 0,
+                durationMinutes: 0,
+                targetAudience: 'all',
+                publishedAt: now,
+                createdBy: req.user._id,
+                updatedBy: req.user._id,
+              });
+            }
+          }
+        } catch (_) {
+          // Non-fatal sync
+        }
+      }
       // Update defaultPassingScore as number if specified
       if (defaultPassingScore !== undefined) settings.defaultPassingScore = Number(defaultPassingScore);
       // Update enableEmailNotifications flag as boolean if specified
@@ -1397,6 +1895,11 @@ class AdminController {
       if (supportEmail !== undefined) settings.supportEmail = supportEmail;
       // Update allowStudentReview flag as boolean if specified
       if (allowStudentReview !== undefined) settings.allowStudentReview = Boolean(allowStudentReview);
+      // Update institutional MFA email OTP policy configuration
+      if (req.body.mfaEmailOtpEnabled !== undefined) settings.mfaEmailOtpEnabled = Boolean(req.body.mfaEmailOtpEnabled);
+      if (req.body.mfaEmailOtpExpiryMinutes !== undefined) settings.mfaEmailOtpExpiryMinutes = Number(req.body.mfaEmailOtpExpiryMinutes);
+      if (req.body.mfaEmailOtpResendCooldownSeconds !== undefined) settings.mfaEmailOtpResendCooldownSeconds = Number(req.body.mfaEmailOtpResendCooldownSeconds);
+      if (req.body.mfaEmailOtpMaxResends !== undefined) settings.mfaEmailOtpMaxResends = Number(req.body.mfaEmailOtpMaxResends);
       // Record ID of administrator performing configuration update
       settings.updatedBy = req.user._id;
 

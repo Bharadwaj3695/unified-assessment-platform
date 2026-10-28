@@ -13,6 +13,7 @@ const {
 describe('Stage 1: Session Model & Cryptography Verification', () => {
   before(async () => {
     await connectDB();
+    await Session.init();
   });
 
   after(async () => {

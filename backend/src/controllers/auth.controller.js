@@ -321,6 +321,16 @@ class AuthController {
       const { code } = req.body;
       // Invoke confirmMfaSetup on authService with user ID and submitted code
       const result = await authService.confirmMfaSetup(req.user._id, code);
+      // If refreshed session tokens were issued, update HttpOnly refresh cookie and CSRF cookie
+      if (result.refreshToken) {
+        setRefreshCookie(res, result.refreshToken);
+        const csrfToken = generateCsrfToken();
+        setCsrfCookie(res, csrfToken);
+        result.csrfToken = csrfToken;
+        if (!env.EMIT_REFRESH_TOKEN_BODY) {
+          delete result.refreshToken;
+        }
+      }
       // Return HTTP 200 response confirming MFA activation and providing recovery codes
       return successResponse(res, result.message || 'MFA enabled successfully', result);
     // Catch block for invalid verification code or setup errors
@@ -406,6 +416,65 @@ class AuthController {
   // Terminate mfaRecovery method definition
   }
 
+  // Controller action to request and dispatch single-use 6-digit email OTP during MFA login
+  async mfaSendEmailOtp(req, res, next) {
+    // Begin try block for email OTP dispatch
+    try {
+      // Extract temporary signed MFA challenge token from request body
+      const { mfaToken } = req.body;
+      // Invoke sendMfaEmailOtp on authService with challenge token and client IP
+      const result = await authService.sendMfaEmailOtp({
+        mfaToken,
+        ipAddress: req.ip,
+      });
+      // Return HTTP 200 response confirming email dispatch with masked email and cooldown
+      return successResponse(res, result.message, {
+        maskedEmail: result.maskedEmail,
+        expiresIn: result.expiresIn,
+        resendCooldown: result.resendCooldown,
+      });
+    // Catch block for invalid token, rate limits, or delivery error
+    } catch (err) {
+      // Forward error to Express error-handling middleware
+      next(err);
+    // Terminate try-catch block
+    }
+  // Terminate mfaSendEmailOtp method definition
+  }
+
+  // Controller action to verify single-use 6-digit email OTP during MFA login
+  async mfaVerifyEmailOtp(req, res, next) {
+    // Begin try block for email OTP verification
+    try {
+      // Extract temporary MFA challenge token and submitted 6-digit email OTP code
+      const { mfaToken, code } = req.body;
+      // Invoke verifyMfaEmailOtp on authService with challenge token, code, and client IP
+      const result = await authService.verifyMfaEmailOtp({
+        mfaToken,
+        code,
+        ipAddress: req.ip,
+      });
+      // Set HttpOnly refresh cookie and companion CSRF cookie
+      if (result.refreshToken) {
+        setRefreshCookie(res, result.refreshToken);
+        const csrfToken = generateCsrfToken();
+        setCsrfCookie(res, csrfToken);
+        result.csrfToken = csrfToken;
+        if (!env.EMIT_REFRESH_TOKEN_BODY) {
+          delete result.refreshToken;
+        }
+      }
+      // Return HTTP 200 response with full authentication tokens upon successful email OTP verification
+      return successResponse(res, 'Email verification successful', result);
+    // Catch block to intercept invalid code or expired challenge token
+    } catch (err) {
+      // Forward error to Express error-handling middleware
+      next(err);
+    // Terminate try-catch block
+    }
+  // Terminate mfaVerifyEmailOtp method definition
+  }
+
   // Controller action to disable MFA protection on user account
   async mfaDisable(req, res, next) {
     // Begin try block for MFA deactivation
@@ -467,6 +536,57 @@ class AuthController {
     // Terminate try-catch block
     }
   // Terminate mfaRegenerateRecoveryCodes method definition
+  }
+
+  // Controller action to initiate Email OTP enrollment for authenticated user
+  async mfaEmailOtpSetup(req, res, next) {
+    try {
+      const { password, code } = req.body;
+      const result = await authService.initiateEmailOtpSetup(req.user._id, { password, code });
+      return successResponse(res, result.message, result);
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  // Controller action to confirm Email OTP enrollment using valid 6-digit code
+  async mfaEmailOtpSetupConfirm(req, res, next) {
+    try {
+      const { code } = req.body;
+      const result = await authService.confirmEmailOtpSetup(req.user._id, code);
+      return successResponse(res, result.message, result);
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  // Controller action to disable Email OTP independently
+  async mfaEmailOtpDisable(req, res, next) {
+    try {
+      const { password, code } = req.body;
+      const result = await authService.disableEmailOtp({
+        userId: req.user._id,
+        password,
+        code,
+        ipAddress: req.ip,
+      });
+      return successResponse(res, result.message, result);
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  // Controller action to send a test verification email code
+  async mfaEmailOtpSendTest(req, res, next) {
+    try {
+      const result = await authService.sendEmailOtpTest({
+        userId: req.user._id,
+        ipAddress: req.ip,
+      });
+      return successResponse(res, result.message, result);
+    } catch (err) {
+      next(err);
+    }
   }
 
   // Controller action to issue new access token using a valid refresh token

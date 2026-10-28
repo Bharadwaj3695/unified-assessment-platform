@@ -78,6 +78,7 @@ describe('Stage 3: Secure Cookies, Session Lifecycle, CSRF & HTTP Caching', () =
     it('1.2 MFA challenge initiation should NOT issue refresh or CSRF cookies', async () => {
       // Temporarily enable MFA for studentUser to test challenge isolation
       studentUser.mfaEnabled = true;
+      studentUser.mfaSecret = 'JBSWY3DPEHPK3PXP';
       await studentUser.save();
 
       try {
@@ -100,6 +101,7 @@ describe('Stage 3: Secure Cookies, Session Lifecycle, CSRF & HTTP Caching', () =
         assert.strictEqual(refreshCookie, undefined, 'MFA challenge must NEVER issue refresh cookie');
       } finally {
         studentUser.mfaEnabled = false;
+        studentUser.mfaSecret = null;
         await studentUser.save();
       }
     });

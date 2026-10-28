@@ -10,6 +10,10 @@ const morgan = require('morgan');
 const path = require('path');
 // Centralized application error handling middleware that captures and formats synchronous and asynchronous errors
 const { errorHandler } = require('./middleware/error.middleware');
+// Mongoose ODM for database connection state inspection
+const mongoose = require('mongoose');
+// Database readiness middleware preventing queries against disconnected database
+const { checkDbReady } = require('./middleware/dbCheck.middleware');
 
 // Authentication and session management routes (register, login, MFA, Google SSO, password recovery)
 const authRoutes = require('./routes/auth.routes');
@@ -33,6 +37,10 @@ const analyticsRoutes = require('./routes/analytics.routes');
 const questionBankRoutes = require('./routes/questionBank.routes');
 // Question document ingestion (PDF, DOCX) and Google Forms import pipeline routes
 const questionImportRoutes = require('./routes/questionImport.routes');
+// Student credential, award snapshot, and certificate verification routes
+const certificateRoutes = require('./routes/certificate.routes');
+// System-wide broadcast announcement routes
+const announcementRoutes = require('./routes/announcement.routes');
 // Centralized rate limiting middleware to prevent brute-force attacks and throttle excessive API traffic
 const { apiRateLimiter, authRateLimiter } = require('./middleware/rateLimit.middleware');
 
@@ -142,6 +150,7 @@ app.get('/', (req, res) => {
     endpoints: {
       auth: '/api/auth',
       assessments: '/api/assessments',
+      certificates: '/api/certificates',
       submissions: '/api/submissions',
       evaluations: '/api/evaluations',
       users: '/api/users',
@@ -151,16 +160,24 @@ app.get('/', (req, res) => {
       questionImport: '/api/question-import',
       notifications: '/api/notifications',
       proctoring: '/api/proctoring',
+      announcements: '/api/announcements',
     },
   });
 });
 
 // Centralized health check handler returning JSON status and timestamp for container orchestrators and monitoring
 const handleHealthCheck = (req, res) => {
-  // Return HTTP 200 OK with health confirmation and ISO timestamp
-  res.status(200).json({
+  // Check active Mongoose database connection state (1 = connected)
+  const isDbConnected = mongoose.connection.readyState === 1;
+  const status = isDbConnected ? 'healthy' : 'unhealthy';
+  const statusCode = isDbConnected ? 200 : 503;
+
+  // Return health status along with explicit database connectivity state
+  res.status(statusCode).json({
     // Service operational state
-    status: 'healthy',
+    status,
+    // Database connectivity state
+    database: isDbConnected ? 'connected' : 'disconnected',
     // Current UTC timestamp in ISO 8601 format
     timestamp: new Date().toISOString(),
     // Service name identifier
@@ -172,10 +189,21 @@ app.get('/api/health', handleHealthCheck);
 // Bind health check handler to /health for load balancer probes and Kubernetes readiness probes
 app.get('/health', handleHealthCheck);
 
+// Guard all stateful API endpoints ensuring database is ready before executing queries
+app.use('/api', (req, res, next) => {
+  // Allow health checks through unconditionally
+  if (req.path === '/health' || req.path === '/health/') {
+    return next();
+  }
+  return checkDbReady(req, res, next);
+});
+
 // Mount authentication routes with dedicated brute-force rate limiter to protect login and registration
 app.use('/api/auth', authRateLimiter, authRoutes);
 // Mount assessment authoring, scheduling, and catalog management routes
 app.use('/api/assessments', assessmentRoutes);
+// Mount student credential awards and certificate verification routes
+app.use('/api/certificates', certificateRoutes);
 // Mount student assessment attempt and autosave submission routes
 app.use('/api/submissions', submissionRoutes);
 // Mount instructor evaluation, subjective grading, and feedback routes
@@ -194,6 +222,8 @@ app.use('/api/analytics', analyticsRoutes);
 app.use('/api/question-bank', questionBankRoutes);
 // Mount multi-format question file parser and Google Forms import processing routes
 app.use('/api/question-import', questionImportRoutes);
+// Mount system-wide broadcast announcement routes
+app.use('/api/announcements', announcementRoutes);
 
 // Register centralized error handling middleware as the terminal handler in the Express pipeline
 app.use(errorHandler);
