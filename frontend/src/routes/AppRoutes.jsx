@@ -4,6 +4,8 @@ import { Routes, Route, Navigate, useLocation } from 'react-router-dom';
 // Layouts section
 // Import the public/main layout wrapper component
 import MainLayout from '../layouts/MainLayout';
+// Import the public landing page layout wrapper component
+import PublicLayout from '../layouts/PublicLayout';
 // Import the authentication pages layout wrapper component
 import AuthLayout from '../layouts/AuthLayout';
 // Import the student workspace layout wrapper component
@@ -34,12 +36,16 @@ import ResetPassword from '../pages/auth/ResetPassword';
 import GoogleCallback from '../pages/auth/GoogleCallback';
 // Import the two-factor authentication TOTP verification page component
 import MfaVerify from '../pages/auth/MfaVerify';
+// Import the two-factor authentication authenticator app enrollment page component
+import MfaSetup from '../pages/auth/MfaSetup';
 // Import the student main dashboard page component
 import StudentDashboard from '../pages/student/Dashboard';
 // Import the student interactive assessment taking component
 import StudentAttempt from '../pages/student/Attempt';
 // Import the student account profile and credentials settings page component
 import StudentProfile from '../pages/student/Profile';
+// Import the student certifications and earned credential awards page component
+import StudentCertifications from '../pages/student/Certifications';
 // Import the instructor main dashboard page component
 import InstructorDashboard from '../pages/instructor/Dashboard';
 // Import the instructor account profile page component
@@ -74,6 +80,8 @@ import FacultyManagement from '../pages/admin/FacultyManagement';
 import StudentRegistryPage from '../pages/admin/StudentRegistry';
 // Import the faculty authoritative master registry component
 import FacultyRegistryPage from '../pages/admin/FacultyRegistry';
+// Import the administrator account profile page component
+import AdminProfile from '../pages/admin/Profile';
 // Import the generic 404 page not found fallback component
 import NotFound from '../pages/NotFound';
 
@@ -99,9 +107,11 @@ const AppRoutes = () => {
       <Route path="/reset-password" element={<SearchPreservingNavigate to="/auth/reset-password" />} />
       {/* Route redirect alias forwarding /mfa-verify directly to canonical /auth/mfa-verify */}
       <Route path="/mfa-verify" element={<SearchPreservingNavigate to="/auth/mfa-verify" />} />
+      {/* Route redirect alias forwarding /mfa-setup directly to canonical /auth/mfa-setup */}
+      <Route path="/mfa-setup" element={<SearchPreservingNavigate to="/auth/mfa-setup" />} />
 
-      {/* Route container wrapping public landing page with MainLayout */}
-      <Route path="/" element={<MainLayout showSidebar={false} />}>
+      {/* Route container wrapping public landing page with PublicLayout */}
+      <Route path="/" element={<PublicLayout />}>
         {/* Default index route rendering the LandingPage component */}
         <Route index element={<LandingPage />} />
       {/* Conclude public landing page route container */}
@@ -121,6 +131,8 @@ const AppRoutes = () => {
         <Route path="google/callback" element={<GoogleCallback />} />
         {/* Child route for two-factor authentication challenge */}
         <Route path="mfa-verify" element={<MfaVerify />} />
+        {/* Child route for authenticator app enrollment */}
+        <Route path="mfa-setup" element={<MfaSetup />} />
         {/* Index route redirecting default /auth path to /auth/login */}
         <Route index element={<Navigate to="/auth/login" replace />} />
       {/* Conclude authentication route container */}
@@ -140,6 +152,10 @@ const AppRoutes = () => {
             <Route path="assessments" element={<Navigate to="/student/catalog" replace />} />
             {/* Dynamic route for active assessment examination session */}
             <Route path="attempt/:id" element={<StudentAttempt />} />
+            {/* Student certifications and earned credential awards */}
+            <Route path="certifications" element={<StudentCertifications />} />
+            {/* Route alias forwarding /student/my-certifications to /student/certifications */}
+            <Route path="my-certifications" element={<Navigate to="/student/certifications" replace />} />
             {/* Student submission history and score review */}
             <Route path="submissions" element={<StudentDashboard />} />
             {/* Direct deep-link to submission evaluation feedback */}
@@ -222,10 +238,10 @@ const AppRoutes = () => {
             <Route path="assessments" element={<AdminDashboard />} />
             {/* Immutable security audit logs and event history */}
             <Route path="logs" element={<AdminDashboard />} />
-            {/* Global platform configuration settings */}
+            {/* Global platform configuration, operational preferences, and MFA security settings */}
             <Route path="settings" element={<AdminDashboard />} />
-            {/* Admin profile redirect forwarding to platform settings */}
-            <Route path="profile" element={<Navigate to="/admin/settings" replace />} />
+            {/* Administrator personal and institutional identity, credentials, and profile details */}
+            <Route path="profile" element={<AdminProfile />} />
             {/* Default admin index redirecting root /admin to /admin/dashboard */}
             <Route index element={<Navigate to="/admin/dashboard" replace />} />
           {/* Conclude admin layout route container */}

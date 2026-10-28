@@ -17,8 +17,8 @@ const Card = ({
       {...props}
     >
       {(title || action || subtitle) && (
-        <div className="flex items-start justify-between border-b border-surface-light-border dark:border-surface-dark-border px-5 py-4">
-          <div>
+        <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3 border-b border-surface-light-border dark:border-surface-dark-border px-4 sm:px-5 py-3.5 sm:py-4">
+          <div className="min-w-0">
             {title && (
               <h3 className="text-base font-bold tracking-tight text-slate-900 dark:text-slate-100">
                 {title}
@@ -30,7 +30,7 @@ const Card = ({
               </p>
             )}
           </div>
-          {action && <div className="ml-4 flex-shrink-0">{action}</div>}
+          {action && <div className="flex-shrink-0">{action}</div>}
         </div>
       )}
 

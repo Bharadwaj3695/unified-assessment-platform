@@ -4,8 +4,7 @@ import Button from '../ui/Button';
 import Spinner from '../ui/Spinner';
 import EmptyState from '../ui/EmptyState';
 import questionBankService from '../../services/questionBank.service';
-import useDebounce from '../../hooks/useDebounce';
-import { Search,CheckSquare, Square} from 'lucide-react';
+import { CheckSquare, Square } from 'lucide-react';
 
 const QuestionBankPickerModal = ({ isOpen, onClose, onSelectQuestions }) => {
   const [questions, setQuestions] = useState([]);
@@ -13,8 +12,6 @@ const QuestionBankPickerModal = ({ isOpen, onClose, onSelectQuestions }) => {
   const [error, setError] = useState(null);
 
   // Filters
-  const [searchTerm, setSearchTerm] = useState('');
-  const debouncedSearch = useDebounce(searchTerm, 300);
   const [selectedCategory, setSelectedCategory] = useState('All');
   const [selectedDifficulty, setSelectedDifficulty] = useState('All');
   const [selectedBloom, setSelectedBloom] = useState('All');
@@ -41,7 +38,6 @@ const QuestionBankPickerModal = ({ isOpen, onClose, onSelectQuestions }) => {
       setIsLoading(true);
       setError(null);
       const params = {};
-      if (debouncedSearch.trim()) params.search = debouncedSearch.trim();
       if (selectedCategory !== 'All') params.category = selectedCategory;
       if (selectedDifficulty !== 'All') params.difficulty = selectedDifficulty;
       if (selectedBloom !== 'All') params.bloomLevel = selectedBloom;
@@ -61,7 +57,7 @@ const QuestionBankPickerModal = ({ isOpen, onClose, onSelectQuestions }) => {
         setIsLoading(false);
       }
     }
-  }, [debouncedSearch, selectedCategory, selectedDifficulty, selectedBloom, selectedType]);
+  }, [selectedCategory, selectedDifficulty, selectedBloom, selectedType]);
 
   useEffect(() => {
     if (isOpen) {
@@ -136,21 +132,11 @@ const QuestionBankPickerModal = ({ isOpen, onClose, onSelectQuestions }) => {
       onClose={onClose}
       title="Import Questions from Question Bank"
       size="xl"
+      maxWidth="max-w-4xl"
     >
       <div className="space-y-4">
         {/* Filter Toolbar */}
-        <div className="bg-slate-50 p-3 rounded-lg border border-slate-200 space-y-3">
-          <div className="relative">
-            <Search className="w-4 h-4 text-slate-400 absolute left-3 top-3" />
-            <input
-              type="text"
-              placeholder="Search questions by keyword or topic..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full pl-9 pr-4 py-2 border border-slate-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 bg-white"
-            />
-          </div>
-
+        <div className="bg-slate-50 dark:bg-slate-900/60 p-3 rounded-lg border border-slate-200 dark:border-slate-800">
           <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
             <div>
               <label className="block text-slate-500 font-medium mb-1">Category</label>
@@ -302,7 +288,7 @@ const QuestionBankPickerModal = ({ isOpen, onClose, onSelectQuestions }) => {
         </div>
 
         {/* Footer Actions */}
-        <div className="flex items-center justify-end space-x-3 pt-3 border-t border-slate-200">
+        <div className="flex flex-col-reverse sm:flex-row sm:items-center sm:justify-end gap-2 sm:gap-3 pt-3 border-t border-slate-200">
           <Button variant="outline" onClick={onClose}>
             Cancel
           </Button>

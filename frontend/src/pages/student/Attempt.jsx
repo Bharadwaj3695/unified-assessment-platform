@@ -576,10 +576,10 @@ const Attempt = () => {
   return (
     <div className="max-w-6xl mx-auto space-y-6 pb-12">
       {/* Sticky Top Bar: Exam Title, Progress & Server Timer */}
-      <div className="sticky top-0 z-30 bg-white/95 dark:bg-[#1A202C]/95 backdrop-blur-md border border-[#EBE3D8] dark:border-[#2D3748] py-3 px-4 sm:px-6 rounded-2xl shadow-warm-xs transition-all">
-        <div className="flex flex-wrap items-center justify-between gap-4">
+      <div className="sticky top-0 z-30 bg-white/95 dark:bg-[#1A202C]/95 backdrop-blur-md border border-[#EBE3D8] dark:border-[#2D3748] py-2.5 sm:py-3 px-3 sm:px-6 rounded-2xl shadow-warm-xs transition-all">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 sm:gap-4">
           <div>
-            <div className="flex flex-wrap items-center gap-2">
+            <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
               <Badge variant="terracotta" size="sm">
                 {assessment?.category || 'Assessment'}
               </Badge>
@@ -610,12 +610,12 @@ const Attempt = () => {
               </span>
             </div>
             <video ref={videoRef} className="hidden" autoPlay playsInline muted />
-            <h1 className="text-lg sm:text-xl font-bold tracking-tight text-[#1F2937] dark:text-[#F9FAFB] line-clamp-1 mt-0.5">
+            <h1 className="text-base sm:text-xl font-bold tracking-tight text-[#1F2937] dark:text-[#F9FAFB] line-clamp-1 mt-0.5">
               {assessment?.title}
             </h1>
           </div>
 
-          <div className="flex items-center space-x-4">
+          <div className="flex flex-wrap items-center justify-between sm:justify-end gap-1.5 sm:gap-3 w-full sm:w-auto">
             {/* Autosave Status Indicator with ARIA live region and Retry button */}
             <div
               className="flex items-center space-x-1.5 text-xs"
@@ -658,7 +658,7 @@ const Attempt = () => {
 
             {/* Server-Authoritative Timer Pill */}
             <div
-              className={`flex items-center space-x-2 px-3.5 py-1.5 rounded-xl font-mono text-sm font-bold border shadow-xs ${
+              className={`flex items-center space-x-1.5 sm:space-x-2 px-2.5 sm:px-3 py-1 sm:py-1.5 rounded-xl font-mono text-xs sm:text-sm font-bold border shadow-xs ${
                 timeLeft !== null && timeLeft <= 60
                   ? 'bg-red-50 dark:bg-red-950/40 text-red-600 border-red-300 dark:border-red-800 animate-pulse'
                   : timeLeft !== null && timeLeft <= 300
@@ -666,7 +666,7 @@ const Attempt = () => {
                   : 'bg-[#F3F7FB] dark:bg-[#1E293B] text-[#1F2937] dark:text-[#F1F5F9] border-[#E2E8F0] dark:border-[#334155]'
               }`}
             >
-              <Clock className="w-4 h-4 flex-shrink-0 text-[#E05D38]" />
+              <Clock className="w-3.5 h-3.5 sm:w-4 sm:h-4 flex-shrink-0 text-[#E05D38]" />
               <span>{formatTimer(timeLeft)}</span>
             </div>
 
@@ -677,7 +677,7 @@ const Attempt = () => {
               iconPosition="right"
               onClick={() => setIsSubmitModalOpen(true)}
             >
-              Submit Exam
+              Submit<span className="hidden sm:inline"> Exam</span>
             </Button>
           </div>
         </div>
@@ -1132,7 +1132,7 @@ const Attempt = () => {
               </div>
 
               {/* Navigation Controls */}
-              <div className="flex items-center justify-between pt-4 border-t border-surface-light-border dark:border-surface-dark-border">
+              <div className="flex items-center justify-between gap-2 pt-4 border-t border-surface-light-border dark:border-surface-dark-border">
                 <Button
                   variant="outline"
                   size="sm"
@@ -1140,7 +1140,7 @@ const Attempt = () => {
                   onClick={() => setCurrentIdx((prev) => Math.max(0, prev - 1))}
                   disabled={currentIdx === 0}
                 >
-                  Previous Question
+                  Previous<span className="hidden sm:inline"> Question</span>
                 </Button>
 
                 {isLastQuestion ? (
@@ -1161,7 +1161,7 @@ const Attempt = () => {
                     iconPosition="right"
                     onClick={() => setCurrentIdx((prev) => Math.min(totalQuestions - 1, prev + 1))}
                   >
-                    Next Question
+                    Next<span className="hidden sm:inline"> Question</span>
                   </Button>
                 )}
               </div>
@@ -1180,7 +1180,7 @@ const Attempt = () => {
             title="Question Palette"
             subtitle={`${answeredCount} of ${totalQuestions} answered`}
           >
-            <div className="grid grid-cols-5 gap-2.5">
+            <div className="grid grid-cols-4 xs:grid-cols-5 sm:grid-cols-6 lg:grid-cols-4 xl:grid-cols-5 gap-2">
               {questions.map((q, idx) => {
                 const ans = answers[q._id];
                 const isAnswered =
@@ -1248,6 +1248,7 @@ const Attempt = () => {
               size="sm"
               onClick={() => handleFinalSubmit(false)}
               isLoading={isSubmitting}
+              loadingText="Submitting..."
               icon={Send}
             >
               Confirm Submission

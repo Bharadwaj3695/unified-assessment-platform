@@ -33,10 +33,12 @@ const Button = ({
   size = 'md',
   isLoading = false,
   loading = false,
+  loadingText = null,
   disabled = false,
   type = 'button',
   icon: Icon = null,
   iconPosition = 'left',
+  iconClassName = '',
   fullWidth = false,
   className = '',
   onClick,
@@ -62,16 +64,20 @@ const Button = ({
       {isSpinning ? (
         <Spinner size="sm" color="currentColor" className="mr-2" />
       ) : Icon && iconPosition === 'left' ? (
-        <Icon className="w-4 h-4 mr-2" />
+        <Icon className={`w-4 h-4 mr-2 ${iconClassName}`.trim()} />
       ) : null}
 
-      <span>{children}</span>
+      <span>{isSpinning && loadingText ? loadingText : children}</span>
 
       {!isSpinning && Icon && iconPosition === 'right' && (
-        <Icon className="w-4 h-4 ml-2" />
+        <Icon className={`w-4 h-4 ml-2 ${iconClassName}`.trim()} />
       )}
     </button>
   );
+};
+
+export const LoadingButton = ({ loadingText = 'Processing...', ...props }) => {
+  return <Button loadingText={loadingText} {...props} />;
 };
 
 export default Button;

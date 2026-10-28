@@ -200,7 +200,7 @@ const QuestionImportReview = () => {
 
   if (isLoading) {
     return (
-      <div className="max-w-6xl mx-auto px-4 sm:px-6 py-6 space-y-6">
+      <div className="max-w-6xl mx-auto space-y-6">
         <CardSkeleton count={3} />
       </div>
     );
@@ -224,7 +224,7 @@ const QuestionImportReview = () => {
   }
 
   return (
-    <div className="max-w-6xl mx-auto px-4 sm:px-6 py-6 space-y-6">
+    <div className="max-w-6xl mx-auto space-y-6">
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div className="flex items-center space-x-3">
@@ -286,12 +286,12 @@ const QuestionImportReview = () => {
       {/* Filter and Bulk Action Bar */}
       <Card className="p-4 flex flex-col md:flex-row md:items-center justify-between gap-4">
         {/* Status Filter Buttons */}
-        <div className="flex items-center space-x-2 text-xs">
+        <div className="flex items-center overflow-x-auto no-scrollbar space-x-2 text-xs pb-1 sm:pb-0">
           {['ALL', 'PENDING', 'ACCEPTED', 'REJECTED'].map((st) => (
             <button
               key={st}
               onClick={() => setFilterState(st)}
-              className={`px-3 py-1.5 rounded-md font-semibold transition-colors ${
+              className={`flex-shrink-0 whitespace-nowrap px-3 py-1.5 rounded-md font-semibold transition-colors ${
                 filterState === st
                   ? 'bg-primary-600 text-white shadow-sm'
                   : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
@@ -304,7 +304,7 @@ const QuestionImportReview = () => {
 
         {/* Bulk Actions */}
         {pendingQuestions.length > 0 && (
-          <div className="flex items-center gap-3">
+          <div className="flex flex-wrap items-center gap-3">
             <button
               onClick={toggleSelectAllPending}
               className="flex items-center gap-1.5 text-xs text-slate-600 font-medium hover:text-slate-900"

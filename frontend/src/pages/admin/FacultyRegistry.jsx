@@ -1,27 +1,16 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import useDebounce from '../../hooks/useDebounce';
+import { useRefresh } from '../../hooks/useRefresh';
 // Import UI icons from lucide-react used across the table, action buttons, and status badges
 import {
   // Icon representing a book or official master registry catalog
   BookOpen,
   // Icon for adding a new master record
   Plus,
-  // Icon representing search functionality in the query bar
-  Search,
-  // Icon representing filtering options
-  Filter,
-  // Icon indicating active status or confirmation
-  CheckCircle2,
-  // Icon indicating inactive or revoked status
-  XCircle,
-  // Icon for inspecting record details in a modal
-  Eye,
   // Icon for refreshing data or indicating a loading spinner
   RefreshCw,
-  // Icon for provisioning a user authentication account from a registry entry
-  UserPlus,
-  // Icon for deleting or removing a registry record
-  Trash2,
+  // Icon for presenting alert and error messages
+  AlertCircle,
 // End of icon imports from lucide-react
 } from 'lucide-react';
 // Import toast notification utility for displaying alerts to the user
@@ -39,6 +28,8 @@ const FacultyRegistryPage = () => {
   const [pagination, setPagination] = useState({ page: 1, limit: 10, total: 0, pages: 1 });
   // State flag indicating whether data fetching is currently in progress
   const [loading, setLoading] = useState(true);
+  // State storing error message if data fetching fails
+  const [error, setError] = useState(null);
   // State storing the search text entered by the user
   const [search, setSearch] = useState('');
   const debouncedSearch = useDebounce(search, 300);
@@ -70,12 +61,15 @@ const FacultyRegistryPage = () => {
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   // Memoized callback function to fetch faculty registry records with pagination, search, and status filters
-  const fetchRecords = useCallback(async () => {
+  const fetchRecords = useCallback(async (isManual = false) => {
     const requestId = ++activeRequestIdRef.current;
     // Wrap API call in try-catch-finally block to handle errors and loading state
     try {
-      // Set loading state to true while the request is being processed
-      setLoading(true);
+      // Set loading state to true only on initial/filter load
+      if (!isManual) {
+        setLoading(true);
+      }
+      setError(null);
       // Send GET request to backend via admin service with query parameters
       const res = await adminService.getFacultyRegistry({
         // Current active page number
@@ -93,18 +87,25 @@ const FacultyRegistryPage = () => {
         // Update records state with the fetched list
         setRecords(list);
         // Extract pagination metadata from response
-        const pag = res?.pagination || res?.data?.pagination;
+        const rawPag = res?.pagination || res?.data?.pagination;
         // If pagination metadata exists in response, update the pagination state
-        if (pag) {
-          // Set pagination state with values returned by backend
-          setPagination(pag);
+        if (rawPag) {
+          setPagination({
+            page: rawPag.currentPage || rawPag.page || 1,
+            limit: rawPag.perPage || rawPag.limit || 10,
+            total: rawPag.totalCount !== undefined ? rawPag.totalCount : (rawPag.total !== undefined ? rawPag.total : 0),
+            pages: rawPag.totalPages || rawPag.pages || 1,
+          });
         }
       }
     } catch (err) {
       if (requestId === activeRequestIdRef.current) {
         // Display error notification toast with message from backend or fallback text
-        toast.error(err.response?.data?.message || 'Failed to load Faculty Registry');
+        const errMsg = err.response?.data?.message || 'Failed to load Faculty Registry';
+        setError(errMsg);
+        toast.error(errMsg);
       }
+      throw err;
     } finally {
       if (requestId === activeRequestIdRef.current) {
         // Set loading state to false once request completes
@@ -114,10 +115,15 @@ const FacultyRegistryPage = () => {
   // Memoize dependency array ensuring fetchRecords recreates only when query params change
   }, [pagination.page, pagination.limit, debouncedSearch, statusFilter]);
 
+  const { isRefreshing, refresh: handleRefresh } = useRefresh(
+    () => fetchRecords(true),
+    { successMessage: 'Faculty registry refreshed!' }
+  );
+
   // Effect hook that triggers record fetching when fetchRecords callback updates
   useEffect(() => {
     // Invoke fetchRecords to load records on mount and upon filter changes
-    fetchRecords();
+    fetchRecords(false).catch(() => {});
   }, [fetchRecords]);
 
   // Form submit handler for executing a search query
@@ -174,22 +180,6 @@ const FacultyRegistryPage = () => {
     }
   };
 
-  // Handler for automatically provisioning a user authentication account from a registry record
-  const handleCreateUserAccount = async (record) => {
-    // Wrap provisioning call in try-catch block
-    try {
-      // Call service to provision user account using record ID
-      await adminService.createAccountForFacultyRegistry(record.id || record._id);
-      // Display success toast notification informing user account was created
-      toast.success(`User account provisioned for ${record.facultyId} (${record.email})`);
-      // Refresh records list to update UI state
-      fetchRecords();
-    } catch (err) {
-      // Display error notification toast if provisioning fails
-      toast.error(err.response?.data?.message || 'Failed to create user account from faculty registry');
-    }
-  };
-
   // Handler for toggling faculty record active/inactive status
   const handleToggleStatus = async (record) => {
     // Calculate inverted status value based on current record status
@@ -242,7 +232,7 @@ const FacultyRegistryPage = () => {
             {/* Lucide BookOpen icon representing faculty master data */}
             <BookOpen className="w-7 h-7 text-brand-primary" />
             {/* Header text heading */}
-            Faculty Registry (Master Data)
+            Faculty Registry
           </h1>
           {/* Subtitle description providing context about institutional master data */}
           <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
@@ -266,36 +256,14 @@ const FacultyRegistryPage = () => {
         </button>
       </div>
 
-      {/* Filter and Search Bar Section */}
+      {/* Filter Section */}
       <div className="p-4 rounded-2xl border border-surface-light-border dark:border-surface-dark-border bg-white dark:bg-surface-dark shadow-xs flex flex-col md:flex-row items-center justify-between gap-3">
-        {/* Search Input Form */}
-        <form onSubmit={handleSearchSubmit} className="relative w-full md:w-80">
-          {/* Magnifying glass search icon positioned inside input */}
-          <Search className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
-          {/* Search input field */}
-          <input
-            /* Set input type to text */
-            type="text"
-            /* Placeholder guidance text */
-            placeholder="Search by ID, name, or email..."
-            /* Controlled input value bound to search state */
-            value={search}
-            /* Update search state on input change */
-            onChange={(e) => setSearch(e.target.value)}
-            /* Input styling classes */
-            className="w-full pl-9 pr-4 py-1.5 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-900/40 text-slate-900 dark:text-slate-100 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-brand-primary"
-          />
-        </form>
+        <div className="text-xs font-semibold text-slate-500 dark:text-slate-400">
+          Showing {pagination.total} institutional faculty record{pagination.total !== 1 ? 's' : ''}
+        </div>
 
         {/* Controls container for filter dropdown and refresh button */}
         <div className="flex items-center gap-3 w-full md:w-auto">
-          {/* Filter icon and label wrapper */}
-          <div className="flex items-center gap-1.5 text-xs text-slate-500">
-            {/* Filter icon */}
-            <Filter className="w-3.5 h-3.5" />
-            {/* Filter title label */}
-            <span>Status:</span>
-          </div>
           {/* Status filter dropdown select */}
           <select
             /* Bound to statusFilter state */
@@ -307,11 +275,13 @@ const FacultyRegistryPage = () => {
               /* Reset pagination page to 1 */
               setPagination((prev) => ({ ...prev, page: 1 }));
             }}
+            /* Accessible label for screen readers */
+            aria-label="Filter by status"
             /* Dropdown styling classes */
             className="px-3 py-1.5 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-900/40 text-slate-700 dark:text-slate-300 focus:outline-none focus:ring-2 focus:ring-brand-primary"
           >
             {/* Option for displaying all records regardless of status */}
-            <option value="">All Statuses</option>
+            <option value="">All Status</option>
             {/* Option to filter by active records */}
             <option value="active">Active</option>
             {/* Option to filter by inactive records */}
@@ -322,15 +292,20 @@ const FacultyRegistryPage = () => {
           <button
             /* Button element type */
             type="button"
-            /* Click handler calling fetchRecords */
-            onClick={fetchRecords}
+            /* Click handler calling handleRefresh */
+            onClick={handleRefresh}
+            /* Disabled during active refresh */
+            disabled={isRefreshing}
+            /* Accessibility attributes */
+            aria-busy={isRefreshing}
+            aria-label={isRefreshing ? 'Refreshing faculty registry' : 'Refresh list'}
             /* Tooltip text on hover */
-            title="Refresh List"
+            title={isRefreshing ? 'Refreshing...' : 'Refresh List'}
             /* Button styling classes */
-            className="p-2 rounded-xl text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+            className="p-2 rounded-xl text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
           >
-            {/* Refresh icon with conditional spin animation when loading */}
-            <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
+            {/* Refresh icon with conditional spin animation when refreshing */}
+            <RefreshCw className={`w-3.5 h-3.5 ${isRefreshing ? 'animate-spin' : ''}`} />
           </button>
         </div>
       </div>
@@ -354,7 +329,7 @@ const FacultyRegistryPage = () => {
                 {/* Column for Status */}
                 <th className="py-3 px-4">Status</th>
                 {/* Column for Action Buttons */}
-                <th className="py-3 px-4 text-right">Actions</th>
+                <th className="py-3 px-4 text-right min-w-[220px]">Actions</th>
               </tr>
             </thead>
             {/* Table body */}
@@ -367,9 +342,34 @@ const FacultyRegistryPage = () => {
                     <td className="py-3.5 px-4"><div className="h-4 w-36 bg-slate-200 dark:bg-slate-700 rounded" /></td>
                     <td className="py-3.5 px-4"><div className="h-4 w-40 bg-slate-200 dark:bg-slate-700 rounded" /></td>
                     <td className="py-3.5 px-4"><div className="h-4 w-16 bg-slate-200 dark:bg-slate-700 rounded-full" /></td>
-                    <td className="py-3.5 px-4 text-right"><div className="h-7 w-20 bg-slate-200 dark:bg-slate-700 rounded ml-auto" /></td>
+                    <td className="py-3.5 px-4 text-right">
+                      <div className="flex items-center justify-end gap-1.5">
+                        <div className="h-6 w-12 bg-slate-200 dark:bg-slate-700 rounded-lg" />
+                        <div className="h-6 w-18 bg-slate-200 dark:bg-slate-700 rounded-lg" />
+                        <div className="h-6 w-14 bg-slate-200 dark:bg-slate-700 rounded-lg" />
+                      </div>
+                    </td>
                   </tr>
                 ))
+              /* Conditional render: Show error state message if data fetching fails */
+              ) : error ? (
+                /* Table row for error state */
+                <tr>
+                  {/* Spanning cell across all 5 columns */}
+                  <td colSpan="5" className="py-12 text-center text-rose-500">
+                    <AlertCircle className="w-10 h-10 mx-auto mb-2 text-rose-400 dark:text-rose-500" />
+                    <p className="font-semibold text-rose-600 dark:text-rose-400">{error}</p>
+                    <p className="text-xs text-slate-400 mt-1">An error occurred while loading faculty records</p>
+                    <button
+                      type="button"
+                      onClick={fetchRecords}
+                      className="mt-3 px-3 py-1.5 rounded-lg text-xs font-semibold bg-rose-50 hover:bg-rose-100 text-rose-700 dark:bg-rose-900/30 dark:hover:bg-rose-900/50 dark:text-rose-300 transition-colors inline-flex items-center gap-1.5"
+                    >
+                      <RefreshCw className="w-3.5 h-3.5" />
+                      Retry
+                    </button>
+                  </td>
+                </tr>
               /* Conditional render: Show empty state message if no records returned */
               ) : records.length === 0 ? (
                 /* Table row for empty state */
@@ -411,73 +411,40 @@ const FacultyRegistryPage = () => {
                       </span>
                     </td>
                     {/* Actions cell containing interactive action buttons */}
-                    <td className="py-3 px-4 text-right">
-                      {/* Button group container aligned to the right */}
+                    <td className="py-3 px-4 text-right whitespace-nowrap">
                       <div className="flex items-center justify-end gap-1.5">
-                        {/* Button to provision authentication user account for this faculty record */}
+                        {/* Named View button */}
                         <button
-                          /* Set button type */
                           type="button"
-                          /* Call handleCreateUserAccount with the current record */
-                          onClick={() => handleCreateUserAccount(r)}
-                          /* Tooltip description */
-                          title="Provision User Account"
-                          /* Button styling classes */
-                          className="p-1.5 rounded-lg text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-950/30 transition-colors"
-                        >
-                          {/* UserPlus icon */}
-                          <UserPlus className="w-4 h-4" />
-                        </button>
-                        {/* Button to view record details in a popup modal */}
-                        <button
-                          /* Set button type */
-                          type="button"
-                          /* Set selected record and open details modal */
                           onClick={() => {
-                            /* Set selected record state */
                             setSelectedRecord(r);
-                            /* Open details modal */
                             setIsDetailsModalOpen(true);
                           }}
-                          /* Tooltip description */
-                          title="View Details"
-                          /* Button styling classes */
-                          className="p-1.5 rounded-lg text-slate-400 hover:text-brand-primary hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+                          className="px-2.5 py-1 rounded-lg text-xs font-semibold border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700/60 hover:text-brand-primary dark:hover:text-brand-primary transition-colors cursor-pointer shadow-xs focus:outline-none focus:ring-2 focus:ring-brand-primary/20"
                         >
-                          {/* Eye icon */}
-                          <Eye className="w-4 h-4" />
+                          View
                         </button>
-                        {/* Button to toggle record active/inactive status */}
+
+                        {/* Toggle active/inactive status button */}
                         <button
-                          /* Set button type */
                           type="button"
-                          /* Call handleToggleStatus with current record */
                           onClick={() => handleToggleStatus(r)}
-                          /* Dynamic tooltip based on active status */
-                          title={r.status === 'active' ? 'Mark Inactive' : 'Mark Active'}
-                          /* Dynamic styling classes based on active status */
-                          className={`p-1.5 rounded-lg transition-colors ${
+                          className={`px-2.5 py-1 rounded-lg text-xs font-semibold border transition-colors cursor-pointer shadow-xs focus:outline-none focus:ring-2 ${
                             r.status === 'active'
-                              ? 'text-amber-500 hover:bg-amber-50 dark:hover:bg-amber-950/30'
-                              : 'text-emerald-500 hover:bg-emerald-50 dark:hover:bg-emerald-950/30'
+                              ? 'border-amber-200 dark:border-amber-800/60 bg-amber-50/60 dark:bg-amber-950/20 text-amber-700 dark:text-amber-400 hover:bg-amber-100/80 dark:hover:bg-amber-900/40 focus:ring-amber-500/20'
+                              : 'border-emerald-200 dark:border-emerald-800/60 bg-emerald-50/60 dark:bg-emerald-950/20 text-emerald-700 dark:text-emerald-400 hover:bg-emerald-100/80 dark:hover:bg-emerald-900/40 focus:ring-emerald-500/20'
                           }`}
                         >
-                          {/* Conditional icon rendering: XCircle when active, CheckCircle2 when inactive */}
-                          {r.status === 'active' ? <XCircle className="w-4 h-4" /> : <CheckCircle2 className="w-4 h-4" />}
+                          {r.status === 'active' ? 'Deactivate' : 'Activate'}
                         </button>
-                        {/* Button to delete record from master registry */}
+
+                        {/* Delete record button */}
                         <button
-                          /* Set button type */
                           type="button"
-                          /* Call handleDelete with current record */
                           onClick={() => handleDelete(r)}
-                          /* Tooltip description */
-                          title="Delete Record"
-                          /* Delete button styling classes */
-                          className="p-1.5 rounded-lg text-red-500 hover:bg-red-50 dark:hover:bg-red-950/30 transition-colors"
+                          className="px-2.5 py-1 rounded-lg text-xs font-semibold border border-red-200 dark:border-red-800/60 bg-red-50/60 dark:bg-red-950/20 text-red-600 dark:text-red-400 hover:bg-red-100/80 dark:hover:bg-red-900/40 transition-colors cursor-pointer shadow-xs focus:outline-none focus:ring-2 focus:ring-red-500/20"
                         >
-                          {/* Trash2 icon */}
-                          <Trash2 className="w-4 h-4" />
+                          Delete
                         </button>
                       </div>
                     </td>

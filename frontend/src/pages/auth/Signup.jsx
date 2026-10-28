@@ -23,7 +23,7 @@ import Badge from '../../components/ui/Badge';
 // Import visual editorial illustration component for auth views
 import AuthIllustration from '../../components/common/AuthIllustration';
 // Import vector icons from the lucide-react icon library
-import { User, Mail, Lock, Building, ArrowRight, ShieldCheck, GraduationCap, Calendar, CheckCircle } from 'lucide-react';
+import { User, Mail, Lock, Building, ArrowRight, ShieldCheck, GraduationCap, Calendar, CheckCircle, Home } from 'lucide-react';
 
 // Define the Yup validation schema for user registration fields
 const signupSchema = Yup.object().shape({
@@ -182,10 +182,23 @@ const Signup = () => {
 
   // Render the Signup component UI layout
   return (
-    // Outer card container with responsive grid layout and rounded styling
-    <div className="w-full max-w-5xl mx-auto rounded-3xl border border-surface-light-border dark:border-surface-dark-border bg-white dark:bg-surface-dark shadow-warm-lg overflow-hidden grid grid-cols-1 lg:grid-cols-12">
-      {/* Left Column: Brand & Editorial Illustration */}
-      <div className="hidden lg:flex lg:col-span-5 flex-col justify-between bg-gradient-to-br from-[#FFF4EB] via-[#FFF9F2] to-[#EEF6F4] dark:from-[#241712] dark:via-surface-dark dark:to-[#132822] p-5 sm:p-6 lg:p-6 xl:p-7 border-r border-surface-light-border dark:border-surface-dark-border">
+    <div className="w-full max-w-5xl mx-auto">
+      {/* Outer card container with responsive grid layout and rounded styling */}
+      <div className="rounded-3xl border border-surface-light-border dark:border-surface-dark-border bg-white dark:bg-surface-dark shadow-warm-lg overflow-hidden">
+        {/* Card Top Header with Home navigation */}
+        <div className="px-4 py-2.5 sm:px-6 sm:py-3 border-b border-surface-light-border/60 dark:border-surface-dark-border/60 bg-white/50 dark:bg-surface-dark/50 flex items-center justify-between">
+          <Link
+            to="/"
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold text-slate-600 dark:text-slate-300 hover:text-brand-primary dark:hover:text-brand-peach bg-white/70 dark:bg-surface-dark/70 hover:bg-white dark:hover:bg-surface-dark border border-surface-light-border dark:border-surface-dark-border shadow-warm-xs transition-colors cursor-pointer"
+          >
+            <Home className="w-3.5 h-3.5" />
+            <span>Home</span>
+          </Link>
+        </div>
+
+        <div className="grid grid-cols-1 lg:grid-cols-12">
+          {/* Left Column: Brand & Editorial Illustration */}
+          <div className="hidden lg:flex lg:col-span-5 flex-col justify-between bg-gradient-to-br from-[#FFF4EB] via-[#FFF9F2] to-[#EEF6F4] dark:from-[#241712] dark:via-surface-dark dark:to-[#132822] p-5 sm:p-6 lg:p-6 xl:p-7 border-r border-surface-light-border dark:border-surface-dark-border">
         {/* Brand header, badge, and descriptive messaging container */}
         <div>
           {/* Header block with logo badge and platform branding title */}
@@ -614,6 +627,7 @@ const Signup = () => {
                       size="md"
                       fullWidth
                       isLoading={isSubmitting}
+                      loadingText={values.role === 'student' ? 'Verifying & Creating...' : 'Submitting Application...'}
                       icon={ArrowRight}
                       iconPosition="right"
                       className="mt-3.5 h-10 sm:h-[42px]"
@@ -647,8 +661,12 @@ const Signup = () => {
         </div>
       {/* Close right column */}
       </div>
-    {/* Close outer grid card */}
+    {/* Close grid container */}
     </div>
+    {/* Close outer card container */}
+    </div>
+  {/* Close page wrapper */}
+  </div>
   );
 // Conclude Signup component definition
 };

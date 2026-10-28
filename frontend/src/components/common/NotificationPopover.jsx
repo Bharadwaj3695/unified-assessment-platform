@@ -278,7 +278,7 @@ const NotificationPopover = () => {
 
       {/* Popover Dropdown Panel rendered when isOpen is true */}
       {isOpen && (
-        <div className="absolute right-0 mt-2 w-80 sm:w-96 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-xl z-50 overflow-hidden animate-in fade-in zoom-in-95 duration-100">
+        <div className="fixed sm:absolute left-2 right-2 sm:left-auto sm:right-0 top-16 sm:top-full mt-1 sm:mt-2 w-auto sm:w-96 max-w-[calc(100vw-1rem)] sm:max-w-none rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-xl z-50 overflow-hidden animate-in fade-in zoom-in-95 duration-100">
           {/* Popover Header with title, unread badge, and actions */}
           <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/50">
             {/* Title and unread count badge container */}
@@ -367,7 +367,7 @@ const NotificationPopover = () => {
                     {/* Category icon */}
                     <div className="mt-0.5">{getTypeIcon(n.type)}</div>
                     {/* Content text container */}
-                    <div className="flex-1 min-w-0 pr-6">
+                    <div className="flex-1 min-w-0 pr-12 sm:pr-6">
                       {/* Title and unread indicator dot */}
                       <div className="flex items-center space-x-1.5">
                         <p className={`text-xs font-semibold truncate ${n.read ? 'text-slate-700 dark:text-slate-300' : 'text-slate-900 dark:text-white font-bold'}`}>
@@ -402,7 +402,7 @@ const NotificationPopover = () => {
                     </div>
 
                     {/* Action buttons revealed on card hover */}
-                    <div className="absolute top-3 right-3 flex items-center space-x-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <div className="absolute top-3 right-3 flex items-center space-x-1 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity">
                       {/* Mark as read button shown for unread notifications */}
                       {!n.read && (
                         <button

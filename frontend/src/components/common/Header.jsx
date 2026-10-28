@@ -12,6 +12,9 @@ import Badge from '../ui/Badge';
 import Button from '../ui/Button';
 // Import NotificationPopover component for displaying in-app alerts and notifications dropdown
 import NotificationPopover from './NotificationPopover';
+import AdminProfileMenu from './AdminProfileMenu';
+import PortalSearchBar from './search/PortalSearchBar';
+import NavbarAnnouncementTicker from './NavbarAnnouncementTicker';
 import { getInitials } from '../../utils/formatters';
 
 // Header component rendering the top navigation bar with brand, theme toggle, notifications, and user session controls
@@ -36,15 +39,15 @@ const Header = ({ onMobileMenuToggle }) => {
   // Render header layout JSX
   return (
     // Top-level sticky header element with translucent background and bottom border
-    <header className="sticky top-0 z-30 flex h-16 w-full items-center justify-between border-b border-surface-light-border dark:border-surface-dark-border bg-white/95 dark:bg-surface-dark/95 backdrop-blur-md px-4 sm:px-6 shadow-warm-xs">
+    <header className="sticky top-0 z-30 flex h-16 w-full items-center justify-between border-b border-surface-light-border dark:border-surface-dark-border bg-white/95 dark:bg-surface-dark/95 backdrop-blur-md px-2.5 xs:px-3 sm:px-4 lg:px-6 shadow-warm-xs flex-shrink-0">
       {/* Left container enclosing mobile drawer hamburger button and brand logo */}
-      <div className="flex items-center space-x-3">
+      <div className="flex items-center space-x-1.5 xs:space-x-2 sm:space-x-3 min-w-0 flex-shrink-0">
         {/* Render hamburger toggle button on small viewports when toggle handler is provided */}
         {onMobileMenuToggle && (
           <button
             type="button"
             onClick={onMobileMenuToggle}
-            className="lg:hidden p-2 rounded-xl text-slate-500 hover:bg-cream dark:hover:bg-slate-800 focus:outline-none cursor-pointer"
+            className="lg:hidden p-1.5 sm:p-2 rounded-xl text-slate-500 hover:bg-cream dark:hover:bg-slate-800 focus:outline-none cursor-pointer flex-shrink-0"
             aria-label="Open navigation menu"
           >
             {/* Lucide Menu hamburger icon */}
@@ -54,17 +57,17 @@ const Header = ({ onMobileMenuToggle }) => {
         )}
 
         {/* Brand logo and platform title container with click handler navigating to home */}
-        <div className="flex items-center space-x-3 cursor-pointer" onClick={() => navigate('/')}>
+        <div className="flex items-center space-x-1.5 xs:space-x-2 sm:space-x-3 cursor-pointer min-w-0" onClick={() => navigate('/')}>
           {/* Terracotta-peach gradient logo icon container */}
-          <div className="w-9 h-9 rounded-2xl bg-gradient-to-br from-brand-terracotta to-brand-peach flex items-center justify-center text-white font-extrabold text-base shadow-warm-xs">
+          <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-xl sm:rounded-2xl bg-gradient-to-br from-brand-terracotta to-brand-peach flex items-center justify-center text-white font-extrabold text-sm sm:text-base shadow-warm-xs flex-shrink-0">
             {/* Brand monogram character */}
             U
           {/* Close monogram container */}
           </div>
           {/* Platform brand text and subtitle container */}
-          <div>
+          <div className="min-w-0">
             {/* Primary platform name heading */}
-            <span className="font-bold text-base sm:text-lg tracking-tight text-slate-900 dark:text-slate-100 block leading-tight">
+            <span className="font-bold text-sm xs:text-base sm:text-lg tracking-tight text-slate-900 dark:text-slate-100 block leading-tight truncate max-w-[100px] xs:max-w-[150px] sm:max-w-none">
               Unified Assessment
             {/* Close platform name */}
             </span>
@@ -107,20 +110,28 @@ const Header = ({ onMobileMenuToggle }) => {
         </nav>
       )}
 
+      {/* Global Navbar Scrolling Announcement Ticker */}
+      <NavbarAnnouncementTicker />
+
       {/* Right controls container for theme toggle, notifications, and user profile or sign-in buttons */}
-      <div className="flex items-center space-x-3">
+      <div className="flex items-center space-x-1 xs:space-x-2 sm:space-x-3 flex-shrink-0">
+        {/* Role-Specific Compact Top-Navigation Search Bar */}
+        {isAuthenticated && user && (
+          <PortalSearchBar role={user.role} />
+        )}
+
         {/* Theme switcher button toggling dark and light mode */}
         <button
           type="button"
           onClick={toggleTheme}
-          className="p-2 rounded-lg text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800 dark:text-slate-400 focus:outline-none focus:ring-2 focus:ring-brand-primary"
+          className="p-1.5 sm:p-2 rounded-lg text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800 dark:text-slate-400 focus:outline-none focus:ring-2 focus:ring-brand-primary flex-shrink-0"
           aria-label={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
         >
           {/* Conditionally render Sun icon in dark mode and Moon icon in light mode */}
           {theme === 'dark' ? (
-            <Sun className="w-5 h-5 text-amber-400" />
+            <Sun className="w-4 h-4 sm:w-5 sm:h-5 text-amber-400" />
           ) : (
-            <Moon className="w-5 h-5 text-slate-600" />
+            <Moon className="w-4 h-4 sm:w-5 sm:h-5 text-slate-600" />
           )}
         {/* Close theme toggle button */}
         </button>
@@ -130,9 +141,9 @@ const Header = ({ onMobileMenuToggle }) => {
 
         {/* User profile controls rendered when authenticated, else sign-in / get started buttons */}
         {isAuthenticated && user ? (
-          <div className="flex items-center space-x-3 pl-2 border-l border-surface-light-border dark:border-surface-dark-border">
+          <div className="flex items-center space-x-1 xs:space-x-2 sm:space-x-3 pl-1.5 xs:pl-2 sm:pl-3 border-l border-surface-light-border dark:border-surface-dark-border flex-shrink-0">
             {/* User name and identifier badges displayed on medium and larger viewports */}
-            <div className="hidden sm:flex flex-col items-end">
+            <div className="hidden md:flex flex-col items-end">
               {/* User display name */}
               <span className="text-sm font-semibold text-slate-900 dark:text-slate-100 leading-tight flex items-center">
                 {user.name}
@@ -166,26 +177,30 @@ const Header = ({ onMobileMenuToggle }) => {
             {/* Close user info column */}
             </div>
 
-            {/* Profile Picture / Avatar Icon container with click handler opening profile */}
-            <div
-              className="cursor-pointer"
-              onClick={() => navigate(`/${user.role}/profile`)}
-              title="View Profile"
-            >
-              {/* Conditionally render user avatar image or monogram fallback */}
-              {user.avatar ? (
-                <img
-                  src={user.avatar}
-                  alt={user.name}
-                  className="w-8 h-8 rounded-xl object-cover border border-brand-terracotta/30 shadow-warm-xs"
-                />
-              ) : (
-                <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-brand-peach/20 to-brand-terracotta/20 text-brand-terracotta font-bold text-xs flex items-center justify-center border border-brand-peach/40 shadow-warm-xs">
-                  {getInitials(user.name, user.role?.charAt(0)?.toUpperCase() || 'U')}
-                </div>
-              )}
-            {/* Close avatar container */}
-            </div>
+            {/* Profile Picture / Avatar Icon: Admin uses dedicated AdminProfileMenu, others navigate to role profile */}
+            {user.role === 'admin' ? (
+              <AdminProfileMenu user={user} />
+            ) : (
+              <div
+                className="cursor-pointer flex-shrink-0"
+                onClick={() => navigate(`/${user.role}/profile`)}
+                title="View Profile"
+              >
+                {/* Conditionally render user avatar image or monogram fallback */}
+                {user.avatar ? (
+                  <img
+                    src={user.avatar}
+                    alt={user.name}
+                    className="w-7 h-7 sm:w-8 sm:h-8 rounded-xl object-cover border border-brand-terracotta/30 shadow-warm-xs"
+                  />
+                ) : (
+                  <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-xl bg-gradient-to-br from-brand-peach/20 to-brand-terracotta/20 text-brand-terracotta font-bold text-xs flex items-center justify-center border border-brand-peach/40 shadow-warm-xs">
+                    {getInitials(user.name, user.role?.charAt(0)?.toUpperCase() || 'U')}
+                  </div>
+                )}
+              {/* Close avatar container */}
+              </div>
+            )}
 
             {/* Sign out button clearing session and redirecting to login */}
             <button
@@ -196,7 +211,7 @@ const Header = ({ onMobileMenuToggle }) => {
                 // Redirect user to login screen
                 navigate('/auth/login', { replace: true });
               }}
-              className="p-2 rounded-lg text-slate-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-950/40 focus:outline-none cursor-pointer"
+              className="p-1.5 sm:p-2 rounded-lg text-slate-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-950/40 focus:outline-none cursor-pointer flex-shrink-0"
               title="Sign Out"
               aria-label="Sign out"
             >

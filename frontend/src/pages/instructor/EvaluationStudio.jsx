@@ -310,6 +310,7 @@ const EvaluationStudio = () => {
             size="md"
             icon={Save}
             loading={isSaving}
+            loadingText="Saving Draft..."
             onClick={() => handleSaveEvaluation(false)}
           >
             Save Draft
@@ -319,7 +320,7 @@ const EvaluationStudio = () => {
             variant="primary"
             size="md"
             icon={Send}
-            loading={isSaving}
+            disabled={isSaving}
             onClick={() => setConfirmModal(true)}
           >
             Finalize Evaluation
@@ -676,6 +677,80 @@ const EvaluationStudio = () => {
             </div>
           </Card>
 
+          {/* Certification & Credential Outcome Card */}
+          <Card title="Certification & Credential">
+            <div className="space-y-2.5 text-xs">
+              <div className="flex justify-between items-center">
+                <span className="text-[#64748B] dark:text-[#94A3B8]">Certification Policy:</span>
+                <Badge
+                  variant={submission.assessment?.certification?.enabled ? 'sage' : 'neutral'}
+                  size="sm"
+                >
+                  {submission.assessment?.certification?.enabled
+                    ? `Enabled (${submission.assessment.certification.passingPercentage || 50}% Threshold)`
+                    : 'Disabled'}
+                </Badge>
+              </div>
+
+              {submission.assessment?.certification?.enabled && (
+                <>
+                  <div className="flex justify-between items-center">
+                    <span className="text-[#64748B] dark:text-[#94A3B8]">Assessment Passing Score:</span>
+                    <span className="font-semibold text-slate-800 dark:text-slate-200">
+                      {submission.assessment?.passingScore || 60}% (Independent)
+                    </span>
+                  </div>
+
+                  <div className="flex justify-between items-center">
+                    <span className="text-[#64748B] dark:text-[#94A3B8]">Letter Grade:</span>
+                    <span className="font-bold text-slate-900 dark:text-slate-100">
+                      {submission.evaluation?.grade || '—'}{' '}
+                      {submission.evaluation?.gradeLabel ? `(${submission.evaluation.gradeLabel})` : ''}
+                    </span>
+                  </div>
+
+                  <div className="flex justify-between items-center">
+                    <span className="text-[#64748B] dark:text-[#94A3B8]">Certification Eligibility:</span>
+                    <Badge
+                      variant={
+                        submission.evaluation?.certificateEligible
+                          ? 'success'
+                          : submission.status === 'evaluated'
+                          ? 'neutral'
+                          : 'warning'
+                      }
+                      size="sm"
+                    >
+                      {submission.status !== 'evaluated'
+                        ? 'Pending Evaluation'
+                        : submission.evaluation?.certificateEligible
+                        ? 'Eligible for Certification'
+                        : 'Not Eligible'}
+                    </Badge>
+                  </div>
+
+                  <div className="flex justify-between items-center">
+                    <span className="text-[#64748B] dark:text-[#94A3B8]">Issued Certificate:</span>
+                    {submission.certificate ? (
+                      <div className="text-right">
+                        <Badge variant="success" size="sm" className="font-mono">
+                          <Award className="w-3 h-3 inline mr-1" />
+                          {submission.certificate.certificateId}
+                        </Badge>
+                      </div>
+                    ) : (
+                      <span className="text-slate-400">
+                        {submission.status === 'evaluated'
+                          ? (submission.evaluation?.certificateEligible ? 'Processing Issuance' : 'Not Issued')
+                          : 'Awaiting Evaluation'}
+                      </span>
+                    )}
+                  </div>
+                </>
+              )}
+            </div>
+          </Card>
+
           {/* Proctoring Telemetry Card (Read-Only Visibility) */}
           {submission.proctoring?.session && (
             <Card
@@ -906,6 +981,7 @@ const EvaluationStudio = () => {
               variant="primary"
               size="sm"
               loading={isSaving}
+              loadingText="Publishing Grade..."
               onClick={() => handleSaveEvaluation(true)}
             >
               Publish Grade
@@ -979,6 +1055,7 @@ const EvaluationStudio = () => {
               size="sm"
               icon={Mail}
               loading={isSendingEmail}
+              loadingText="Sending..."
             >
               Send Email
             </Button>

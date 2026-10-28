@@ -16,6 +16,7 @@ import { authService } from '../../services/auth.service';
 import Input from '../../components/ui/Input';
 // Import standard Button component with loading and icon props
 import Button from '../../components/ui/Button';
+import Spinner from '../../components/ui/Spinner';
 // Import reusable Alert banner component for authentication failure notices
 import Alert from '../../components/ui/Alert';
 // Import Badge component for editorial tags
@@ -27,7 +28,7 @@ import { BRANDED_TRANSITION_MIN_DURATION_MS } from '../../utils/constants';
 // Import authentication illustration SVG graphic component
 import AuthIllustration from '../../components/common/AuthIllustration';
 // Import Lucide icons used across login inputs, badges, and features
-import { Mail, Lock, CheckCircle, ArrowRight, Users, GraduationCap, BarChart3 } from 'lucide-react';
+import { Mail, Lock, CheckCircle, ArrowRight, Users, GraduationCap, BarChart3, Home } from 'lucide-react';
 
 // Yup client-side validation schema enforcing valid institutional email structure and minimum password length
 const loginSchema = Yup.object().shape({
@@ -129,6 +130,10 @@ const Login = () => {
             email: values.email,
             role: response.user?.role || 'student',
             from: from || null,
+            allowedMethods: response.allowedMethods || ['totp', 'email_otp', 'recovery_code'],
+            defaultMethod: response.defaultMethod || 'totp',
+            emailOtpSent: Boolean(response.emailOtpSent),
+            maskedEmail: response.maskedEmail || '',
           })
         );
         // Navigate user to MFA verification view passing challenge token in route state
@@ -137,6 +142,10 @@ const Login = () => {
             mfaToken: response.mfaToken,
             email: values.email,
             from,
+            allowedMethods: response.allowedMethods || ['totp', 'email_otp', 'recovery_code'],
+            defaultMethod: response.defaultMethod || 'totp',
+            emailOtpSent: Boolean(response.emailOtpSent),
+            maskedEmail: response.maskedEmail || '',
           },
         });
         // Terminate execution to prevent direct dashboard redirection
@@ -207,11 +216,23 @@ const Login = () => {
   return (
     <div className="w-full max-w-5xl mx-auto">
       {/* Container card dividing editorial brand presentation from interactive form */}
-      <div className="rounded-3xl border border-surface-light-border dark:border-surface-dark-border bg-white dark:bg-surface-dark shadow-warm-lg overflow-hidden grid grid-cols-1 lg:grid-cols-12">
-        {/* Left Column: Editorial Brand & Illustration */}
-        <div className="hidden lg:flex lg:col-span-5 flex-col justify-between bg-gradient-to-br from-[#FFF4EB] via-[#FFF9F2] to-[#EEF6F4] dark:from-[#241712] dark:via-surface-dark dark:to-[#132822] p-5 sm:p-6 lg:p-6 xl:p-7 border-r border-surface-light-border dark:border-surface-dark-border">
-          <div>
-            {/* Platform brand logo and title */}
+      <div className="rounded-3xl border border-surface-light-border dark:border-surface-dark-border bg-white dark:bg-surface-dark shadow-warm-lg overflow-hidden">
+        {/* Card Top Header with Home navigation */}
+        <div className="px-4 py-2.5 sm:px-6 sm:py-3 border-b border-surface-light-border/60 dark:border-surface-dark-border/60 bg-white/50 dark:bg-surface-dark/50 flex items-center justify-between">
+          <Link
+            to="/"
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold text-slate-600 dark:text-slate-300 hover:text-brand-primary dark:hover:text-brand-peach bg-white/70 dark:bg-surface-dark/70 hover:bg-white dark:hover:bg-surface-dark border border-surface-light-border dark:border-surface-dark-border shadow-warm-xs transition-colors cursor-pointer"
+          >
+            <Home className="w-3.5 h-3.5" />
+            <span>Home</span>
+          </Link>
+        </div>
+
+        <div className="grid grid-cols-1 lg:grid-cols-12">
+          {/* Left Column: Editorial Brand & Illustration */}
+          <div className="hidden lg:flex lg:col-span-5 flex-col justify-between bg-gradient-to-br from-[#FFF4EB] via-[#FFF9F2] to-[#EEF6F4] dark:from-[#241712] dark:via-surface-dark dark:to-[#132822] p-5 sm:p-6 lg:p-6 xl:p-7 border-r border-surface-light-border dark:border-surface-dark-border">
+            <div>
+              {/* Platform brand logo and title */}
             <div className="flex items-center space-x-3 mb-4 sm:mb-5">
               <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-xl sm:rounded-2xl bg-gradient-to-br from-brand-terracotta to-brand-peach flex items-center justify-center text-white font-extrabold text-base shadow-warm-xs">
                 U
@@ -357,6 +378,7 @@ const Login = () => {
                       size="md"
                       fullWidth
                       isLoading={isSubmitting}
+                      loadingText="Signing In..."
                       icon={ArrowRight}
                       iconPosition="right"
                       className="mt-2.5 h-10 sm:h-[42px]"
@@ -385,27 +407,32 @@ const Login = () => {
               type="button"
               onClick={handleGoogleSignIn}
               disabled={isGoogleLoading}
+              aria-busy={isGoogleLoading}
               className="w-full h-10 sm:h-[42px] flex items-center justify-center gap-3 px-4 border border-slate-200 dark:border-slate-700 hover:border-slate-300 dark:hover:border-slate-600 rounded-xl bg-white dark:bg-surface-dark hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-200 font-medium text-xs sm:text-sm transition-colors shadow-xs disabled:opacity-60 disabled:cursor-not-allowed cursor-pointer"
             >
-              {/* Google multicolored brand SVG icon */}
-              <svg className="w-4 h-4 shrink-0" viewBox="0 0 24 24">
-                <path
-                  fill="#4285F4"
-                  d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
-                />
-                <path
-                  fill="#34A853"
-                  d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"
-                />
-                <path
-                  fill="#FBBC05"
-                  d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z"
-                />
-                <path
-                  fill="#EA4335"
-                  d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"
-                />
-              </svg>
+              {isGoogleLoading ? (
+                <Spinner size="sm" color="currentColor" className="text-slate-500" />
+              ) : (
+                /* Google multicolored brand SVG icon */
+                <svg className="w-4 h-4 shrink-0" viewBox="0 0 24 24">
+                  <path
+                    fill="#4285F4"
+                    d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
+                  />
+                  <path
+                    fill="#34A853"
+                    d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"
+                  />
+                  <path
+                    fill="#FBBC05"
+                    d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z"
+                  />
+                  <path
+                    fill="#EA4335"
+                    d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"
+                  />
+                </svg>
+              )}
               <span>{isGoogleLoading ? 'Connecting to Google...' : 'Continue with Google'}</span>
             </button>
 
@@ -420,6 +447,7 @@ const Login = () => {
               </Link>
             </div>
           </div>
+        </div>
         </div>
       </div>
 

@@ -5,7 +5,6 @@ import Button from '../ui/Button';
 import Spinner from '../ui/Spinner';
 import Alert from '../ui/Alert';
 import {
-  Search,
   X,
   Check,
 Users,
@@ -14,7 +13,6 @@ Users,
 const StudentSelector = ({ value = [], onChange, error }) => {
   const [allStudents, setAllStudents] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [searchTerm, setSearchTerm] = useState('');
   const [fetchError, setFetchError] = useState(null);
 
   useEffect(() => {
@@ -59,17 +57,6 @@ const StudentSelector = ({ value = [], onChange, error }) => {
     return map;
   }, [allStudents]);
 
-  // Filter available students by search
-  const filteredStudents = useMemo(() => {
-    if (!searchTerm.trim()) return allStudents;
-    const term = searchTerm.toLowerCase().trim();
-    return allStudents.filter(
-      (s) =>
-        s.name?.toLowerCase().includes(term) ||
-        s.email?.toLowerCase().includes(term)
-    );
-  }, [allStudents, searchTerm]);
-
   const toggleStudent = (studentId) => {
     const idStr = studentId.toString();
     let updated;
@@ -87,9 +74,9 @@ const StudentSelector = ({ value = [], onChange, error }) => {
     onChange(updated);
   };
 
-  const handleSelectAllFiltered = () => {
-    const filteredIds = filteredStudents.map((s) => (s._id || s.id).toString());
-    const combined = [...new Set([...selectedIds, ...filteredIds])];
+  const handleSelectAll = () => {
+    const allIds = allStudents.map((s) => (s._id || s.id).toString());
+    const combined = [...new Set([...selectedIds, ...allIds])];
     onChange(combined);
   };
 
@@ -159,40 +146,21 @@ const StudentSelector = ({ value = [], onChange, error }) => {
         </div>
       )}
 
-      {/* Student Search & Quick Select */}
-      <div className="flex flex-col sm:flex-row sm:items-center gap-2">
-        <div className="relative flex-1">
-          <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-          <input
-            type="text"
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            placeholder="Search students by name or email..."
-            className="w-full pl-9 pr-8 py-2 text-xs bg-white dark:bg-surface-dark border border-surface-light-border dark:border-surface-dark-border rounded-lg text-slate-900 dark:text-slate-100 placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-brand-primary"
-          />
-          {searchTerm && (
-            <button
-              type="button"
-              onClick={() => setSearchTerm('')}
-              className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 cursor-pointer"
-            >
-              <X className="w-3.5 h-3.5" />
-            </button>
-          )}
-        </div>
-
-        {filteredStudents.length > 0 && (
+      {/* Quick Select Actions */}
+      {allStudents.length > 0 && (
+        <div className="flex items-center justify-between text-xs text-slate-500 py-1">
+          <span>{allStudents.length} active student{allStudents.length !== 1 ? 's' : ''} available</span>
           <Button
             type="button"
             variant="outline"
             size="sm"
-            onClick={handleSelectAllFiltered}
+            onClick={handleSelectAll}
             className="whitespace-nowrap text-xs"
           >
-            Assign All Filtered ({filteredStudents.length})
+            Assign All ({allStudents.length})
           </Button>
-        )}
-      </div>
+        </div>
+      )}
 
       {/* Available Students Checklist */}
       <div className="bg-white dark:bg-surface-dark rounded-xl border border-surface-light-border dark:border-surface-dark-border divide-y divide-slate-100 dark:divide-slate-800/60 max-h-56 overflow-y-auto">
@@ -201,14 +169,12 @@ const StudentSelector = ({ value = [], onChange, error }) => {
             <Spinner size="sm" className="mr-2" />
             Loading active students...
           </div>
-        ) : filteredStudents.length === 0 ? (
+        ) : allStudents.length === 0 ? (
           <div className="py-6 text-center text-xs text-slate-400">
-            {searchTerm
-              ? `No active students match "${searchTerm}"`
-              : 'No registered active students found.'}
+            No registered active students found.
           </div>
         ) : (
-          filteredStudents.map((student) => {
+          allStudents.map((student) => {
             const id = (student._id || student.id).toString();
             const isSelected = selectedIds.includes(id);
 

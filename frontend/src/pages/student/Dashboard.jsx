@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useNavigate, useLocation, useParams } from 'react-router-dom';
 import { toast } from 'react-toastify';
 import { useAuth } from '../../hooks/useAuth';
+import { useRefresh } from '../../hooks/useRefresh';
 import { getTimeBasedGreeting } from '../../utils/greeting';
 import assessmentService from '../../services/assessment.service';
 import submissionService from '../../services/submission.service';
@@ -28,27 +29,33 @@ import {
   TableHeader,
   TableCell,
 } from '../../components/ui/Table';
+import ReassignmentRequestModal from '../../components/modals/ReassignmentRequestModal';
+import { formatDateTime } from '../../utils/formatters';
 import {
   BookOpen,
   Clock,
   CheckCircle2,
-Award,
+  Award,
   ArrowRight,
   RefreshCw,
-Search,
-Calendar,
+  X,
+  Calendar,
   Lock,
-Shield,
-AlertTriangle,
+  Shield,
+  AlertTriangle,
   TrendingUp,
-Download,
+  Download,
   ExternalLink,
   FileText,
   Flame,
   Trophy,
-TrendingDown,
+  TrendingDown,
   Minus,
-Star} from 'lucide-react';
+  Star,
+  List,
+  LayoutGrid,
+  RotateCcw,
+} from 'lucide-react';
 
 const STANDARD_CATEGORIES = [
   'Artificial Intelligence',
@@ -84,10 +91,23 @@ const StudentDashboard = () => {
   const [catalogSearch, setCatalogSearch] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('All');
   const [selectedAssessmentForModal, setSelectedAssessmentForModal] = useState(null);
+  const [selectedAssessmentForReassignment, setSelectedAssessmentForReassignment] = useState(null);
+  const [reassignmentRequests, setReassignmentRequests] = useState([]);
+  const [catalogViewMode, setCatalogViewMode] = useState('table');
   const [selectedFeedbackSubmission, setSelectedFeedbackSubmission] = useState(null);
   const [isLoadingFeedback, setIsLoadingFeedback] = useState(false);
   const { id: routeSubmissionId } = useParams();
   const lastProcessedStudentSearchRef = useRef('');
+
+  const handleReassignmentSubmit = async (assessmentId, reason) => {
+    const res = await assessmentService.requestReassignment(assessmentId, { reason });
+    toast.success('Reassignment request submitted successfully.');
+    if (res?.data) {
+      setReassignmentRequests((prev) => [res.data, ...prev]);
+    } else {
+      await loadData(true);
+    }
+  };
 
   const openFeedbackModal = async (subId) => {
     try {
@@ -106,6 +126,11 @@ const StudentDashboard = () => {
     const searchParams = new URLSearchParams(location.search);
     const querySubId = searchParams.get('submissionId') || searchParams.get('subId');
     const targetSubId = querySubId || routeSubmissionId;
+
+    const querySearch = searchParams.get('search');
+    if (querySearch !== null && querySearch !== undefined) {
+      setCatalogSearch(querySearch);
+    }
 
     const currentKey = `${location.pathname}${location.search}`;
     if (!targetSubId || currentKey === lastProcessedStudentSearchRef.current) return;
@@ -163,18 +188,21 @@ const StudentDashboard = () => {
     setError(null);
     try {
       const analyticsParams = dateFilter !== 'all' ? { dateFilter } : {};
-      const [asmtRes, subRes, perfRes, trendsRes] = await Promise.all([
-        assessmentService.getAssessments({ limit: 200 }),
+      const [asmtRes, subRes, perfRes, trendsRes, reqsRes] = await Promise.all([
+        assessmentService.getAssessments({ limit: 200, includePast: true }),
         submissionService.getStudentSubmissions(),
         analyticsService.getStudentPerformance(analyticsParams).catch(() => null),
         analyticsService.getStudentTrends(analyticsParams).catch(() => []),
+        assessmentService.getMyReassignmentRequests().catch(() => []),
       ]);
 
       const loadedAssessments = asmtRes.data || asmtRes.assessments || [];
       const loadedSubmissions = subRes || [];
+      const loadedRequests = Array.isArray(reqsRes) ? reqsRes : (reqsRes?.data || []);
 
       setAssessments(loadedAssessments);
       setSubmissions(loadedSubmissions);
+      setReassignmentRequests(loadedRequests);
       if (perfRes) setPerformanceData(perfRes);
       if (trendsRes) setScoreTrends(trendsRes);
       coreLoadedRef.current = true;
@@ -210,6 +238,14 @@ const StudentDashboard = () => {
       }
     }
   }, [leaderboardScope, selectedLeaderboardAssessment]);
+
+  // Dedicated refresh hook with duplicate submission prevention and toast feedback
+  const { isRefreshing: isRefreshingDashboard, refresh: handleRefreshDashboard } = useRefresh(
+    async () => {
+      await Promise.all([loadData(false), loadLeaderboard()]);
+    },
+    { successMessage: 'Student dashboard and catalog refreshed!' }
+  );
 
   // Initial load: do not reload when toggling between sub-routes (/catalog, /submissions, /dashboard)
   useEffect(() => {
@@ -318,6 +354,172 @@ const StudentDashboard = () => {
     };
   }, [performanceData]);
 
+  // All submissions map keyed by assessment ID
+  const submissionsByAssessmentId = useMemo(() => {
+    const map = new Map();
+    submissions.forEach((s) => {
+      const id = s.assessment?._id || s.assessment?.id || s.assessmentId?._id || s.assessmentId;
+      if (id) {
+        map.set(id.toString(), s);
+      }
+    });
+    return map;
+  }, [submissions]);
+
+  // Reassignment requests map keyed by assessment ID
+  const reassignmentRequestsMap = useMemo(() => {
+    const map = new Map();
+    reassignmentRequests.forEach((r) => {
+      const id = r.assessmentId?._id || r.assessmentId || r.assessment?._id || r.assessment?.id;
+      if (id) {
+        const idStr = id.toString();
+        const existing = map.get(idStr);
+        if (!existing || existing.status !== 'pending') {
+          map.set(idStr, r);
+        }
+      }
+    });
+    return map;
+  }, [reassignmentRequests]);
+
+  // Assessment status details helper for student views
+  const getAssessmentStatusDetails = useCallback(
+    (asmt) => {
+      const asmtId = (asmt._id || asmt.id)?.toString();
+      const sub = submissionsByAssessmentId.get(asmtId);
+      const req = reassignmentRequestsMap.get(asmtId);
+
+      const hasPendingRequest = req?.status === 'pending';
+      const hasApprovedRequest = req?.status === 'approved';
+      const hasRejectedRequest = req?.status === 'rejected';
+
+      const certEnabled = Boolean(asmt.certification?.enabled);
+      let certStatus = null; // 'issued' | 'processing' | 'not_eligible' | 'disabled'
+      let certLabel = null;
+      let certificate = sub?.certificate || null;
+
+      if (!certEnabled) {
+        certStatus = 'disabled';
+        certLabel = 'Certification Disabled';
+      } else if (sub) {
+        if (sub.status === 'evaluated') {
+          if (certificate) {
+            certStatus = 'issued';
+            certLabel = 'Certificate Issued';
+          } else if (sub.evaluation?.certificateEligible) {
+            certStatus = 'processing';
+            certLabel = 'Eligible — Certificate Processing';
+          } else {
+            certStatus = 'not_eligible';
+            certLabel = 'Not Eligible';
+          }
+        }
+      }
+
+      if (sub) {
+        if (sub.status === 'evaluated') {
+          if (sub.passed) {
+            return {
+              type: 'passed',
+              label: 'Passed',
+              badgeVariant: 'success',
+              isEligibleForReassignment: false,
+              hasPendingRequest: false,
+              hasApprovedRequest: false,
+              req,
+              sub,
+              certStatus,
+              certLabel,
+              certificate,
+            };
+          } else {
+            return {
+              type: 'failed',
+              label: 'Failed',
+              badgeVariant: 'danger',
+              isEligibleForReassignment: !hasPendingRequest,
+              hasPendingRequest,
+              hasApprovedRequest,
+              hasRejectedRequest,
+              req,
+              sub,
+              certStatus,
+              certLabel,
+              certificate,
+            };
+          }
+        }
+        if (sub.status === 'submitted') {
+          return {
+            type: 'submitted',
+            label: 'Pending Evaluation',
+            badgeVariant: 'warning',
+            isEligibleForReassignment: false,
+            hasPendingRequest: false,
+            hasApprovedRequest: false,
+            sub,
+            certStatus,
+            certLabel,
+            certificate,
+          };
+        }
+        if (sub.status === 'in_progress') {
+          return {
+            type: 'in_progress',
+            label: 'In Progress',
+            badgeVariant: 'warning',
+            isEligibleForReassignment: false,
+            hasPendingRequest: false,
+            hasApprovedRequest: false,
+            sub,
+            certStatus,
+            certLabel,
+            certificate,
+          };
+        }
+      }
+
+      // No submission recorded
+      const now = new Date();
+      const isScheduledFuture = asmt.scheduledAt && new Date(asmt.scheduledAt) > now;
+      const isDeadlinePassed = asmt.deadlineAt && new Date(asmt.deadlineAt) <= now;
+
+      if (isScheduledFuture) {
+        return {
+          type: 'upcoming',
+          label: 'Scheduled',
+          badgeVariant: 'neutral',
+          isEligibleForReassignment: false,
+          hasPendingRequest: false,
+          hasApprovedRequest: false,
+        };
+      }
+
+      if (isDeadlinePassed) {
+        return {
+          type: 'missed',
+          label: 'Missed',
+          badgeVariant: 'danger',
+          isEligibleForReassignment: !hasPendingRequest,
+          hasPendingRequest,
+          hasApprovedRequest,
+          hasRejectedRequest,
+          req,
+        };
+      }
+
+      return {
+        type: 'available',
+        label: 'Available',
+        badgeVariant: 'sage',
+        isEligibleForReassignment: false,
+        hasPendingRequest: false,
+        hasApprovedRequest: false,
+      };
+    },
+    [submissionsByAssessmentId, reassignmentRequestsMap]
+  );
+
   if (isLoading && assessments.length === 0 && submissions.length === 0) {
     if (currentView === 'catalog') {
       return (
@@ -374,10 +576,18 @@ const StudentDashboard = () => {
     }
   });
 
-  // Available assessments for attempt (either not started or in-progress)
-  const availableAssessments = assessments.filter(
-    (a) => !completedAssessmentIds.has((a._id || a.id)?.toString())
-  );
+  // Available assessments for attempt (either not started or in-progress, but not missed or completed)
+  const availableAssessments = assessments.filter((a) => {
+    const id = (a._id || a.id)?.toString();
+    const sub = submissionsByAssessmentId.get(id);
+    if (sub && (sub.status === 'submitted' || sub.status === 'evaluated')) {
+      return false;
+    }
+    if (a.deadlineAt && new Date(a.deadlineAt) <= new Date() && !sub) {
+      return false;
+    }
+    return true;
+  });
 
   const evaluatedSubmissions = submissions.filter((s) => s.status === 'evaluated');
   const avgScore =
@@ -444,7 +654,11 @@ const StudentDashboard = () => {
                     variant="outline"
                     size="sm"
                     icon={RefreshCw}
-                    onClick={loadData}
+                    iconClassName={isRefreshingDashboard ? 'animate-spin' : ''}
+                    isLoading={isRefreshingDashboard}
+                    loadingText="Refreshing..."
+                    onClick={handleRefreshDashboard}
+                    aria-label={isRefreshingDashboard ? 'Refreshing dashboard data' : 'Refresh dashboard data'}
                   >
                     Refresh Data
                   </Button>
@@ -559,11 +773,43 @@ const StudentDashboard = () => {
         </>
       )}
 
-      {/* 3. Sub-View: CATALOG ONLY */}
+      {/* 3. Sub-View: CATALOG / MY ASSESSMENTS */}
       {currentView === 'catalog' && (
         <Card
-          title="Assessment Catalog"
-          subtitle="Browse all course examinations and quizzes available to your account"
+          title="My Assessments"
+          subtitle="Authoritative course examinations, timed tests, and reassignment requests"
+          action={
+            <div className="flex items-center space-x-1 border border-surface-light-border dark:border-surface-dark-border rounded-xl p-1 bg-slate-50 dark:bg-surface-dark-muted">
+              <button
+                type="button"
+                onClick={() => setCatalogViewMode('table')}
+                className={`px-2.5 py-1 rounded-lg text-xs font-semibold flex items-center space-x-1 transition-all cursor-pointer ${
+                  catalogViewMode === 'table'
+                    ? 'bg-white dark:bg-surface-dark text-slate-900 dark:text-slate-100 shadow-warm-xs'
+                    : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
+                }`}
+                title="Table View"
+                aria-label="Table View"
+              >
+                <List className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">Table</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setCatalogViewMode('grid')}
+                className={`px-2.5 py-1 rounded-lg text-xs font-semibold flex items-center space-x-1 transition-all cursor-pointer ${
+                  catalogViewMode === 'grid'
+                    ? 'bg-white dark:bg-surface-dark text-slate-900 dark:text-slate-100 shadow-warm-xs'
+                    : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
+                }`}
+                title="Cards View"
+                aria-label="Cards View"
+              >
+                <LayoutGrid className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">Cards</span>
+              </button>
+            </div>
+          }
         >
           {/* Filter Bar */}
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6">
@@ -584,20 +830,27 @@ const StudentDashboard = () => {
               ))}
             </div>
 
-            <div className="relative w-full sm:w-64">
-              <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-              <input
-                type="text"
-                value={catalogSearch}
-                onChange={(e) => setCatalogSearch(e.target.value)}
-                placeholder="Search catalog..."
-                className="w-full pl-9 pr-3 py-2 text-xs bg-white dark:bg-surface-dark border border-surface-light-border dark:border-surface-dark-border rounded-xl focus:outline-none focus:ring-1 focus:ring-brand-primary"
-              />
-            </div>
+            {catalogSearch && (
+              <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold bg-[#FDECE2] text-[#E05D38] dark:bg-[#341C16] dark:text-[#F4A261] border border-[#E05D38]/30">
+                <span>Filter: &ldquo;{catalogSearch}&rdquo;</span>
+                <button
+                  type="button"
+                  onClick={() => setCatalogSearch('')}
+                  className="hover:text-red-600 transition-colors cursor-pointer ml-1"
+                  title="Clear search filter"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            )}
           </div>
 
           {isLoading && assessments.length === 0 ? (
-            <CardSkeleton count={6} />
+            catalogViewMode === 'table' ? (
+              <TableSkeleton rows={5} columns={6} />
+            ) : (
+              <CardSkeleton count={6} />
+            )
           ) : filteredCatalog.length === 0 ? (
             <EmptyState
               title="No matching assessments"
@@ -608,83 +861,309 @@ const StudentDashboard = () => {
                 setCatalogSearch('');
               }}
             />
+          ) : catalogViewMode === 'table' ? (
+            <Table>
+              <TableHead>
+                <TableRow>
+                  <TableHeader>Assessment Title</TableHeader>
+                  <TableHeader>Category</TableHeader>
+                  <TableHeader>Due Date</TableHeader>
+                  <TableHeader>Duration / Passing</TableHeader>
+                  <TableHeader>Status</TableHeader>
+                  <TableHeader className="text-right">Action</TableHeader>
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {filteredCatalog.map((asmt) => {
+                  const statusInfo = getAssessmentStatusDetails(asmt);
+                  return (
+                    <TableRow key={asmt._id || asmt.id}>
+                      <TableCell>
+                        <span className="font-bold text-slate-900 dark:text-slate-100 block">
+                          {asmt.title}
+                        </span>
+                        <div className="flex items-center space-x-1.5 mt-0.5">
+                          {asmt.accessType === 'restricted' && (
+                            <span className="text-[10px] text-amber-600 dark:text-amber-400 font-medium">
+                              <Lock className="w-2.5 h-2.5 inline mr-0.5" />
+                              Cohort Assigned
+                            </span>
+                          )}
+                        </div>
+                      </TableCell>
+                      <TableCell>
+                        <Badge variant={asmt.accessType === 'restricted' ? 'peach' : 'secondary'} size="sm">
+                          {asmt.category || 'General'}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="text-xs">
+                        {asmt.deadlineAt ? (
+                          <span
+                            className={
+                              new Date(asmt.deadlineAt) <= new Date()
+                                ? 'text-red-600 dark:text-red-400 font-semibold'
+                                : 'text-slate-600 dark:text-slate-400'
+                            }
+                          >
+                            {formatDateTime(asmt.deadlineAt)}
+                          </span>
+                        ) : (
+                          <span className="text-slate-400">No deadline</span>
+                        )}
+                      </TableCell>
+                      <TableCell className="text-xs text-slate-600 dark:text-slate-400">
+                        {asmt.durationMinutes}m · {asmt.totalPoints || 100} pts ({asmt.passingScore || 60}% pass)
+                      </TableCell>
+                      <TableCell>
+                        <div className="flex flex-col gap-1 items-start">
+                          {statusInfo.hasPendingRequest ? (
+                            <Badge variant="warning" size="sm" dot>
+                              Request Pending
+                            </Badge>
+                          ) : statusInfo.hasApprovedRequest ? (
+                            <Badge variant="success" size="sm" dot>
+                              Reassignment Approved
+                            </Badge>
+                          ) : (
+                            <Badge variant={statusInfo.badgeVariant} size="sm" dot>
+                              {statusInfo.label}
+                            </Badge>
+                          )}
+                          {statusInfo.sub?.status === 'evaluated' && (
+                            <span className="text-[11px] font-semibold text-slate-700 dark:text-slate-300">
+                              {statusInfo.sub.percentage}% · Grade: {statusInfo.sub.evaluation?.grade || '—'}
+                            </span>
+                          )}
+                          {statusInfo.sub?.status === 'evaluated' && statusInfo.certStatus && (
+                            statusInfo.certStatus === 'issued' ? (
+                              <button
+                                type="button"
+                                onClick={() => navigate('/student/certifications')}
+                                className="cursor-pointer text-left"
+                                title="View in My Certifications"
+                              >
+                                <Badge variant="success" size="sm" className="flex items-center gap-1">
+                                  <Award className="w-3 h-3 text-emerald-600 dark:text-emerald-400" />
+                                  <span>Certificate Issued</span>
+                                </Badge>
+                              </button>
+                            ) : statusInfo.certStatus === 'processing' ? (
+                              <Badge variant="warning" size="sm">
+                                Eligible — Certificate Processing
+                              </Badge>
+                            ) : statusInfo.certStatus === 'not_eligible' ? (
+                              <Badge variant="neutral" size="sm">
+                                Not Eligible
+                              </Badge>
+                            ) : statusInfo.certStatus === 'disabled' ? (
+                              <Badge variant="neutral" size="sm">
+                                Certification Disabled
+                              </Badge>
+                            ) : null
+                          )}
+                        </div>
+                      </TableCell>
+                      <TableCell className="text-right">
+                        {statusInfo.hasPendingRequest ? (
+                          <Badge variant="warning" size="sm">
+                            Pending Approval
+                          </Badge>
+                        ) : statusInfo.hasApprovedRequest ? (
+                          <Badge variant="success" size="sm">
+                            Approved
+                          </Badge>
+                        ) : statusInfo.isEligibleForReassignment ? (
+                          <Button
+                            variant="primary"
+                            size="sm"
+                            onClick={() => setSelectedAssessmentForReassignment(asmt)}
+                          >
+                            Request Reassignment
+                          </Button>
+                        ) : statusInfo.type === 'available' ? (
+                          <Button
+                            variant="primary"
+                            size="sm"
+                            icon={ArrowRight}
+                            iconPosition="right"
+                            onClick={() => setSelectedAssessmentForModal(asmt)}
+                          >
+                            Start Exam
+                          </Button>
+                        ) : statusInfo.type === 'in_progress' ? (
+                          <Button
+                            variant="secondary"
+                            size="sm"
+                            icon={ArrowRight}
+                            iconPosition="right"
+                            onClick={() => setSelectedAssessmentForModal(asmt)}
+                          >
+                            Resume Attempt
+                          </Button>
+                        ) : statusInfo.type === 'passed' ? (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => navigate('/student/submissions')}
+                          >
+                            View Submission
+                          </Button>
+                        ) : statusInfo.type === 'submitted' ? (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => navigate('/student/submissions')}
+                          >
+                            View Status
+                          </Button>
+                        ) : (
+                          <span className="text-xs text-slate-400">—</span>
+                        )}
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {filteredCatalog.map((asmt) => (
-                <div
-                  key={asmt._id || asmt.id}
-                  className="p-5 rounded-2xl border border-surface-light-border dark:border-surface-dark-border bg-white dark:bg-surface-dark shadow-warm-xs hover:shadow-warm-sm hover:border-brand-peach/40 transition-all flex flex-col justify-between gap-4"
-                >
-                  <div className="space-y-2">
-                    <div className="flex items-center space-x-2">
-                      <Badge variant={asmt.accessType === 'restricted' ? 'peach' : 'secondary'} size="sm">
-                        {asmt.category || 'General'}
-                      </Badge>
-                      {completedAssessmentIds.has((asmt._id || asmt.id).toString()) ? (
-                        <Badge variant="success" size="sm" dot>
-                          Completed
+              {filteredCatalog.map((asmt) => {
+                const statusInfo = getAssessmentStatusDetails(asmt);
+                return (
+                  <div
+                    key={asmt._id || asmt.id}
+                    className="p-5 rounded-2xl border border-surface-light-border dark:border-surface-dark-border bg-white dark:bg-surface-dark shadow-warm-xs hover:shadow-warm-sm hover:border-brand-peach/40 transition-all flex flex-col justify-between gap-4"
+                  >
+                    <div className="space-y-2">
+                      <div className="flex items-center space-x-2">
+                        <Badge variant={asmt.accessType === 'restricted' ? 'peach' : 'secondary'} size="sm">
+                          {asmt.category || 'General'}
                         </Badge>
-                      ) : inProgressSubmissionsMap.has((asmt._id || asmt.id).toString()) ? (
-                        <Badge variant="warning" size="sm" dot>
-                          In Progress
+                        {statusInfo.hasPendingRequest ? (
+                          <Badge variant="warning" size="sm" dot>
+                            Request Pending
+                          </Badge>
+                        ) : statusInfo.hasApprovedRequest ? (
+                          <Badge variant="success" size="sm" dot>
+                            Approved
+                          </Badge>
+                        ) : (
+                          <Badge variant={statusInfo.badgeVariant} size="sm" dot>
+                            {statusInfo.label}
+                          </Badge>
+                        )}
+                        {asmt.accessType === 'restricted' && (
+                          <Badge variant="neutral" size="sm">
+                            <Lock className="w-2.5 h-2.5 mr-1 inline" />
+                            Cohort Assigned
+                          </Badge>
+                        )}
+                      </div>
+
+                      <h3 className="text-base font-bold text-slate-900 dark:text-slate-100">
+                        {asmt.title}
+                      </h3>
+                      {asmt.description && (
+                        <p className="text-xs text-slate-500 dark:text-slate-400 line-clamp-2 leading-relaxed">
+                          {asmt.description}
+                        </p>
+                      )}
+
+                      {statusInfo.sub?.status === 'evaluated' && (
+                        <div className="flex flex-wrap items-center gap-1.5 pt-1">
+                          <span className="text-[11px] font-semibold text-slate-700 dark:text-slate-300">
+                            Result: {statusInfo.sub.percentage}% · Grade {statusInfo.sub.evaluation?.grade || '—'}
+                          </span>
+                          {statusInfo.certStatus === 'issued' ? (
+                            <button
+                              type="button"
+                              onClick={() => navigate('/student/certifications')}
+                              className="cursor-pointer"
+                              title="View in My Certifications"
+                            >
+                              <Badge variant="success" size="sm" className="flex items-center gap-1">
+                                <Award className="w-3 h-3 text-emerald-600 dark:text-emerald-400" />
+                                <span>Certificate Issued</span>
+                              </Badge>
+                            </button>
+                          ) : statusInfo.certStatus === 'processing' ? (
+                            <Badge variant="warning" size="sm">
+                              Eligible — Certificate Processing
+                            </Badge>
+                          ) : statusInfo.certStatus === 'not_eligible' ? (
+                            <Badge variant="neutral" size="sm">
+                              Not Eligible
+                            </Badge>
+                          ) : statusInfo.certStatus === 'disabled' ? (
+                            <Badge variant="neutral" size="sm">
+                              Certification Disabled
+                            </Badge>
+                          ) : null}
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="pt-3 border-t border-surface-light-border dark:border-surface-dark-border flex items-center justify-between">
+                      <div className="flex items-center space-x-3 text-xs text-slate-500 dark:text-slate-400">
+                        <span className="flex items-center">
+                          <Clock className="w-3.5 h-3.5 mr-1 text-slate-400" />
+                          {asmt.durationMinutes}m
+                        </span>
+                        <span>{asmt.totalPoints || 100} pts</span>
+                        <span className="text-brand-terracotta font-semibold">
+                          Pass: {asmt.passingScore || 60}%
+                        </span>
+                      </div>
+
+                      {statusInfo.hasPendingRequest ? (
+                        <Badge variant="warning" size="sm">
+                          Pending Approval
                         </Badge>
+                      ) : statusInfo.hasApprovedRequest ? (
+                        <Badge variant="success" size="sm">
+                          Approved
+                        </Badge>
+                      ) : statusInfo.isEligibleForReassignment ? (
+                        <Button
+                          variant="primary"
+                          size="sm"
+                          onClick={() => setSelectedAssessmentForReassignment(asmt)}
+                        >
+                          Request Reassignment
+                        </Button>
+                      ) : statusInfo.type === 'available' ? (
+                        <Button
+                          variant="primary"
+                          size="sm"
+                          icon={ArrowRight}
+                          iconPosition="right"
+                          onClick={() => setSelectedAssessmentForModal(asmt)}
+                        >
+                          Start Exam
+                        </Button>
+                      ) : statusInfo.type === 'in_progress' ? (
+                        <Button
+                          variant="secondary"
+                          size="sm"
+                          icon={ArrowRight}
+                          iconPosition="right"
+                          onClick={() => setSelectedAssessmentForModal(asmt)}
+                        >
+                          Resume Attempt
+                        </Button>
                       ) : (
-                        <Badge variant="sage" size="sm" dot>
-                          Available
-                        </Badge>
-                      )}
-                      {asmt.accessType === 'restricted' && (
-                        <Badge variant="neutral" size="sm">
-                          <Lock className="w-2.5 h-2.5 mr-1 inline" />
-                          Cohort Assigned
-                        </Badge>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => navigate('/student/submissions')}
+                        >
+                          View Submission
+                        </Button>
                       )}
                     </div>
-
-                    <h3 className="text-base font-bold text-slate-900 dark:text-slate-100">
-                      {asmt.title}
-                    </h3>
-                    {asmt.description && (
-                      <p className="text-xs text-slate-500 dark:text-slate-400 line-clamp-2 leading-relaxed">
-                        {asmt.description}
-                      </p>
-                    )}
                   </div>
-
-                  <div className="pt-3 border-t border-surface-light-border dark:border-surface-dark-border flex items-center justify-between">
-                    <div className="flex items-center space-x-3 text-xs text-slate-500 dark:text-slate-400">
-                      <span className="flex items-center">
-                        <Clock className="w-3.5 h-3.5 mr-1 text-slate-400" />
-                        {asmt.durationMinutes}m
-                      </span>
-                      <span>{asmt.totalPoints || 100} pts</span>
-                      <span className="text-brand-terracotta font-semibold">
-                        Pass: {asmt.passingScore || 60}%
-                      </span>
-                    </div>
-
-                    {completedAssessmentIds.has((asmt._id || asmt.id).toString()) ? (
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => navigate('/student/submissions')}
-                      >
-                        View Submission
-                      </Button>
-                    ) : (
-                      <Button
-                        variant={inProgressSubmissionsMap.has((asmt._id || asmt.id).toString()) ? 'secondary' : 'primary'}
-                        size="sm"
-                        icon={ArrowRight}
-                        iconPosition="right"
-                        onClick={() => setSelectedAssessmentForModal(asmt)}
-                      >
-                        {inProgressSubmissionsMap.has((asmt._id || asmt.id).toString()) ? 'Resume Attempt' : 'Start Exam'}
-                      </Button>
-                    )}
-                  </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </Card>
@@ -1227,77 +1706,174 @@ const StudentDashboard = () => {
                   <TableRow>
                     <TableHeader>Assessment Title</TableHeader>
                     <TableHeader>Submitted Date</TableHeader>
-                    <TableHeader>Score</TableHeader>
+                    <TableHeader>Score & Grade</TableHeader>
                     <TableHeader>Result</TableHeader>
+                    <TableHeader>Certification</TableHeader>
                     <TableHeader>Status</TableHeader>
                     <TableHeader className="text-right">Action</TableHeader>
                   </TableRow>
                 </TableHead>
                 <TableBody>
-                  {submissions.map((sub) => (
-                    <TableRow key={sub._id || sub.id}>
-                      <TableCell>
-                        <span className="font-bold text-slate-900 dark:text-slate-100 block">
-                          {sub.assessment?.title || 'Assessment'}
-                        </span>
-                        <span className="text-xs text-slate-400">{sub.assessment?.category || 'General'}</span>
-                      </TableCell>
-                      <TableCell className="text-xs text-slate-500 dark:text-slate-400">
-                        {sub.submittedAt ? new Date(sub.submittedAt).toLocaleDateString() : '—'}
-                      </TableCell>
-                      <TableCell className="text-xs font-bold text-slate-800 dark:text-slate-200">
-                        {sub.status === 'evaluated'
-                          ? `${sub.score} / ${sub.totalPoints} (${sub.percentage}%)`
-                          : sub.status === 'submitted'
-                          ? 'Grading in progress'
-                          : 'In Progress'}
-                      </TableCell>
-                      <TableCell>
-                        {sub.status === 'evaluated' ? (
-                          <Badge variant={sub.passed ? 'success' : 'danger'} size="sm">
-                            {sub.passed ? 'Passed' : 'Needs Review'}
-                          </Badge>
-                        ) : sub.status === 'submitted' ? (
-                          <Badge variant="warning" size="sm">
-                            Pending Evaluation
-                          </Badge>
-                        ) : (
-                          <Badge variant="neutral" size="sm">
-                            In Progress
-                          </Badge>
-                        )}
-                      </TableCell>
-                      <TableCell>
-                        <Badge
-                          variant={
-                            sub.status === 'evaluated'
-                              ? 'success'
-                              : sub.status === 'submitted'
-                              ? 'primary'
-                              : 'neutral'
-                          }
-                          size="sm"
-                          dot
-                        >
-                          {sub.status}
-                        </Badge>
-                      </TableCell>
-                      <TableCell className="text-right">
-                        {sub.status === 'evaluated' ? (
-                          <Button
-                            variant="outline"
+                  {submissions.map((sub) => {
+                    const certEnabled = Boolean(sub.assessment?.certification?.enabled);
+                    const isPending = sub.status === 'submitted' || sub.evaluationStatus === 'pending';
+                    const hasCert = Boolean(sub.certificate);
+                    const isEligible = Boolean(sub.evaluation?.certificateEligible);
+                    const isPassed = sub.passed || sub.resultStatus === 'passed';
+
+                    return (
+                      <TableRow key={sub._id || sub.id}>
+                        <TableCell>
+                          <span className="font-bold text-slate-900 dark:text-slate-100 block">
+                            {sub.assessment?.title || 'Assessment'}
+                          </span>
+                          <span className="text-xs text-slate-400">{sub.assessment?.category || 'General'}</span>
+                        </TableCell>
+                        <TableCell className="text-xs text-slate-500 dark:text-slate-400">
+                          {sub.submittedAt ? new Date(sub.submittedAt).toLocaleDateString() : '—'}
+                        </TableCell>
+                        <TableCell className="text-xs font-bold text-slate-800 dark:text-slate-200">
+                          {sub.status === 'evaluated' ? (
+                            <div>
+                              <span>
+                                {sub.score} / {sub.totalPoints} ({sub.percentage}%)
+                              </span>
+                              {sub.evaluation?.grade && (
+                                <span className="text-[11px] font-bold text-[#E05D38] dark:text-[#F4A261] block">
+                                  Grade: {sub.evaluation.grade} {sub.evaluation.gradeLabel ? `(${sub.evaluation.gradeLabel})` : ''}
+                                </span>
+                              )}
+                            </div>
+                          ) : sub.status === 'submitted' ? (
+                            'Grading in progress'
+                          ) : (
+                            'In Progress'
+                          )}
+                        </TableCell>
+                        <TableCell>
+                          {sub.status === 'evaluated' ? (
+                            <Badge variant={isPassed ? 'success' : 'danger'} size="sm">
+                              {isPassed ? 'Passed' : 'Not Passed'}
+                            </Badge>
+                          ) : sub.status === 'submitted' ? (
+                            <Badge variant="warning" size="sm">
+                              Pending Evaluation
+                            </Badge>
+                          ) : (
+                            <Badge variant="neutral" size="sm">
+                              In Progress
+                            </Badge>
+                          )}
+                        </TableCell>
+                        <TableCell>
+                          {!certEnabled ? (
+                            <Badge variant="neutral" size="sm">
+                              Certification Disabled
+                            </Badge>
+                          ) : isPending ? (
+                            <Badge variant="warning" size="sm">
+                              Pending Evaluation
+                            </Badge>
+                          ) : hasCert ? (
+                            <button
+                              type="button"
+                              onClick={() => navigate('/student/certifications')}
+                              className="cursor-pointer text-left"
+                              title="View in My Certifications"
+                            >
+                              <Badge variant="success" size="sm" className="flex items-center gap-1">
+                                <Award className="w-3 h-3 text-emerald-600 dark:text-emerald-400" />
+                                <span>Certificate Issued</span>
+                              </Badge>
+                              <span className="text-[10px] font-mono text-slate-500 block">
+                                {sub.certificate.certificateId}
+                              </span>
+                            </button>
+                          ) : isEligible ? (
+                            <Badge variant="warning" size="sm">
+                              Eligible — Certificate Processing
+                            </Badge>
+                          ) : (
+                            <Badge variant="neutral" size="sm">
+                              Not Eligible
+                            </Badge>
+                          )}
+                        </TableCell>
+                        <TableCell>
+                          <Badge
+                            variant={
+                              sub.status === 'evaluated'
+                                ? 'success'
+                                : sub.status === 'submitted'
+                                ? 'primary'
+                                : 'neutral'
+                            }
                             size="sm"
-                            onClick={() => openFeedbackModal(sub._id || sub.id)}
+                            dot
                           >
-                            View Feedback
-                          </Button>
-                        ) : (
-                          <span className="text-xs text-slate-400">—</span>
-                        )}
+                            {sub.status === 'submitted' ? 'Submitted' : sub.status}
+                          </Badge>
+                        </TableCell>
+                      <TableCell className="text-right">
+                        <div className="flex items-center justify-end space-x-2">
+                          {sub.status === 'evaluated' && (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => openFeedbackModal(sub._id || sub.id)}
+                            >
+                              View Feedback
+                            </Button>
+                          )}
+                          {sub.status === 'evaluated' && !sub.passed && (() => {
+                            const asmtId = (
+                              sub.assessment?._id ||
+                              sub.assessment?.id ||
+                              sub.assessmentId?._id ||
+                              sub.assessmentId
+                            )?.toString();
+                            const req = reassignmentRequestsMap.get(asmtId);
+                            if (req?.status === 'pending') {
+                              return (
+                                <Badge variant="warning" size="sm">
+                                  Request Pending
+                                </Badge>
+                              );
+                            }
+                            if (req?.status === 'approved') {
+                              return (
+                                <Badge variant="success" size="sm">
+                                  Approved
+                                </Badge>
+                              );
+                            }
+                            return (
+                              <Button
+                                variant="primary"
+                                size="sm"
+                                onClick={() =>
+                                  setSelectedAssessmentForReassignment(
+                                    sub.assessment || {
+                                      _id: asmtId,
+                                      title: sub.assessment?.title || 'Assessment',
+                                      category: sub.assessment?.category,
+                                    }
+                                  )
+                                }
+                              >
+                                Request Reassignment
+                              </Button>
+                            );
+                          })()}
+                          {sub.status !== 'evaluated' && (
+                            <span className="text-xs text-slate-400">—</span>
+                          )}
+                        </div>
                       </TableCell>
                     </TableRow>
-                  ))}
-                </TableBody>
+                  );
+                })}
+              </TableBody>
               </Table>
             )}
           </Card>
@@ -1370,7 +1946,7 @@ const StudentDashboard = () => {
               )}
             </div>
 
-            <div className="grid grid-cols-3 gap-2.5 p-3 rounded-xl bg-slate-50 dark:bg-surface-dark border border-surface-light-border dark:border-surface-dark-border text-center text-xs">
+            <div className="grid grid-cols-1 xs:grid-cols-3 gap-2 sm:gap-2.5 p-3 rounded-xl bg-slate-50 dark:bg-surface-dark border border-surface-light-border dark:border-surface-dark-border text-center text-xs">
               <div>
                 <span className="text-slate-400 block mb-0.5">Duration</span>
                 <strong className="text-slate-800 dark:text-slate-200 font-bold">
@@ -1459,7 +2035,7 @@ const StudentDashboard = () => {
                 </Badge>
               </div>
 
-              <div className="grid grid-cols-3 gap-2 text-center pt-2 border-t border-surface-light-border dark:border-surface-dark-border text-xs">
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-center pt-2 border-t border-surface-light-border dark:border-surface-dark-border text-xs">
                 <div>
                   <span className="text-slate-400 block text-[10px] uppercase font-semibold">Final Score</span>
                   <span className="font-bold text-brand-terracotta text-sm">
@@ -1473,12 +2049,69 @@ const StudentDashboard = () => {
                   </span>
                 </div>
                 <div>
-                  <span className="text-slate-400 block text-[10px] uppercase font-semibold">Status</span>
-                  <span className="font-bold text-emerald-600 text-sm">
-                    {selectedFeedbackSubmission.status}
+                  <span className="text-slate-400 block text-[10px] uppercase font-semibold">Letter Grade</span>
+                  <span className="font-bold text-slate-900 dark:text-slate-100 text-sm">
+                    {selectedFeedbackSubmission.evaluation?.grade || '—'}{' '}
+                    {selectedFeedbackSubmission.evaluation?.gradeLabel ? `(${selectedFeedbackSubmission.evaluation.gradeLabel})` : ''}
                   </span>
                 </div>
+                <div>
+                  <span className="text-slate-400 block text-[10px] uppercase font-semibold">Outcome</span>
+                  <Badge variant={selectedFeedbackSubmission.passed ? 'success' : 'danger'} size="sm">
+                    {selectedFeedbackSubmission.passed ? 'Passed' : 'Not Passed'}
+                  </Badge>
+                </div>
               </div>
+
+              {/* Certification details banner */}
+              {selectedFeedbackSubmission.assessment?.certification?.enabled ? (
+                selectedFeedbackSubmission.certificate ? (
+                  <div className="mt-3 p-3 rounded-xl bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800 text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                    <div className="flex items-center space-x-2">
+                      <Award className="w-5 h-5 text-emerald-600 dark:text-emerald-400 flex-shrink-0" />
+                      <div>
+                        <span className="font-bold text-emerald-900 dark:text-emerald-100 block">
+                          Certificate Issued: {selectedFeedbackSubmission.certificate.certificateId}
+                        </span>
+                        <span className="text-[11px] text-emerald-700 dark:text-emerald-300">
+                          Accredited Certificate awarded for satisfying completion requirements.
+                        </span>
+                      </div>
+                    </div>
+                    <Button
+                      size="sm"
+                      variant="primary"
+                      onClick={() => {
+                        setSelectedFeedbackSubmission(null);
+                        navigate('/student/certifications');
+                      }}
+                    >
+                      View in My Certifications
+                    </Button>
+                  </div>
+                ) : selectedFeedbackSubmission.evaluation?.certificateEligible ? (
+                  <div className="mt-3 p-3 rounded-xl bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 text-xs flex items-center space-x-2 text-amber-900 dark:text-amber-200">
+                    <Award className="w-4 h-4 text-amber-600 dark:text-amber-400 flex-shrink-0" />
+                    <span>Eligible — Certificate Processing</span>
+                  </div>
+                ) : (
+                  <div className="mt-3 p-2.5 rounded-xl bg-slate-100 dark:bg-surface-dark-muted border border-surface-light-border dark:border-surface-dark-border text-xs text-slate-600 dark:text-slate-400 flex items-center justify-between">
+                    <span>Certification Threshold: {selectedFeedbackSubmission.assessment?.certification?.passingPercentage || 50}%</span>
+                    <Badge variant="neutral" size="sm">Not Eligible</Badge>
+                  </div>
+                )
+              ) : (
+                <div className="mt-2 text-[11px] text-slate-400 italic">
+                  Certification is disabled for this assessment.
+                </div>
+              )}
+
+              {/* Encouraging Non-passing message */}
+              {!selectedFeedbackSubmission.passed && (
+                <div className="mt-3 p-3.5 rounded-xl bg-amber-50/70 dark:bg-amber-950/30 border border-amber-200/60 dark:border-amber-900/40 text-xs text-amber-900 dark:text-amber-200 leading-relaxed font-medium">
+                  Every attempt is an opportunity to learn. Review the material, strengthen your understanding, and try again when another attempt is available.
+                </div>
+              )}
             </div>
 
             {/* Overall Faculty Feedback */}
@@ -1619,6 +2252,16 @@ const StudentDashboard = () => {
               )}
           </div>
         </Modal>
+      )}
+
+      {/* Student Reassignment Request Modal */}
+      {selectedAssessmentForReassignment && (
+        <ReassignmentRequestModal
+          isOpen={Boolean(selectedAssessmentForReassignment)}
+          onClose={() => setSelectedAssessmentForReassignment(null)}
+          assessment={selectedAssessmentForReassignment}
+          onSubmit={handleReassignmentSubmit}
+        />
       )}
     </div>
   );

@@ -1,10 +1,11 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
+import { toast } from 'react-toastify';
 import { useAuth } from '../../hooks/useAuth';
+import { useRefresh } from '../../hooks/useRefresh';
 import { getTimeBasedGreeting } from '../../utils/greeting';
 import assessmentService from '../../services/assessment.service';
 import instructorService from '../../services/instructor.service';
-import InstructorSearchBar from '../../components/instructor/InstructorSearchBar';
 import Card from '../../components/ui/Card';
 import Badge from '../../components/ui/Badge';
 import Button from '../../components/ui/Button';
@@ -34,6 +35,7 @@ AlertCircle,
 Edit,
   Globe,
   Lock,
+  RefreshCw,
   BarChart2} from 'lucide-react';
 
 const InstructorDashboard = () => {
@@ -51,9 +53,11 @@ const InstructorDashboard = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState(null);
 
-  const loadDashboardData = useCallback(async () => {
+  const loadDashboardData = useCallback(async (isManual = false) => {
     try {
-      setIsLoading(true);
+      if (!isManual) {
+        setIsLoading(true);
+      }
       setError(null);
       const [asmtRes, subRes] = await Promise.allSettled([
         assessmentService.getAssessments({ limit: 50 }),
@@ -87,13 +91,19 @@ const InstructorDashboard = () => {
       });
     } catch (err) {
       setError(err.message || 'Failed to load dashboard data.');
+      throw err;
     } finally {
       setIsLoading(false);
     }
   }, []);
 
+  const { isRefreshing, refresh: handleRefresh } = useRefresh(
+    () => loadDashboardData(true),
+    { successMessage: 'Instructor dashboard refreshed!' }
+  );
+
   useEffect(() => {
-    loadDashboardData();
+    loadDashboardData(false).catch(() => {});
   }, [loadDashboardData]);
 
   if (isLoading && assessments.length === 0 && submissions.length === 0) {
@@ -112,14 +122,6 @@ const InstructorDashboard = () => {
 
   return (
     <div className="space-y-4 sm:space-y-5 lg:space-y-6">
-      {/* Prominent Workspace Search Bar */}
-      <div className="rounded-2xl border border-[#EBE3D8] dark:border-[#2D3748] bg-white dark:bg-[#1A202C] p-3.5 sm:p-4 shadow-warm-xs">
-        <InstructorSearchBar
-          placeholder="Search course assessments, students, or submissions..."
-          onSelectAssessment={(asmt) => navigate(`/instructor/edit/${asmt._id || asmt.id}`)}
-        />
-      </div>
-
       {/* Personalized Welcome Header with Instructor Illustration */}
       <div className="rounded-2xl border border-[#EBE3D8] dark:border-[#2D3748] bg-gradient-to-r from-[#EAF4F1] via-[#FFFDFB] to-[#FDECE2] dark:from-[#132A24] dark:via-[#1A202C] dark:to-[#341C16] p-5 sm:p-6 lg:py-5 lg:px-7 shadow-warm-xs relative overflow-hidden">
         <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-5 sm:gap-6 relative z-10">
@@ -135,6 +137,18 @@ const InstructorDashboard = () => {
               Welcome back. Manage your assessments and monitor student performance.
             </p>
             <div className="mt-3.5 sm:mt-4 flex flex-wrap items-center gap-2.5 sm:gap-3">
+              <Button
+                variant="outline"
+                size="md"
+                icon={RefreshCw}
+                iconClassName={isRefreshing ? 'animate-spin' : ''}
+                isLoading={isRefreshing}
+                loadingText="Refreshing..."
+                onClick={handleRefresh}
+                aria-label={isRefreshing ? 'Refreshing dashboard' : 'Refresh dashboard'}
+              >
+                Refresh Data
+              </Button>
               <Link to="/instructor/create">
                 <Button variant="primary" size="md" icon={PlusCircle}>
                   Create Assessment
