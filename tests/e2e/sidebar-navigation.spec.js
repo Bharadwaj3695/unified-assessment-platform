@@ -154,12 +154,12 @@ test.describe('Application Shell Navigation & Sidebar E2E - Admin', () => {
     await page.fill('#password', 'Admin@123');
     await page.click('button[type="submit"]');
     await expect(page).toHaveURL(/\/admin\/dashboard/);
-    await expect(page.getByText('System Overview', { exact: true })).toBeVisible({ timeout: 10000 });
+    await expect(page.locator('aside').getByText('System Overview', { exact: true })).toBeVisible({ timeout: 10000 });
   });
 
   test('All admin sidebar links are clickable, route with React Router, and maintain active state on refresh', async ({ page }) => {
     const adminItems = [
-      { name: 'User Management', path: '/admin/users' },
+      { name: 'Approval Queue', path: '/admin/users' },
       { name: 'All Assessments', path: '/admin/assessments' },
       { name: 'Audit Logs', path: '/admin/logs' },
       { name: 'Settings', path: '/admin/settings' },

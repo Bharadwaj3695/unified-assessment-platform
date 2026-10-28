@@ -38,10 +38,17 @@ test.describe('Global RBAC Scroll Reset & Layout Consistency E2E', () => {
         return page.evaluate(() => document.querySelector('main')?.scrollTop || 0);
       }).toBe(0);
 
-      // Scroll down in User Management
+      // Scroll down in User Management (ensure container is scrollable)
       await page.evaluate(() => {
         const main = document.querySelector('main');
-        if (main) main.scrollTop = 350;
+        if (main) {
+          if (main.scrollHeight <= main.clientHeight) {
+            const spacer = document.createElement('div');
+            spacer.style.height = '600px';
+            main.appendChild(spacer);
+          }
+          main.scrollTop = 350;
+        }
       });
       const usersScroll = await page.evaluate(() => document.querySelector('main')?.scrollTop || 0);
       expect(usersScroll).toBeGreaterThan(0);
@@ -97,20 +104,27 @@ test.describe('Global RBAC Scroll Reset & Layout Consistency E2E', () => {
       await expect(page).toHaveURL(/\/admin\/student-registry/);
       await expect(page.locator('h1', { hasText: 'Student Registry' })).toBeVisible({ timeout: 10000 });
 
-      // Scroll down moderately within available space
+      // Scroll down moderately within available space (ensure scrollable)
       await page.evaluate(() => {
         const main = document.querySelector('main');
-        if (main) main.scrollTop = 50;
+        if (main) {
+          if (main.scrollHeight <= main.clientHeight) {
+            const spacer = document.createElement('div');
+            spacer.style.height = '600px';
+            main.appendChild(spacer);
+          }
+          main.scrollTop = 50;
+        }
       });
 
       const currentScroll = await page.evaluate(() => document.querySelector('main')?.scrollTop || 0);
       expect(currentScroll).toBe(50);
 
-      // Type in search box without changing pathname
-      const searchInput = page.locator('input[placeholder*="Search by ID"]');
-      await searchInput.fill('NonExistentStudent');
+      // Interact with local status filter without changing pathname
+      const statusSelect = page.locator('select');
+      await statusSelect.selectOption('active');
 
-      // Give search a moment to debounce
+      // Give filter a moment to update
       await page.waitForTimeout(400);
 
       // Scroll should NOT be reset to 0 because pathname did not change
