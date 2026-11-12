@@ -278,6 +278,28 @@ class EmailService {
   // End sendMail method
   }
 
+  // Login verification code (email OTP) — alternative second factor during an MFA challenge
+  async sendMfaEmailOtp(user, code, ttlMinutes = 5) {
+    const html = this.buildHtmlTemplate({
+      title: 'Your Sign-In Verification Code',
+      recipientName: user.name,
+      messageHtml: `
+        <p>Use the code below to finish signing in to the <strong>Unified Assessment Platform</strong>.</p>
+        <p style="font-size:28px;font-weight:700;letter-spacing:8px;font-family:monospace;text-align:center;margin:24px 0;">${code}</p>
+        <p>This code expires in <strong>${ttlMinutes} minute${ttlMinutes === 1 ? '' : 's'}</strong> and can be used only once.</p>
+        <p>If you did not try to sign in, someone may know your password. Please change it immediately and contact your administrator. Never share this code with anyone.</p>
+      `,
+    });
+
+    return this.sendMail({
+      to: user.email,
+      // NOTE: keep the code out of the subject — sendMail() logs subjects to the console
+      subject: 'Your sign-in verification code — Unified Assessment Platform',
+      text: `Your Unified Assessment Platform sign-in code is ${code}. It expires in ${ttlMinutes} minute${ttlMinutes === 1 ? '' : 's'} and can be used only once. If you did not try to sign in, change your password immediately.`,
+      html,
+    });
+  }
+
   // 1. Pending Registration Email to Applicant
   // Dispatch notification to a newly registered applicant confirming receipt of their account request
   async sendPendingRegistrationEmail(user) {

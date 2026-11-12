@@ -337,13 +337,15 @@ class AuthController {
     // Begin try block for MFA challenge verification
     try {
       // Extract temporary MFA challenge token and TOTP verification code from request body
-      const { mfaToken, code } = req.body;
+      const { mfaToken, code, method } = req.body;
       // Invoke verifyMfaChallenge on authService with challenge token, code, and client IP
       const result = await authService.verifyMfaChallenge({
         // Temporary signed MFA JWT token
         mfaToken,
-        // Submitted 6-digit TOTP code
+        // Submitted 6-digit code (authenticator app or email OTP)
         code,
+        // Second-factor method: 'totp' (default) or 'email'
+        method: method === 'email' ? 'email' : 'totp',
         // Client IP address for logging
         ipAddress: req.ip,
       // Terminate MFA challenge verification payload object
@@ -367,6 +369,18 @@ class AuthController {
     // Terminate try-catch block
     }
   // Terminate mfaVerify method definition
+  }
+
+  // Controller action to email a one-time sign-in code during an active MFA challenge
+  async mfaSendEmailOtp(req, res, next) {
+    try {
+      const { mfaToken } = req.body;
+      const result = await authService.sendMfaEmailOtp({ mfaToken, ipAddress: req.ip });
+      return successResponse(res, `Verification code sent to ${result.email}`, result);
+    } catch (err) {
+      if (err.retryAfterSeconds) res.set('Retry-After', String(err.retryAfterSeconds));
+      next(err);
+    }
   }
 
   // Controller action to authenticate user via single-use backup recovery code

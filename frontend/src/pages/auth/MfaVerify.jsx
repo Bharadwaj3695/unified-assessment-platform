@@ -19,7 +19,7 @@ import PageLoader from '../../components/ui/PageLoader';
 // Import branded transition duration constant
 import { BRANDED_TRANSITION_MIN_DURATION_MS } from '../../utils/constants';
 // Import icons from lucide-react for security shields, keys, arrows, and mode toggles
-import { ShieldCheck, KeyRound, ArrowRight, ArrowLeft, RotateCcw } from 'lucide-react';
+import { ShieldCheck, KeyRound, ArrowRight, ArrowLeft, RotateCcw, Mail } from 'lucide-react';
 
 // Multi-Factor Authentication verification view validating time-based authenticator codes or single-use recovery codes
 const MfaVerify = () => {
@@ -32,6 +32,16 @@ const MfaVerify = () => {
 
   // Mode toggle: false = 6-digit TOTP code entry; true = 10-character backup recovery code entry
   const [isRecoveryMode, setIsRecoveryMode] = useState(false);
+  // Email OTP mode: user asked for a one-time code by email instead of using the authenticator app
+  const [isEmailMode, setIsEmailMode] = useState(false);
+  // 6-digit code received by email
+  const [emailCode, setEmailCode] = useState('');
+  // Details of the last email OTP send (masked email, expiry, resend time) — null until sent
+  const [emailOtpInfo, setEmailOtpInfo] = useState(null);
+  // Sending flag for the "send code" request
+  const [isSendingEmail, setIsSendingEmail] = useState(false);
+  // Seconds remaining before a resend is allowed
+  const [resendIn, setResendIn] = useState(0);
   // State storing the 6-digit numeric TOTP code entered by user
   const [totpCode, setTotpCode] = useState('');
   // State storing the formatted 10-character backup recovery code entered by user
@@ -54,6 +64,8 @@ const MfaVerify = () => {
   const totpInputRef = useRef(null);
   // Reference to recovery code text input element for autofocus
   const recoveryInputRef = useRef(null);
+  // Reference to email code text input element for autofocus
+  const emailInputRef = useRef(null);
 
   // Retrieve challenge token from location.state or sessionStorage
   // Mount effect extracting pending MFA challenge token from router state or browser session storage
@@ -111,8 +123,11 @@ const MfaVerify = () => {
   // Focus appropriate input on mount or mode toggle
   // Effect focusing the active code input field whenever mode changes
   useEffect(() => {
+    // If email mode is active and a code has been sent, focus the email code input
+    if (isEmailMode) {
+      if (emailOtpInfo) emailInputRef.current?.focus();
     // If recovery mode is active, focus recovery input
-    if (isRecoveryMode) {
+    } else if (isRecoveryMode) {
       // Focus recovery input
       recoveryInputRef.current?.focus();
     // Otherwise focus standard 6-digit TOTP input
@@ -121,7 +136,86 @@ const MfaVerify = () => {
       totpInputRef.current?.focus();
     }
   // Trigger on mode toggle
-  }, [isRecoveryMode]);
+  }, [isRecoveryMode, isEmailMode, emailOtpInfo]);
+
+  // Countdown ticker for the email resend cooldown
+  useEffect(() => {
+    if (!emailOtpInfo?.resendAvailableAt) return undefined;
+    const tick = () => {
+      const secs = Math.max(0, Math.ceil((new Date(emailOtpInfo.resendAvailableAt).getTime() - Date.now()) / 1000));
+      setResendIn(secs);
+    };
+    tick();
+    const id = setInterval(tick, 1000);
+    return () => clearInterval(id);
+  }, [emailOtpInfo]);
+
+  // Requests (or re-requests) a one-time sign-in code by email
+  const handleSendEmailCode = async () => {
+    if (!challengeData?.mfaToken) return;
+    setErrorMessage('');
+    setIsSendingEmail(true);
+    try {
+      const result = await authService.sendMfaEmailOtp({ mfaToken: challengeData.mfaToken });
+      setEmailOtpInfo(result);
+      setEmailCode('');
+      toast.success(`Code sent to ${result.email}`);
+    } catch (err) {
+      const msg = err.message || 'Could not send the email code. Please try again.';
+      setErrorMessage(msg);
+      if (msg.toLowerCase().includes('expired') || msg.toLowerCase().includes('sign in again')) {
+        sessionStorage.removeItem('uap_mfa_challenge');
+      }
+    } finally {
+      setIsSendingEmail(false);
+    }
+  };
+
+  // Input change handler for the emailed code (digits only, max 6)
+  const handleEmailCodeChange = (e) => {
+    const val = e.target.value.replace(/\D/g, '').slice(0, 6);
+    setEmailCode(val);
+    if (errorMessage) setErrorMessage('');
+  };
+
+  // Form submission handler verifying the emailed 6-digit code
+  const handleEmailSubmit = async (e) => {
+    e.preventDefault();
+    if (!emailCode || emailCode.length !== 6) {
+      setErrorMessage('Please enter the 6-digit code from your email.');
+      return;
+    }
+    setErrorMessage('');
+    setIsSubmitting(true);
+    try {
+      const result = await authService.verifyMfa({
+        mfaToken: challengeData.mfaToken,
+        code: emailCode,
+        method: 'email',
+      });
+      handleSuccessfulAuth(result);
+    } catch (err) {
+      const msg = err.message || 'Verification failed. Please check your code and try again.';
+      setErrorMessage(msg);
+      if (msg.toLowerCase().includes('locked') || msg.toLowerCase().includes('sign in again')) {
+        sessionStorage.removeItem('uap_mfa_challenge');
+      }
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  // Switches between modes, clearing transient errors
+  const switchToEmailMode = () => {
+    setIsRecoveryMode(false);
+    setIsEmailMode(true);
+    setErrorMessage('');
+  };
+  const switchToAuthenticator = () => {
+    setIsRecoveryMode(false);
+    setIsEmailMode(false);
+    setErrorMessage('');
+  };
 
   // Input change handler for TOTP code enforcing numeric digits and maximum length of 6
   const handleTotpChange = (e) => {
@@ -302,6 +396,9 @@ const MfaVerify = () => {
     );
   }
 
+  // Wait until the pending challenge has been loaded (first render happens before the mount effect runs)
+  if (!challengeData) return null;
+
   // Render MFA verification UI markup
   return (
     <div className="w-full max-w-lg mx-auto py-8 sm:py-12 px-4">
@@ -309,7 +406,9 @@ const MfaVerify = () => {
         {/* Header Icon */}
         <div className="w-14 h-14 rounded-2xl bg-brand-peach/20 dark:bg-brand-peach/10 border border-brand-peach/30 flex items-center justify-center text-brand-terracotta mx-auto mb-4 shadow-warm-xs">
           {/* Render KeyRound icon in recovery mode, ShieldCheck in TOTP mode */}
-          {isRecoveryMode ? (
+          {isEmailMode ? (
+            <Mail className="w-7 h-7" aria-hidden="true" />
+          ) : isRecoveryMode ? (
             <KeyRound className="w-7 h-7" aria-hidden="true" />
           ) : (
             <ShieldCheck className="w-7 h-7" aria-hidden="true" />
@@ -323,12 +422,23 @@ const MfaVerify = () => {
 
         {/* View heading */}
         <h1 className="text-xl sm:text-2xl font-bold font-display tracking-tight text-slate-900 dark:text-slate-100 mb-1.5">
-          {isRecoveryMode ? 'Use Backup Recovery Code' : 'Verify Your Identity'}
+          {isEmailMode ? 'Verify With Email Code' : isRecoveryMode ? 'Use Backup Recovery Code' : 'Verify Your Identity'}
         </h1>
 
         {/* Instructions paragraph */}
         <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 mb-5 max-w-sm mx-auto leading-relaxed">
-          {isRecoveryMode ? (
+          {isEmailMode ? (
+            emailOtpInfo ? (
+              <>
+                We sent a 6-digit code to <strong>{emailOtpInfo.email}</strong>. It expires in a few minutes.
+              </>
+            ) : (
+              <>
+                We'll email a one-time 6-digit code to the address on your account
+                {challengeData.email ? ` (${challengeData.email})` : ''}.
+              </>
+            )
+          ) : isRecoveryMode ? (
             <>
               Enter one of your 10-character recovery codes generated during enrollment.
             </>
@@ -347,8 +457,104 @@ const MfaVerify = () => {
           </Alert>
         )}
 
-        {/* Form conditional rendering: TOTP mode or Recovery mode */}
-        {!isRecoveryMode ? (
+        {/* Form conditional rendering: Email OTP mode, TOTP mode, or Recovery mode */}
+        {isEmailMode ? (
+          /* Email OTP Form */
+          <div className="space-y-4">
+            {!emailOtpInfo ? (
+              <Button
+                type="button"
+                variant="primary"
+                size="md"
+                fullWidth
+                isLoading={isSendingEmail}
+                icon={Mail}
+                iconPosition="left"
+                className="h-11 font-semibold"
+                onClick={handleSendEmailCode}
+              >
+                Send Code to My Email
+              </Button>
+            ) : (
+              <form onSubmit={handleEmailSubmit} className="space-y-4">
+                <div>
+                  <label
+                    htmlFor="email-code"
+                    className="block text-xs font-semibold uppercase tracking-wider text-slate-700 dark:text-slate-300 mb-2"
+                  >
+                    6-Digit Email Code
+                  </label>
+                  <input
+                    ref={emailInputRef}
+                    id="email-code"
+                    name="emailCode"
+                    type="text"
+                    inputMode="numeric"
+                    autoComplete="one-time-code"
+                    pattern="[0-9]*"
+                    maxLength={6}
+                    value={emailCode}
+                    onChange={handleEmailCodeChange}
+                    placeholder="000000"
+                    disabled={isSubmitting}
+                    className="w-full max-w-xs mx-auto text-center font-mono text-2xl sm:text-3xl tracking-[0.4em] sm:tracking-[0.5em] py-2.5 px-4 bg-slate-50 dark:bg-surface-dark-muted border border-surface-light-border dark:border-surface-dark-border rounded-2xl focus:outline-none focus:border-brand-primary focus:ring-2 focus:ring-brand-primary/20 text-slate-900 dark:text-slate-100 transition-all placeholder:text-slate-300 dark:placeholder:text-slate-600"
+                    aria-label="6-digit email verification code"
+                    required
+                  />
+                </div>
+
+                <Button
+                  type="submit"
+                  variant="primary"
+                  size="md"
+                  fullWidth
+                  isLoading={isSubmitting}
+                  disabled={emailCode.length !== 6}
+                  icon={ArrowRight}
+                  iconPosition="right"
+                  className="h-11 font-semibold"
+                >
+                  Verify Email Code
+                </Button>
+
+                <button
+                  type="button"
+                  onClick={handleSendEmailCode}
+                  disabled={resendIn > 0 || isSendingEmail || emailOtpInfo.sendsRemaining === 0}
+                  className="text-xs font-medium text-brand-primary hover:text-brand-primary-hover transition-colors disabled:text-slate-400 disabled:cursor-not-allowed cursor-pointer"
+                >
+                  {emailOtpInfo.sendsRemaining === 0
+                    ? 'No more resends for this sign-in'
+                    : resendIn > 0
+                      ? `Resend code in ${resendIn}s`
+                      : isSendingEmail
+                        ? 'Sending…'
+                        : 'Resend code'}
+                </button>
+              </form>
+            )}
+
+            <div className="pt-2 flex flex-col items-center gap-2 text-xs">
+              <button
+                type="button"
+                onClick={switchToAuthenticator}
+                className="font-medium text-brand-primary hover:text-brand-primary-hover transition-colors flex items-center gap-1 cursor-pointer"
+              >
+                <RotateCcw className="w-3.5 h-3.5" />
+                <span>Use authenticator app instead</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={handleCancel}
+                className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 transition-colors flex items-center gap-1 mt-1 cursor-pointer"
+              >
+                <ArrowLeft className="w-3.5 h-3.5" />
+                <span>Return to Sign In</span>
+              </button>
+            </div>
+          </div>
+        ) : !isRecoveryMode ? (
           /* TOTP Verification Form */
           <form onSubmit={handleTotpSubmit} className="space-y-4">
             <div>
@@ -404,6 +610,15 @@ const MfaVerify = () => {
                 className="font-medium text-brand-primary hover:text-brand-primary-hover transition-colors cursor-pointer"
               >
                 Don't have your device? Use a recovery code
+              </button>
+
+              <button
+                type="button"
+                onClick={switchToEmailMode}
+                className="font-medium text-brand-primary hover:text-brand-primary-hover transition-colors flex items-center gap-1 cursor-pointer"
+              >
+                <Mail className="w-3.5 h-3.5" />
+                <span>Email me a code instead</span>
               </button>
 
               <button

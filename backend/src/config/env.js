@@ -16,6 +16,8 @@ module.exports = {
   MFA_CHALLENGE_SECRET: process.env.MFA_CHALLENGE_SECRET || 'dev_mfa_challenge_secret_unified_assessment_platform',
   MFA_ENCRYPTION_KEY: process.env.MFA_ENCRYPTION_KEY || 'uap_mfa_default_aes256_encryption_key_32bytes!!',
   MFA_CHALLENGE_EXPIRES_IN: process.env.MFA_CHALLENGE_EXPIRES_IN || '5m',
+  // Email OTP as an alternative second factor on the MFA screen (set to 'false' to turn off)
+  MFA_EMAIL_OTP_ENABLED: process.env.MFA_EMAIL_OTP_ENABLED !== 'false',
   LOG_LEVEL: process.env.LOG_LEVEL || 'info',
   ADMIN_REGISTRATION_KEY: process.env.ADMIN_REGISTRATION_KEY || 'ADMIN-UAP-2025',
   GOOGLE_CLIENT_ID: process.env.GOOGLE_CLIENT_ID || '',

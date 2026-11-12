@@ -66,6 +66,27 @@ const mfaChallengeSchema = new mongoose.Schema(
       // Default maximum threshold of 5 attempts to deter brute-force guessing
       default: 5,
     },
+    // ---- Email OTP (optional alternative second factor delivered to the account email) ----
+    // HMAC-SHA256 hash of the most recent 6-digit email OTP issued for this challenge (never plaintext)
+    emailOtpHash: {
+      type: String,
+      default: null,
+    },
+    // Expiry of the most recently issued email OTP
+    emailOtpExpiresAt: {
+      type: Date,
+      default: null,
+    },
+    // Number of email OTPs dispatched for this challenge (caps resend abuse)
+    emailOtpSendCount: {
+      type: Number,
+      default: 0,
+    },
+    // Timestamp of the most recent email OTP dispatch (enforces resend cooldown)
+    emailOtpLastSentAt: {
+      type: Date,
+      default: null,
+    },
     // Exact expiration timestamp after which the challenge is rejected as expired
     expiresAt: {
       // Date type representing expiration epoch
@@ -118,6 +139,8 @@ mfaChallengeSchema.set('toJSON', {
     // Strip sensitive challenge hash from serialized output
     delete ret.challengeHash;
     delete ret.challengeId;
+    // Strip email OTP hash from serialized output
+    delete ret.emailOtpHash;
     // Strip internal document version key
     delete ret.__v;
     // Return sanitized plain object
