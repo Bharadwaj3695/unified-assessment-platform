@@ -124,7 +124,7 @@ const LandingPage = () => {
                   Multi Formats
                 </span>
                 <span className="text-xs text-slate-500 dark:text-slate-400">
-                  MCQ, Short, Long, File
+                  MCQ, Short, Long, File, Coding questions
                 </span>
               </div>
               <div>
