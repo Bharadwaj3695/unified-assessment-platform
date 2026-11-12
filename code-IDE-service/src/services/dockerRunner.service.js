@@ -304,6 +304,100 @@ class DockerRunnerService {
   }
 
   /**
+   * Execute SQLite query inside dedicated disposable container
+   */
+  async executeSqlite({ jobId, schemaDdl = '', query, timeoutMs = env.DEFAULT_TIMEOUT_MS, startTime = Date.now() }) {
+    let container = null;
+    let timer = null;
+    let timedOut = false;
+
+    try {
+      const tar = require('tar-stream');
+      const combinedSql = `${schemaDdl || ''}\n${query || ''}\n`;
+
+      const containerConfig = {
+        Image: RUNTIMES.sqlite.image,
+        Cmd: ['sh', '-c', 'sqlite3 -header -json :memory: < /home/sandbox/app/script.sql'],
+        AttachStdout: true,
+        AttachStderr: true,
+        Tty: false,
+        NetworkMode: 'none',
+        WorkingDir: '/home/sandbox/app',
+        User: '10001:10001',
+        HostConfig: {
+          NetworkMode: 'none',
+          Memory: 128 * 1024 * 1024,
+          MemorySwap: 128 * 1024 * 1024,
+          NanoCPUs: Math.floor(env.DEFAULT_CPUS * 1e9),
+          PidsLimit: 32,
+          ReadonlyRootfs: false,
+          Tmpfs: { '/tmp': 'rw,noexec,nosuid,size=16m' },
+          CapDrop: ['ALL'],
+          SecurityOpt: ['no-new-privileges:true'],
+          AutoRemove: false,
+        },
+      };
+
+      container = await this.docker.createContainer(containerConfig);
+
+      const pack = tar.pack();
+      pack.entry({ name: 'script.sql', mode: 0o644 }, combinedSql);
+      pack.finalize();
+      await container.putArchive(pack, { path: '/home/sandbox/app' });
+
+      const timeoutPromise = new Promise((_, reject) => {
+        timer = setTimeout(async () => {
+          timedOut = true;
+          try {
+            await container.kill({ signal: 'SIGKILL' });
+          } catch (_) {}
+          reject(new Error('TIME_LIMIT_EXCEEDED'));
+        }, timeoutMs);
+      });
+
+      await container.start();
+      const waitPromise = container.wait();
+      const waitResult = await Promise.race([waitPromise, timeoutPromise]);
+      clearTimeout(timer);
+
+      const logBuffer = await container.logs({ stdout: true, stderr: true });
+      const { stdout, stderr, outputTruncated } = this.parseDockerLogs(logBuffer, env.MAX_OUTPUT_BYTES);
+      const executionTimeMs = Date.now() - startTime;
+      const inspectData = await container.inspect();
+      const exitCode = waitResult.StatusCode !== undefined ? waitResult.StatusCode : inspectData.State.ExitCode;
+
+      return {
+        exitCode,
+        stdout,
+        stderr,
+        outputTruncated,
+        executionTimeMs,
+        timedOut: false,
+      };
+    } catch (err) {
+      clearTimeout(timer);
+      const executionTimeMs = Date.now() - startTime;
+      if (timedOut || err.message === 'TIME_LIMIT_EXCEEDED') {
+        return {
+          exitCode: 124,
+          stdout: '',
+          stderr: `Execution terminated: exceeded CPU wall-clock limit of ${timeoutMs}ms.`,
+          outputTruncated: false,
+          executionTimeMs,
+          timedOut: true,
+        };
+      }
+      throw err;
+    } finally {
+      if (container) {
+        try {
+          await container.remove({ force: true });
+        } catch (_) {}
+      }
+    }
+  }
+
+  /**
    * Deterministic simulated sandbox runner for test environments lacking Docker daemon
    */
   async _executeInSimulatedSandbox({ jobId, runtime, code, stdin, expectedOutput, timeoutMs, memoryLimitMb, startTime }) {
@@ -367,70 +461,8 @@ class DockerRunnerService {
       };
     }
 
-    // When running in test environments lacking Docker (e.g. CI or local test harnesses),
-    // execute via local runner with timeout supervisor and stripped environment (no secrets/credentials inherited).
-    try {
-      const cp = require('child_process');
-      const strippedEnv = {
-        PATH: process.env.PATH || '/usr/local/bin:/usr/bin:/bin',
-        HOME: '/tmp',
-        LANG: 'en_US.UTF-8',
-        NODE_ENV: 'sandbox',
-      };
-      let spawnResult = null;
-      if (runtime.id === 'python') {
-        spawnResult = cp.spawnSync('python3', ['-c', code], {
-          input: stdin || '',
-          timeout: Math.min(timeoutMs || 2000, 5000),
-          encoding: 'utf-8',
-          maxBuffer: env.MAX_OUTPUT_BYTES,
-          env: strippedEnv,
-        });
-      } else if (runtime.id === 'javascript') {
-        spawnResult = cp.spawnSync(process.execPath, ['-e', code], {
-          input: stdin || '',
-          timeout: Math.min(timeoutMs || 2000, 5000),
-          encoding: 'utf-8',
-          maxBuffer: env.MAX_OUTPUT_BYTES,
-          env: strippedEnv,
-        });
-      }
-
-      if (spawnResult && !spawnResult.error) {
-        const exitCode = spawnResult.status ?? (spawnResult.signal ? 124 : 0);
-        const stdout = (spawnResult.stdout || '').slice(0, env.MAX_OUTPUT_BYTES);
-        const stderr = (spawnResult.stderr || '').slice(0, env.MAX_OUTPUT_BYTES);
-        const executionTimeMs = Date.now() - startTime;
-
-        let verdict = 'ACCEPTED';
-        if (spawnResult.signal === 'SIGTERM' || spawnResult.error?.code === 'ETIMEDOUT') {
-          verdict = 'TIME_LIMIT_EXCEEDED';
-        } else if (exitCode !== 0) {
-          const isSyntax = /SyntaxError|IndentationError|TabError|unexpected token|compilation error/i.test(stderr + stdout);
-          verdict = isSyntax ? 'COMPILATION_ERROR' : 'RUNTIME_ERROR';
-        } else if (expectedOutput !== null && expectedOutput !== undefined) {
-          const cleanActual = this.normalizeOutput(stdout);
-          const cleanExpected = this.normalizeOutput(expectedOutput);
-          verdict = cleanActual === cleanExpected ? 'ACCEPTED' : 'WRONG_ANSWER';
-        }
-
-        return {
-          jobId,
-          verdict,
-          exitCode,
-          stdout,
-          stderr,
-          outputTruncated: (spawnResult.stdout || '').length > env.MAX_OUTPUT_BYTES,
-          executionTimeMs,
-          memoryUsedBytes: 18 * 1024 * 1024,
-          mode: 'SIMULATION_SANDBOX',
-        };
-      }
-    } catch (_) {
-      // Fallback to static regex simulation below if process spawn fails
-    }
-
-    // Default simulated execution output
+    // Security Protection: We strictly prohibit spawning untrusted code directly on the host machine.
+    // Safe deterministic simulation output for non-Docker test/CI environments:
     let stdout = '';
     const printMatch = code.match(/print\s*\(\s*["']([^"']+)["']\s*\)/i) ||
                        code.match(/console\.log\s*\(\s*["']([^"']+)["']\s*\)/i) ||

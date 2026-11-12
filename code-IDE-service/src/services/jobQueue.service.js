@@ -14,6 +14,45 @@ class JobQueueService {
    * Run a single code execution through the runner
    */
   async runSingle(job) {
+    if (env.USE_REDIS_QUEUE) {
+      const redisQueue = require('../queue/redisQueue.service');
+      return await redisQueue.submitAndAwaitJob({
+        type: 'single',
+        ...job,
+      }, job.timeoutMs || env.DEFAULT_TIMEOUT_MS);
+    }
+    return await this.processJobDirectly({ type: 'single', ...job });
+  }
+
+  /**
+   * Run a suite of test cases against a submission
+   */
+  async runSuite(suiteJob) {
+    if (env.USE_REDIS_QUEUE) {
+      const redisQueue = require('../queue/redisQueue.service');
+      const maxTimeout = (suiteJob.testCases?.length || 1) * (suiteJob.timeoutMs || env.DEFAULT_TIMEOUT_MS);
+      return await redisQueue.submitAndAwaitJob({
+        type: 'suite',
+        ...suiteJob,
+      }, maxTimeout);
+    }
+    return await this.processJobDirectly({ type: 'suite', ...suiteJob });
+  }
+
+  /**
+   * Internal processing dispatcher used directly or by the decoupled Worker
+   */
+  async processJobDirectly(job) {
+    if (job.type === 'suite') {
+      return await this._processSuite(job);
+    }
+    return await this._processSingle(job);
+  }
+
+  /**
+   * Internal single execution processor
+   */
+  async _processSingle(job) {
     while (this.activeJobs >= this.maxConcurrent) {
       await new Promise((res) => setTimeout(res, 50));
     }
@@ -46,9 +85,9 @@ class JobQueueService {
   }
 
   /**
-   * Run a suite of test cases against a submission
+   * Internal suite execution processor
    */
-  async runSuite({ language, code, testCases, timeoutMs, memoryLimitMb, schemaDdl = '' }) {
+  async _processSuite({ language, code, testCases, timeoutMs, memoryLimitMb, schemaDdl = '' }) {
     const results = [];
     let passedCount = 0;
     let totalWeight = 0;
@@ -71,7 +110,7 @@ class JobQueueService {
           ? { columns: tc.expectedColumns || [], rows: tc.expectedRows || [], ordered: true }
           : tc.expectedOutput;
 
-      const runResult = await this.runSingle({
+      const runResult = await this._processSingle({
         language,
         code,
         stdin: tc.input || '',
@@ -100,9 +139,6 @@ class JobQueueService {
         weight,
         isHidden: Boolean(tc.isHidden),
       });
-
-      // Stop on first failure if configured, or continue testing all cases
-      // In academic assessments, we typically run all test cases to award partial marks
     }
 
     const overallVerdict =

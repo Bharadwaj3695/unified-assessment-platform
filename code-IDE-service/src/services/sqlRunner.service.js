@@ -352,6 +352,80 @@ class SqlRunnerService {
       };
     }
 
+    // When Docker is active, execute untrusted SQL strictly inside disposable container
+    const dockerRunner = require('./dockerRunner.service');
+    const isDockerLive = await dockerRunner.checkDockerAvailability();
+
+    if (isDockerLive) {
+      try {
+        const rawRes = await dockerRunner.executeSqlite({
+          jobId,
+          schemaDdl,
+          query,
+          timeoutMs,
+          startTime,
+        });
+
+        if (rawRes.timedOut) {
+          return {
+            jobId,
+            verdict: 'TIME_LIMIT_EXCEEDED',
+            exitCode: 124,
+            stdout: '',
+            stderr: rawRes.stderr,
+            columns: [],
+            rows: [],
+            rowCount: 0,
+            executionTimeMs: rawRes.executionTimeMs,
+            mode: 'SQLITE_CONTAINER',
+          };
+        }
+
+        if (rawRes.exitCode !== 0) {
+          return {
+            jobId,
+            verdict: 'RUNTIME_ERROR',
+            exitCode: rawRes.exitCode,
+            stdout: '',
+            stderr: `SQL Execution Error: ${rawRes.stderr.trim()}`,
+            columns: [],
+            rows: [],
+            rowCount: 0,
+            executionTimeMs: rawRes.executionTimeMs,
+            mode: 'SQLITE_CONTAINER',
+          };
+        }
+
+        let rawRows = [];
+        try {
+          rawRows = rawRes.stdout.trim() ? JSON.parse(rawRes.stdout.trim()) : [];
+          if (!Array.isArray(rawRows)) rawRows = [rawRows];
+        } catch (_) {
+          rawRows = [];
+        }
+
+        const rows = this.normalizeSqlRows(rawRows);
+        const columns = rows.length > 0 ? Object.keys(rows[0]) : [];
+        const comparison = this.compareSqlExpected(rows, columns, expectedOutput);
+        const verdict = comparison.verdict;
+
+        return {
+          jobId,
+          verdict,
+          exitCode: verdict === 'ACCEPTED' ? 0 : 1,
+          stdout: JSON.stringify(rows, null, 2),
+          stderr: comparison.reason || '',
+          columns,
+          rows,
+          rowCount: rows.length,
+          executionTimeMs: rawRes.executionTimeMs,
+          mode: 'SQLITE_CONTAINER',
+        };
+      } catch (err) {
+        logger.warn('Containerized SQLite execution error; evaluating in isolated hermetic sandbox', { error: err.message });
+      }
+    }
+
     try {
       const { DatabaseSync } = require('node:sqlite');
       const db = new DatabaseSync(':memory:');

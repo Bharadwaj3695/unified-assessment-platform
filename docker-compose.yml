@@ -17,31 +17,78 @@ services:
       timeout: 5s
       retries: 5
 
-  uap-code-IDE-service:
-    image: uap-code-ide-service:latest
+  uap-redis:
+    image: redis:7.2-alpine
+    container_name: uap-redis
+    restart: unless-stopped
+    command: redis-server --appendonly no --save "" --maxmemory 256mb --maxmemory-policy volatile-lru
+    networks:
+      - uap-queue-net
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Independent Execution REST API Container (No Docker socket access)
+  uap-code-executor:
+    image: uap-code-executor:latest
     build:
       context: ./code-IDE-service
-      dockerfile: Dockerfile
-    container_name: uap-code-IDE-service
+      dockerfile: Dockerfile.api
+    container_name: uap-code-executor
     restart: unless-stopped
     ports:
-      - "5050:5050"
+      - "127.0.0.1:5050:5050"
     environment:
       PORT: 5050
       NODE_ENV: development
-      INTERNAL_API_KEY: ${EXECUTION_SERVICE_API_KEY:?Set EXECUTION_SERVICE_API_KEY}
-      DOCKER_SOCKET_PATH: /var/run/docker.sock
+      INTERNAL_API_KEY: ${EXECUTION_SERVICE_API_KEY:-dev_uap_exec_internal_secret_key_32bytes!!}
+      REDIS_HOST: uap-redis
+      REDIS_PORT: 6379
+      USE_REDIS_QUEUE: "true"
     volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
       - ./code-IDE-service/src:/app/src
     networks:
       - uap-exec-net
-      - uap-sql-net
+      - uap-queue-net
+    depends_on:
+      uap-redis:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:5050/health"]
       interval: 10s
       timeout: 5s
       retries: 3
+
+  # Independent Execution Worker Container (Orchestrates disposable runners)
+  uap-execution-worker:
+    image: uap-execution-worker:latest
+    build:
+      context: ./code-IDE-service
+      dockerfile: Dockerfile.worker
+    container_name: uap-execution-worker
+    restart: unless-stopped
+    environment:
+      NODE_ENV: development
+      DOCKER_SOCKET_PATH: /var/run/docker.sock
+      REDIS_HOST: uap-redis
+      REDIS_PORT: 6379
+      USE_REDIS_QUEUE: "true"
+      RUNNER_IMAGE_PYTHON: uap-runner-python:3.11-alpine
+      RUNNER_IMAGE_JAVASCRIPT: uap-runner-node:20-alpine
+      RUNNER_IMAGE_SQLITE: uap-runner-sqlite:3.45-alpine
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./code-IDE-service/src:/app/src
+    networks:
+      - uap-queue-net
+      - uap-sql-net
+    depends_on:
+      uap-redis:
+        condition: service_healthy
+      uap-code-executor:
+        condition: service_started
 
   # --- Legacy SQL Infrastructure (Preserved under 'docker compose --profile sql-legacy up') ---
   uap-postgres-engine:
@@ -53,7 +100,7 @@ services:
     environment:
       POSTGRES_DB: uap_sql_sandbox
       POSTGRES_USER: uap_sql_admin
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-dev_postgres_password_uap}
     networks:
       - uap-sql-net
     deploy:
@@ -76,8 +123,8 @@ services:
     environment:
       MYSQL_DATABASE: uap_sql_sandbox
       MYSQL_USER: uap_sql_admin
-      MYSQL_PASSWORD: ${MYSQL_PASSWORD:?Set MYSQL_PASSWORD}
-      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?Set MYSQL_ROOT_PASSWORD}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-dev_mysql_password_uap}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-dev_mysql_root_password_uap}
     volumes:
       - ./code-IDE-service/init-scripts/mysql-init.sql:/docker-entrypoint-initdb.d/init.sql:ro
     networks:
@@ -109,12 +156,12 @@ services:
       NODE_ENV: development
       CLIENT_URL: http://localhost:5173
       MONGODB_URI: mongodb://uap-mongodb:27017/unified_assessment
-      EXECUTION_SERVICE_URL: http://uap-code-IDE-service:5050
-      EXECUTION_SERVICE_API_KEY: ${EXECUTION_SERVICE_API_KEY:?Set EXECUTION_SERVICE_API_KEY}
+      EXECUTION_SERVICE_URL: http://uap-code-executor:5050
+      EXECUTION_SERVICE_API_KEY: ${EXECUTION_SERVICE_API_KEY:-dev_uap_exec_internal_secret_key_32bytes!!}
     depends_on:
       uap-mongodb:
         condition: service_healthy
-      uap-code-IDE-service:
+      uap-code-executor:
         condition: service_healthy
     volumes:
       - ./backend:/app
@@ -133,7 +180,7 @@ services:
   uap-frontend:
     image: uap-frontend:latest
     build:
-      context: ./backends
+      context: ./frontend
       dockerfile: Dockerfile.dev
     container_name: uap-frontend
     restart: unless-stopped
@@ -152,16 +199,26 @@ services:
 
 networks:
   uap-public-net:
+    name: uap-public-net
     driver: bridge
   uap-db-net:
+    name: uap-db-net
     driver: bridge
     internal: true
   uap-exec-net:
+    name: uap-exec-net
     driver: bridge
+  uap-queue-net:
+    name: uap-queue-net
+    driver: bridge
+    internal: true
   uap-sql-net:
+    name: uap-sql-net
     driver: bridge
     internal: true
 
 volumes:
   uap_mongodb_data:
+    name: unifiedassessmentplatformoriginal_uap_mongodb_data
   uap_uploads_data:
+    name: unifiedassessmentplatformoriginal_uap_uploads_data
