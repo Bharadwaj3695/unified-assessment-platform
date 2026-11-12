@@ -133,6 +133,7 @@ class AssessmentService {
         points: parseInt(q.points, 10) || 5,
         orderIndex: idx,
         fileUploadConfig: q.fileUploadConfig || undefined,
+        codingConfig: q.codingConfig || undefined,
         bankQuestionId: q.bankQuestionId || null,
         questionBankId: q.questionBankId || null,
         questionBankVersion: q.questionBankVersion || null,
@@ -254,6 +255,7 @@ class AssessmentService {
           points: pts,
           orderIndex: idx,
           fileUploadConfig: q.fileUploadConfig || undefined,
+          codingConfig: q.codingConfig || undefined,
           bankQuestionId: q.bankQuestionId || null,
           questionBankId: q.questionBankId || null,
           questionBankVersion: q.questionBankVersion || null,
@@ -445,6 +447,16 @@ class AssessmentService {
     }
 
     const assessmentJson = assessment.toJSON();
+    if (isStudent && questions.length > 0) {
+      questions = questions.map((q) => {
+        const qObj = q.toObject ? q.toObject() : (q.toJSON ? q.toJSON() : { ...q });
+        if (qObj.codingConfig && Array.isArray(qObj.codingConfig.testCases)) {
+          // Strictly strip hidden test cases for student callers to prevent cheating
+          qObj.codingConfig.testCases = qObj.codingConfig.testCases.filter((tc) => !tc.isHidden);
+        }
+        return qObj;
+      });
+    }
     assessmentJson.questions = questions;
     return assessmentJson;
   }

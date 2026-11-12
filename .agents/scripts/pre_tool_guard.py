@@ -46,6 +46,12 @@ DESTRUCTIVE_COMMAND_PATTERNS = [
 
     # Destructive file deletions
     (re.compile(r"\brm\s+(-[a-zA-Z]*r[a-zA-Z]*f?|-[a-zA-Z]*f[a-zA-Z]*r?)\s+(/|~|\.\.|backend|frontend|\.git|\.agents|\*)"), "force_ask", "Broad or recursive file deletion requires explicit approval."),
+
+    # Destructive Docker operations
+    (re.compile(r"\bdocker\s+compose\s+down\s+.*-v\b"), "force_ask", "Docker compose down with volumes (-v) destroys data and requires explicit approval."),
+    (re.compile(r"\bdocker\s+(volume|system)\s+prune\b"), "force_ask", "Docker volume or system prune destroys cache/volumes and requires explicit approval."),
+    (re.compile(r"\bdocker\s+volume\s+rm\b"), "force_ask", "Removing Docker volumes destroys data and requires explicit approval."),
+    (re.compile(r"\bdocker\s+rmi\b"), "force_ask", "Removing Docker images requires explicit approval."),
     
     # Production publishing / deployments
     (re.compile(r"\bnpm\s+publish\b"), "force_ask", "Publishing packages requires explicit approval."),
@@ -69,7 +75,7 @@ ROUTINE_COMMAND_PATTERNS = [
     # Tests
     re.compile(r"^\s*npm\s+test(\s+.*)?$"),
     re.compile(r"^\s*npm\s+(run\s+)?test(:[a-zA-Z0-9_\-]+)?(\s+.*)?$"),
-    re.compile(r"^\s*npm\s+--prefix\s+backend\s+test(\s+.*)?$"),
+    re.compile(r"^\s*npm\s+--prefix\s+(backend|code-IDE-service)\s+test(\s+.*)?$"),
     re.compile(r"^\s*npx\s+playwright\s+test(\s+.*)?$"),
     re.compile(r"^\s*node\s+--test(\s+.*)?$"),
     
@@ -84,6 +90,21 @@ ROUTINE_COMMAND_PATTERNS = [
     # Safe inspect & navigation tools
     re.compile(r"^\s*(pwd|ls|dir)(\s+.*)?$"),
     re.compile(r"^\s*(node|npm|python3|git)\s+(--version|-v)$"),
+
+    # Safe Docker read-only status and diagnostics
+    re.compile(r"^\s*docker\s+(ps|images|version|info)(\s+.*)?$"),
+    re.compile(r"^\s*docker\s+compose\s+(ps|config|version)(\s+.*)?$"),
+    re.compile(r"^\s*docker\s+logs\s+[a-zA-Z0-9_\-]+(\s+.*)?$"),
+    re.compile(r"^\s*docker\s+inspect\s+[a-zA-Z0-9_\-]+(\s+.*)?$"),
+
+    # Local network socket and health probe inspection
+    re.compile(r"^\s*ss(\s+.*)?$"),
+    re.compile(r"^\s*netstat(\s+.*)?$"),
+    re.compile(r"^\s*curl\s+.*(localhost|127\.0\.0\.1|::1).*$"),
+
+    # Read-only process & system inspection
+    re.compile(r"^\s*ps(\s+.*)?$"),
+    re.compile(r"^\s*(cat|head|tail|grep|find)\s+.*$"),
 ]
 
 

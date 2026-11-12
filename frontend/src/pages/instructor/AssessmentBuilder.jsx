@@ -36,8 +36,24 @@ import {
   HelpCircle,
   Layers,
   Sparkles,
+  Code2,
+  Terminal,
+  FileCheck2,
 } from 'lucide-react';
 import QuestionBankPickerModal from '../../components/modals/QuestionBankPickerModal';
+import CodeEditor from '../../components/common/CodeEditor';
+
+const SUPPORTED_LANGUAGES = [
+  { id: 'python', label: 'Python 3.11', category: 'code' },
+  { id: 'javascript', label: 'JavaScript (Node.js 20)', category: 'code' },
+  { id: 'sqlite', label: 'SQLite 3 (In-Memory)', category: 'sql' },
+];
+
+const DEFAULT_STARTER_CODE = {
+  python: '# Write your solution here\nimport sys\n\ndef main():\n    pass\n\nif __name__ == "__main__":\n    main()\n',
+  javascript: '// Write your solution here\nconst fs = require("fs");\n\nfunction main() {\n  // Process input\n}\n\nmain();\n',
+  sqlite: '-- Write your SQL query here\nSELECT * FROM students;\n',
+};
 
 const CATEGORIES = [
   'Computer Science',
@@ -103,6 +119,7 @@ const AssessmentBuilder = () => {
 
   // Expand / Collapse State for Questions
   const [expandedQuestions, setExpandedQuestions] = useState({ 'temp-1': true });
+  const [activeCodeTab, setActiveCodeTab] = useState({});
 
   // Delete Question Confirmation Modal State
   const [questionToDelete, setQuestionToDelete] = useState(null);
@@ -188,6 +205,17 @@ const AssessmentBuilder = () => {
                 allowGoogleDocs: true,
                 isRequired: true,
               },
+              codingConfig: q.codingConfig || ((q.type === 'code' || q.type === 'sql') ? {
+                allowedLanguages: q.type === 'sql' ? ['sqlite'] : ['python', 'javascript'],
+                defaultLanguage: q.type === 'sql' ? 'sqlite' : 'python',
+                starterCode: { ...DEFAULT_STARTER_CODE },
+                schemaDdl: '',
+                cpuTimeLimitMs: 2000,
+                memoryLimitMb: 256,
+                testCases: [
+                  { id: 'tc-1', input: '', expectedOutput: '', isHidden: false, weight: 1, explanation: 'Sample test case 1' }
+                ]
+              } : undefined),
             }));
             setQuestions(loadedQuestions);
             // Expand first question by default
@@ -260,6 +288,8 @@ const AssessmentBuilder = () => {
         difficulty: iq.difficulty,
         bloomLevel: iq.bloomLevel,
         tags: iq.tags,
+        codingConfig: iq.codingConfig,
+        fileUploadConfig: iq.fileUploadConfig,
       }));
 
       // Automatically expand new items
@@ -281,7 +311,9 @@ const AssessmentBuilder = () => {
       questionText: '',
       type,
       points:
-        type === 'long_answer'
+        (type === 'code' || type === 'sql')
+          ? 25
+          : type === 'long_answer'
           ? 20
           : type === 'short_answer'
           ? 10
@@ -305,6 +337,31 @@ const AssessmentBuilder = () => {
         allowGoogleDocs: true,
         isRequired: true,
       },
+      codingConfig:
+        (type === 'code' || type === 'sql')
+          ? {
+              executionCategory: type === 'sql' ? 'sql' : 'code',
+              sqlDialect: type === 'sql' ? 'sqlite' : undefined,
+              allowedLanguages: type === 'sql' ? ['sqlite'] : ['python', 'javascript'],
+              defaultLanguage: type === 'sql' ? 'sqlite' : 'python',
+              starterCode: { ...DEFAULT_STARTER_CODE },
+              schemaDdl: '',
+              cpuTimeLimitMs: 2000,
+              memoryLimitMb: 256,
+              testCases: [
+                {
+                  id: `tc-${Date.now()}-1`,
+                  input: '',
+                  expectedOutput: '',
+                  expectedColumns: [],
+                  expectedRows: [],
+                  isHidden: false,
+                  weight: 1,
+                  explanation: 'Sample test case 1',
+                },
+              ],
+            }
+          : undefined,
     };
     setQuestions([...questions, newQ]);
     setExpandedQuestions((prev) => ({ ...prev, [newId]: true }));
@@ -399,7 +456,130 @@ const AssessmentBuilder = () => {
 
   const updateQuestionField = (index, field, val) => {
     const updated = [...questions];
-    updated[index] = { ...updated[index], [field]: val };
+    const prevQ = updated[index];
+    let codingConfig = prevQ.codingConfig;
+    if ((field === 'type' && (val === 'code' || val === 'sql')) && !codingConfig) {
+      codingConfig = {
+        executionCategory: val === 'sql' ? 'sql' : 'code',
+        sqlDialect: val === 'sql' ? 'sqlite' : undefined,
+        allowedLanguages: val === 'sql' ? ['sqlite'] : ['python', 'javascript'],
+        defaultLanguage: val === 'sql' ? 'sqlite' : 'python',
+        starterCode: { ...DEFAULT_STARTER_CODE },
+        schemaDdl: val === 'sql' ? '-- CREATE TABLE students (id INT, name TEXT);' : '',
+        cpuTimeLimitMs: 2000,
+        memoryLimitMb: 256,
+        testCases: [
+          {
+            id: `tc-${Date.now()}-1`,
+            input: '',
+            expectedOutput: val === 'sql' ? JSON.stringify([{ id: 1, name: 'Alice' }]) : '',
+            expectedColumns: val === 'sql' ? ['id', 'name'] : [],
+            expectedRows: val === 'sql' ? [[1, 'Alice']] : [],
+            isHidden: false,
+            weight: 1,
+            explanation: 'Sample test case 1',
+          },
+        ],
+      };
+    }
+    updated[index] = { ...prevQ, [field]: val, ...(codingConfig ? { codingConfig } : {}) };
+    setQuestions(updated);
+  };
+
+  const updateCodingConfig = (qIndex, field, val) => {
+    const updated = [...questions];
+    const currentConfig = updated[qIndex].codingConfig || {};
+    updated[qIndex].codingConfig = {
+      ...currentConfig,
+      [field]: val,
+    };
+    setQuestions(updated);
+  };
+
+  const updateStarterCode = (qIndex, lang, code) => {
+    const updated = [...questions];
+    const currentConfig = updated[qIndex].codingConfig || {};
+    const starterCode = { ...(currentConfig.starterCode || {}) };
+    starterCode[lang] = code;
+    updated[qIndex].codingConfig = {
+      ...currentConfig,
+      starterCode,
+    };
+    setQuestions(updated);
+  };
+
+  const toggleAllowedLanguage = (qIndex, langId) => {
+    const updated = [...questions];
+    const currentConfig = updated[qIndex].codingConfig || {};
+    const langs = [...(currentConfig.allowedLanguages || ['python', 'javascript'])];
+    const idx = langs.indexOf(langId);
+    if (idx >= 0) {
+      if (langs.length === 1) {
+        toast.warning('At least one language must remain enabled.');
+        return;
+      }
+      langs.splice(idx, 1);
+    } else {
+      langs.push(langId);
+    }
+    const defaultLang = langs.includes(currentConfig.defaultLanguage)
+      ? currentConfig.defaultLanguage
+      : langs[0];
+    updated[qIndex].codingConfig = {
+      ...currentConfig,
+      allowedLanguages: langs,
+      defaultLanguage: defaultLang,
+    };
+    setQuestions(updated);
+  };
+
+  const addTestCase = (qIndex) => {
+    const updated = [...questions];
+    const currentConfig = updated[qIndex].codingConfig || {};
+    const testCases = [...(currentConfig.testCases || [])];
+    testCases.push({
+      id: `tc-${Date.now()}-${testCases.length + 1}`,
+      input: '',
+      expectedOutput: '',
+      isHidden: testCases.length >= 1,
+      weight: 1,
+      explanation: `Test case ${testCases.length + 1}`,
+    });
+    updated[qIndex].codingConfig = {
+      ...currentConfig,
+      testCases,
+    };
+    setQuestions(updated);
+  };
+
+  const removeTestCase = (qIndex, tcIndex) => {
+    const updated = [...questions];
+    const currentConfig = updated[qIndex].codingConfig || {};
+    const testCases = [...(currentConfig.testCases || [])];
+    if (testCases.length <= 1) {
+      toast.warning('Coding questions must have at least one test case.');
+      return;
+    }
+    testCases.splice(tcIndex, 1);
+    updated[qIndex].codingConfig = {
+      ...currentConfig,
+      testCases,
+    };
+    setQuestions(updated);
+  };
+
+  const updateTestCase = (qIndex, tcIndex, field, val) => {
+    const updated = [...questions];
+    const currentConfig = updated[qIndex].codingConfig || {};
+    const testCases = [...(currentConfig.testCases || [])];
+    testCases[tcIndex] = {
+      ...testCases[tcIndex],
+      [field]: val,
+    };
+    updated[qIndex].codingConfig = {
+      ...currentConfig,
+      testCases,
+    };
     setQuestions(updated);
   };
 
@@ -499,6 +679,27 @@ const AssessmentBuilder = () => {
           qHasError = true;
         }
       }
+      if (q.type === 'code' || q.type === 'sql') {
+        const allowed = q.codingConfig?.allowedLanguages || [];
+        if (allowed.length === 0) {
+          errors[`q_${idx}_languages`] = `Question #${idx + 1} must have at least one allowed language or SQL dialect.`;
+          qHasError = true;
+        }
+        const testCases = q.codingConfig?.testCases || [];
+        if (testCases.length === 0) {
+          errors[`q_${idx}_testcases`] = `Question #${idx + 1} must have at least one test case.`;
+          qHasError = true;
+        } else {
+          const hasEmptyExpected = testCases.some((tc) => {
+            const hasStructured = (tc.expectedColumns && tc.expectedColumns.length > 0) || (tc.expectedRows && tc.expectedRows.length > 0);
+            return !hasStructured && (!tc.expectedOutput || !tc.expectedOutput.trim());
+          });
+          if (hasEmptyExpected) {
+            errors[`q_${idx}_testcases`] = `Question #${idx + 1} has test cases with missing expected output.`;
+            qHasError = true;
+          }
+        }
+      }
       if (qHasError) {
         questionsToExpand[q.id] = true;
       }
@@ -510,6 +711,10 @@ const AssessmentBuilder = () => {
 
     setValidationErrors(errors);
     return Object.keys(errors).length === 0;
+  };
+
+  const handleNavigateToSubmissions = () => {
+    navigate('/instructor/submissions');
   };
 
   const handleSave = async (targetStatus) => {
@@ -570,6 +775,29 @@ const AssessmentBuilder = () => {
                   maxFileSizeMb: q.fileUploadConfig?.maxFileSizeMb || 10,
                   allowGoogleDocs: q.fileUploadConfig?.allowGoogleDocs ?? true,
                   isRequired: q.fileUploadConfig?.isRequired ?? true,
+                }
+              : undefined,
+          codingConfig:
+            (q.type === 'code' || q.type === 'sql')
+              ? {
+                  executionCategory: q.codingConfig?.executionCategory || (q.type === 'sql' ? 'sql' : 'code'),
+                  sqlDialect: q.codingConfig?.sqlDialect || (q.type === 'sql' ? 'sqlite' : undefined),
+                  allowedLanguages:
+                    q.codingConfig?.allowedLanguages || (q.type === 'sql' ? ['sqlite'] : ['python', 'javascript']),
+                  defaultLanguage: q.codingConfig?.defaultLanguage || (q.type === 'sql' ? 'sqlite' : 'python'),
+                  starterCode: q.codingConfig?.starterCode || {},
+                  schemaDdl: q.codingConfig?.schemaDdl || '',
+                  cpuTimeLimitMs: Number(q.codingConfig?.cpuTimeLimitMs) || 2000,
+                  memoryLimitMb: Number(q.codingConfig?.memoryLimitMb) || 256,
+                  testCases: (q.codingConfig?.testCases || []).map((tc) => ({
+                    input: tc.input || '',
+                    expectedOutput: tc.expectedOutput || '',
+                    expectedColumns: tc.expectedColumns || [],
+                    expectedRows: tc.expectedRows || [],
+                    isHidden: Boolean(tc.isHidden),
+                    weight: Number(tc.weight) >= 1 ? Number(tc.weight) : 1,
+                    explanation: tc.explanation || '',
+                  })),
                 }
               : undefined,
         })),
@@ -647,7 +875,16 @@ const AssessmentBuilder = () => {
           </div>
 
           {/* Action Controls */}
-          <div className="flex items-center gap-2.5 self-start sm:self-auto flex-shrink-0">
+          <div className="flex items-center gap-2.5 flex-wrap self-start sm:self-auto flex-shrink-0">
+            <Button
+              type="button"
+              variant="outline"
+              size="md"
+              icon={FileCheck2}
+              onClick={handleNavigateToSubmissions}
+            >
+              Submissions
+            </Button>
             <Button
               type="button"
               variant="outline"
@@ -1037,6 +1274,16 @@ const AssessmentBuilder = () => {
               type="button"
               variant="outline"
               size="sm"
+              icon={Code2}
+              onClick={() => addQuestion('code')}
+              className="text-[#E05D38] border-[#E05D38]/30 hover:bg-[#FDF1EC] dark:hover:bg-[#341C16]/40 font-semibold"
+            >
+              Add Coding & SQL
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
               icon={Database}
               onClick={() => setIsQuestionBankModalOpen(true)}
               className="text-indigo-700 dark:text-indigo-300 border-indigo-200 dark:border-indigo-800 hover:bg-indigo-50 dark:hover:bg-indigo-950/40 font-semibold"
@@ -1089,6 +1336,8 @@ const AssessmentBuilder = () => {
                       variant={
                         q.type === 'mcq'
                           ? 'terracotta'
+                          : (q.type === 'code' || q.type === 'sql')
+                          ? 'terracotta'
                           : q.type === 'short_answer'
                           ? 'peach'
                           : q.type === 'long_answer'
@@ -1099,6 +1348,10 @@ const AssessmentBuilder = () => {
                     >
                       {q.type === 'mcq'
                         ? 'Multiple Choice'
+                        : q.type === 'code'
+                        ? 'Programming (Code)'
+                        : q.type === 'sql'
+                        ? 'SQL Query'
                         : q.type === 'short_answer'
                         ? 'Short Answer'
                         : q.type === 'long_answer'
@@ -1200,6 +1453,8 @@ const AssessmentBuilder = () => {
                           className="w-full px-3 py-1.5 text-xs bg-white dark:bg-[#12161F] border border-[#EBE3D8] dark:border-[#2D3748] rounded-xl text-[#1F2937] dark:text-[#F9FAFB] focus:outline-none focus:border-[#E05D38] focus:ring-1 focus:ring-[#E05D38]/20"
                         >
                           <option value="mcq">Multiple Choice (MCQ)</option>
+                          <option value="code">Programming Problem (Python / JS)</option>
+                          <option value="sql">SQL Query Problem (Database)</option>
                           <option value="short_answer">Short Answer (Subjective)</option>
                           <option value="long_answer">Long Essay (Subjective)</option>
                           <option value="file_upload">File Upload / Document (Subjective)</option>
@@ -1369,6 +1624,354 @@ const AssessmentBuilder = () => {
                               Mandatory Submission (Required)
                             </span>
                           </label>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Coding & SQL Configuration */}
+                    {(q.type === 'code' || q.type === 'sql') && (
+                      <div className="p-4 rounded-xl border border-[#EBE3D8] dark:border-[#2D3748] bg-[#FAF8F5]/80 dark:bg-[#151B28]/80 space-y-4">
+                        {/* Header */}
+                        <div className="flex items-center justify-between pb-2 border-b border-[#EBE3D8] dark:border-[#2D3748]">
+                          <div className="text-xs font-bold uppercase tracking-wider text-[#64748B] dark:text-[#94A3B8] flex items-center space-x-1.5">
+                            <Terminal className="w-4 h-4 text-[#E05D38]" />
+                            <span>Coding & SQL Runtime Configuration</span>
+                          </div>
+                          <div className="text-[11px] font-medium text-[#64748B] dark:text-[#94A3B8]">
+                            Approved Scope: Python, JavaScript, and SQL (SQLite, PostgreSQL, MySQL)
+                          </div>
+                        </div>
+
+                        {/* Allowed Languages Checkboxes & Default Language Selector */}
+                        <div className="space-y-2">
+                          <label className="block text-xs font-semibold text-[#1F2937] dark:text-[#F9FAFB]">
+                            Allowed Execution Environments *
+                          </label>
+                          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2.5 text-xs">
+                            {SUPPORTED_LANGUAGES.map((lang) => {
+                              const isAllowed = (q.codingConfig?.allowedLanguages || []).includes(lang.id);
+                              const isDefault = q.codingConfig?.defaultLanguage === lang.id;
+                              return (
+                                <div
+                                  key={lang.id}
+                                  className={`p-2.5 rounded-xl border transition-all flex items-start justify-between ${
+                                    isAllowed
+                                      ? 'border-[#E05D38]/40 bg-white dark:bg-[#12161F] shadow-sm'
+                                      : 'border-[#EBE3D8] dark:border-[#2D3748] opacity-60 bg-[#F9F7F4] dark:bg-[#0E131F]'
+                                  }`}
+                                >
+                                  <label className="flex items-center space-x-2 cursor-pointer flex-1">
+                                    <input
+                                      type="checkbox"
+                                      checked={isAllowed}
+                                      onChange={() => toggleAllowedLanguage(qIndex, lang.id)}
+                                      className="rounded border-[#EBE3D8] text-[#E05D38] focus:ring-[#E05D38] cursor-pointer"
+                                    />
+                                    <div>
+                                      <div className="font-semibold text-[#1F2937] dark:text-[#F9FAFB]">
+                                        {lang.label}
+                                      </div>
+                                      <div className="text-[10px] text-[#64748B] dark:text-[#94A3B8] uppercase">
+                                        {lang.category === 'sql' ? 'Relational DB' : 'Programming'}
+                                      </div>
+                                    </div>
+                                  </label>
+
+                                  {isAllowed && (
+                                    <button
+                                      type="button"
+                                      onClick={() => updateCodingConfig(qIndex, 'defaultLanguage', lang.id)}
+                                      title={isDefault ? 'Default language' : 'Click to make default language'}
+                                      className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${
+                                        isDefault
+                                          ? 'bg-[#E05D38] text-white'
+                                          : 'bg-slate-100 dark:bg-slate-800 text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
+                                      }`}
+                                    >
+                                      {isDefault ? 'Default' : 'Set Default'}
+                                    </button>
+                                  )}
+                                </div>
+                              );
+                            })}
+                          </div>
+                          {validationErrors[`q_${qIndex}_languages`] && (
+                            <p className="text-xs text-red-500 mt-1">
+                              {validationErrors[`q_${qIndex}_languages`]}
+                            </p>
+                          )}
+                        </div>
+
+                        {/* Execution Limits: CPU Time & Memory */}
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-1">
+                          <div>
+                            <label className="block text-xs font-semibold text-[#1F2937] dark:text-[#F9FAFB] mb-1">
+                              CPU Time Limit (ms)
+                            </label>
+                            <div className="flex items-center space-x-2">
+                              <input
+                                type="number"
+                                min="500"
+                                max="10000"
+                                step="500"
+                                value={q.codingConfig?.cpuTimeLimitMs ?? 2000}
+                                onChange={(e) =>
+                                  updateCodingConfig(
+                                    qIndex,
+                                    'cpuTimeLimitMs',
+                                    Math.max(500, Math.min(10000, parseInt(e.target.value, 10) || 2000))
+                                  )
+                                }
+                                className="w-32 px-3 py-1.5 text-xs bg-white dark:bg-[#12161F] border border-[#EBE3D8] dark:border-[#2D3748] rounded-xl text-[#1F2937] dark:text-[#F9FAFB] focus:outline-none focus:border-[#E05D38]"
+                              />
+                              <span className="text-xs text-[#64748B] dark:text-[#94A3B8]">
+                                ms (500 - 10,000ms)
+                              </span>
+                            </div>
+                          </div>
+
+                          <div>
+                            <label className="block text-xs font-semibold text-[#1F2937] dark:text-[#F9FAFB] mb-1">
+                              Memory Limit (MB)
+                            </label>
+                            <div className="flex items-center space-x-2">
+                              <input
+                                type="number"
+                                min="64"
+                                max="512"
+                                step="64"
+                                value={q.codingConfig?.memoryLimitMb ?? 256}
+                                onChange={(e) =>
+                                  updateCodingConfig(
+                                    qIndex,
+                                    'memoryLimitMb',
+                                    Math.max(64, Math.min(512, parseInt(e.target.value, 10) || 256))
+                                  )
+                                }
+                                className="w-32 px-3 py-1.5 text-xs bg-white dark:bg-[#12161F] border border-[#EBE3D8] dark:border-[#2D3748] rounded-xl text-[#1F2937] dark:text-[#F9FAFB] focus:outline-none focus:border-[#E05D38]"
+                              />
+                              <span className="text-xs text-[#64748B] dark:text-[#94A3B8]">
+                                MB (64 - 512MB)
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* SQL Schema DDL (Rendered if SQLite is selected) */}
+                        {(q.codingConfig?.allowedLanguages || []).includes('sqlite') && (
+                          <div className="space-y-1.5 pt-2 border-t border-[#EBE3D8] dark:border-[#2D3748]">
+                            <div className="flex items-center justify-between">
+                              <label className="text-xs font-semibold text-[#1F2937] dark:text-[#F9FAFB] flex items-center space-x-1.5">
+                                <Database className="w-3.5 h-3.5 text-[#E05D38]" />
+                                <span>SQL Schema DDL (Table Definitions & Seed Data)</span>
+                              </label>
+                              <span className="text-[11px] text-[#64748B] dark:text-[#94A3B8]">
+                                Pre-executes inside isolated ephemeral database/schema
+                              </span>
+                            </div>
+                            <CodeEditor
+                              value={q.codingConfig?.schemaDdl || ''}
+                              onChange={(val) => updateCodingConfig(qIndex, 'schemaDdl', val)}
+                              language="sqlite"
+                              height="140px"
+                              minHeight="100px"
+                              placeholder="-- e.g. CREATE TABLE employees (id INT PRIMARY KEY, name VARCHAR(50), salary INT);\n-- INSERT INTO employees VALUES (1, 'Alice', 95000);"
+                            />
+                          </div>
+                        )}
+
+                        {/* Starter Code Editor with Language Tabs */}
+                        <div className="space-y-2 pt-2 border-t border-[#EBE3D8] dark:border-[#2D3748]">
+                          <div className="flex items-center justify-between">
+                            <label className="text-xs font-semibold text-[#1F2937] dark:text-[#F9FAFB] flex items-center space-x-1.5">
+                              <Code2 className="w-3.5 h-3.5 text-[#E05D38]" />
+                              <span>Starter Code Templates (CodeMirror Editor)</span>
+                            </label>
+                            <span className="text-[11px] text-[#64748B] dark:text-[#94A3B8]">
+                              Pre-populated for students
+                            </span>
+                          </div>
+
+                          {/* Language Switcher Tabs */}
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            {(q.codingConfig?.allowedLanguages || ['python']).map((langId) => {
+                              const langMeta = SUPPORTED_LANGUAGES.find((l) => l.id === langId) || { label: langId };
+                              const activeTab = activeCodeTab[q.id || qIndex] || q.codingConfig?.defaultLanguage || 'python';
+                              const isActive = activeTab === langId;
+                              return (
+                                <button
+                                  key={langId}
+                                  type="button"
+                                  onClick={() => setActiveCodeTab((prev) => ({ ...prev, [q.id || qIndex]: langId }))}
+                                  className={`px-3 py-1 text-xs rounded-lg font-medium transition-colors ${
+                                    isActive
+                                      ? 'bg-[#E05D38] text-white shadow-sm'
+                                      : 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700'
+                                  }`}
+                                >
+                                  {langMeta.label}
+                                </button>
+                              );
+                            })}
+                          </div>
+
+                          {/* CodeMirror Starter Code Editor */}
+                          {(() => {
+                            const activeTab =
+                              activeCodeTab[q.id || qIndex] &&
+                              (q.codingConfig?.allowedLanguages || []).includes(activeCodeTab[q.id || qIndex])
+                                ? activeCodeTab[q.id || qIndex]
+                                : q.codingConfig?.defaultLanguage || q.codingConfig?.allowedLanguages?.[0] || 'python';
+
+                            const codeVal =
+                              (q.codingConfig?.starterCode && q.codingConfig.starterCode[activeTab] !== undefined)
+                                ? q.codingConfig.starterCode[activeTab]
+                                : (DEFAULT_STARTER_CODE[activeTab] || '');
+
+                            return (
+                              <CodeEditor
+                                value={codeVal}
+                                onChange={(val) => updateStarterCode(qIndex, activeTab, val)}
+                                language={activeTab}
+                                height="180px"
+                                placeholder={`Enter starter template for ${activeTab}...`}
+                              />
+                            );
+                          })()}
+                        </div>
+
+                        {/* Automated Test Cases Suite */}
+                        <div className="space-y-3 pt-2 border-t border-[#EBE3D8] dark:border-[#2D3748]">
+                          <div className="flex items-center justify-between">
+                            <div>
+                              <label className="text-xs font-semibold text-[#1F2937] dark:text-[#F9FAFB] flex items-center space-x-1.5">
+                                <CheckCircle className="w-3.5 h-3.5 text-[#E05D38]" />
+                                <span>Automated Test Cases Suite *</span>
+                              </label>
+                              <p className="text-[11px] text-[#64748B] dark:text-[#94A3B8]">
+                                Hidden cases are evaluated securely on final submit and never revealed to students.
+                              </p>
+                            </div>
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              icon={Plus}
+                              onClick={() => addTestCase(qIndex)}
+                              className="text-xs"
+                            >
+                              Add Test Case
+                            </Button>
+                          </div>
+
+                          {validationErrors[`q_${qIndex}_testcases`] && (
+                            <p className="text-xs text-red-500">
+                              {validationErrors[`q_${qIndex}_testcases`]}
+                            </p>
+                          )}
+
+                          {/* Test cases list */}
+                          <div className="space-y-3">
+                            {(q.codingConfig?.testCases || []).map((tc, tcIndex) => (
+                              <div
+                                key={tc.id || tcIndex}
+                                className={`p-3.5 rounded-xl border transition-all ${
+                                  tc.isHidden
+                                    ? 'border-indigo-200 dark:border-indigo-900/60 bg-indigo-50/30 dark:bg-indigo-950/20'
+                                    : 'border-[#EBE3D8] dark:border-[#2D3748] bg-white dark:bg-[#12161F]'
+                                }`}
+                              >
+                                {/* Header: Number, Weight, Hidden Checkbox, Remove */}
+                                <div className="flex flex-wrap items-center justify-between gap-2 pb-2.5 border-b border-[#EBE3D8]/60 dark:border-[#2D3748]/60">
+                                  <div className="flex items-center space-x-2">
+                                    <span className="px-2 py-0.5 rounded text-xs font-bold bg-[#FDF1EC] dark:bg-[#341C16] text-[#E05D38]">
+                                      Case #{tcIndex + 1}
+                                    </span>
+                                    <label className="flex items-center space-x-1.5 text-xs text-[#1F2937] dark:text-[#F9FAFB]">
+                                      <span className="text-[#64748B] dark:text-[#94A3B8]">Weight:</span>
+                                      <input
+                                        type="number"
+                                        min="1"
+                                        max="100"
+                                        value={tc.weight ?? 1}
+                                        onChange={(e) =>
+                                          updateTestCase(qIndex, tcIndex, 'weight', Math.max(1, parseInt(e.target.value, 10) || 1))
+                                        }
+                                        className="w-14 px-2 py-0.5 text-xs bg-white dark:bg-[#1A202C] border border-[#EBE3D8] dark:border-[#2D3748] rounded-lg text-center font-bold"
+                                      />
+                                      <span className="text-[#64748B] dark:text-[#94A3B8]">pts</span>
+                                    </label>
+                                  </div>
+
+                                  <div className="flex items-center space-x-3">
+                                    <label className="flex items-center space-x-1.5 text-xs cursor-pointer select-none">
+                                      <input
+                                        type="checkbox"
+                                        checked={Boolean(tc.isHidden)}
+                                        onChange={(e) => updateTestCase(qIndex, tcIndex, 'isHidden', e.target.checked)}
+                                        className="rounded border-[#EBE3D8] text-indigo-600 focus:ring-indigo-500 cursor-pointer"
+                                      />
+                                      <span className={`font-medium ${tc.isHidden ? 'text-indigo-600 dark:text-indigo-400 font-semibold' : 'text-[#64748B] dark:text-[#94A3B8]'}`}>
+                                        {tc.isHidden ? 'Hidden Case (Grading Only)' : 'Visible (Public Sample)'}
+                                      </span>
+                                    </label>
+
+                                    {(q.codingConfig?.testCases || []).length > 1 && (
+                                      <button
+                                        type="button"
+                                        onClick={() => removeTestCase(qIndex, tcIndex)}
+                                        className="p-1 text-slate-400 hover:text-rose-500 rounded transition-colors cursor-pointer"
+                                        title="Remove Test Case"
+                                        aria-label="Remove Test Case"
+                                      >
+                                        <Trash2 className="w-3.5 h-3.5" />
+                                      </button>
+                                    )}
+                                  </div>
+                                </div>
+
+                                {/* Inputs: Stdin & Expected Output */}
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-2.5">
+                                  <div>
+                                    <label className="block text-xs font-semibold text-[#64748B] dark:text-[#94A3B8] mb-1">
+                                      Standard Input (stdin / arguments)
+                                    </label>
+                                    <textarea
+                                      rows={2}
+                                      value={tc.input || ''}
+                                      onChange={(e) => updateTestCase(qIndex, tcIndex, 'input', e.target.value)}
+                                      placeholder="Leave empty if program requires no stdin..."
+                                      className="w-full px-3 py-1.5 text-xs font-mono bg-[#FAF8F5] dark:bg-[#0E131F] border border-[#EBE3D8] dark:border-[#2D3748] rounded-xl text-[#1F2937] dark:text-[#F9FAFB] focus:outline-none focus:border-[#E05D38]"
+                                    />
+                                  </div>
+
+                                  <div>
+                                    <label className="block text-xs font-semibold text-[#64748B] dark:text-[#94A3B8] mb-1">
+                                      Expected Output (stdout / expected JSON rows) *
+                                    </label>
+                                    <textarea
+                                      rows={2}
+                                      value={tc.expectedOutput || ''}
+                                      onChange={(e) => updateTestCase(qIndex, tcIndex, 'expectedOutput', e.target.value)}
+                                      placeholder="Expected stdout or JSON array for SQL rows..."
+                                      className="w-full px-3 py-1.5 text-xs font-mono bg-[#FAF8F5] dark:bg-[#0E131F] border border-[#EBE3D8] dark:border-[#2D3748] rounded-xl text-[#1F2937] dark:text-[#F9FAFB] focus:outline-none focus:border-[#E05D38]"
+                                    />
+                                  </div>
+                                </div>
+
+                                {/* Explanation Note */}
+                                <div className="pt-2">
+                                  <input
+                                    type="text"
+                                    value={tc.explanation || ''}
+                                    onChange={(e) => updateTestCase(qIndex, tcIndex, 'explanation', e.target.value)}
+                                    placeholder="Optional explanation note for this test case (e.g. Edge case: empty input list)"
+                                    className="w-full px-3 py-1 text-xs bg-white dark:bg-[#1A202C] border border-[#EBE3D8]/80 dark:border-[#2D3748]/80 rounded-lg text-[#64748B] dark:text-[#94A3B8] focus:outline-none focus:border-[#E05D38]"
+                                  />
+                                </div>
+                              </div>
+                            ))}
+                          </div>
                         </div>
                       </div>
                     )}

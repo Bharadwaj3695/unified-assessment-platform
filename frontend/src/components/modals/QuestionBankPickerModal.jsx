@@ -102,6 +102,8 @@ const QuestionBankPickerModal = ({ isOpen, onClose, onSelectQuestions }) => {
       difficulty: bq.difficulty,
       bloomLevel: bq.bloomLevel,
       tags: bq.tags || [],
+      codingConfig: bq.codingConfig || undefined,
+      fileUploadConfig: bq.fileUploadConfig || undefined,
       // Embedded Question Bank Versioning Snapshot
       bankQuestionId: bq._id,
       questionBankId: bq.questionBankId,
@@ -161,6 +163,8 @@ const QuestionBankPickerModal = ({ isOpen, onClose, onSelectQuestions }) => {
               >
                 <option value="All">All Types</option>
                 <option value="mcq">MCQ</option>
+                <option value="code">Programming (Code)</option>
+                <option value="sql">SQL Query</option>
                 <option value="short_answer">Short Answer</option>
                 <option value="long_answer">Long Answer</option>
                 <option value="file_upload">File Upload</option>

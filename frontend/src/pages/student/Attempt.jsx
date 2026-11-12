@@ -14,6 +14,7 @@ import Spinner from '../../components/ui/Spinner';
 import PageLoader from '../../components/ui/PageLoader';
 import ErrorState from '../../components/ui/ErrorState';
 import ProgressBar from '../../components/ui/ProgressBar';
+import CodeEditor from '../../components/common/CodeEditor';
 import {
   Clock,
   CheckCircle,
@@ -21,7 +22,7 @@ import {
   ChevronLeft,
   ChevronRight,
   Send,
-FileText,
+  FileText,
   AlertTriangle,
   RefreshCw,
   Shield,
@@ -34,7 +35,15 @@ FileText,
   FileCheck,
   Trash2,
   Paperclip,
-  X} from 'lucide-react';
+  X,
+  Play,
+  RotateCcw,
+  Code2,
+  Database,
+  Cpu,
+  Layers,
+  Terminal,
+} from 'lucide-react';
 
 const Attempt = () => {
   const { id: assessmentId } = useParams();
@@ -46,6 +55,7 @@ const Attempt = () => {
   const [currentIdx, setCurrentIdx] = useState(0);
   const [answers, setAnswers] = useState({});
   const answersRef = useRef({});
+  const [selectedAnswers, setSelectedAnswers] = useState({});
 
   // Loading & error states
   const [isLoading, setIsLoading] = useState(true);
@@ -79,6 +89,15 @@ const Attempt = () => {
   const [isAttachingUrl, setIsAttachingUrl] = useState(false);
   const [replacingQuestionId, setReplacingQuestionId] = useState({});
   const [activeTabByQuestion, setActiveTabByQuestion] = useState({});
+
+  // Coding & SQL Assessment states (Phase 3)
+  const [editorDrafts, setEditorDrafts] = useState({}); // { [qId]: { [lang]: code } }
+  const [activeLanguageByQuestion, setActiveLanguageByQuestion] = useState({}); // { [qId]: 'python' | 'javascript' | 'sqlite' ... }
+  const [executionResultsByQuestion, setExecutionResultsByQuestion] = useState({}); // { [qId]: execResult }
+  const [isExecutingByQuestion, setIsExecutingByQuestion] = useState({}); // { [qId]: boolean }
+  const [customStdinByQuestion, setCustomStdinByQuestion] = useState({});
+  const [showCustomStdinByQuestion, setShowCustomStdinByQuestion] = useState({});
+  const [resetModalState, setResetModalState] = useState({ isOpen: false, questionId: null, language: null });
 
   const stopCamera = useCallback(() => {
     if (streamRef.current) {
@@ -142,14 +161,40 @@ const Attempt = () => {
       }
       setSubmission(submissionData);
 
-      // 3. Initialize answers
-      const existingAnswers = submissionData.answers
-        ? (submissionData.answers instanceof Map
-            ? Object.fromEntries(submissionData.answers)
-            : submissionData.answers)
-        : {};
-      setAnswers(existingAnswers);
-      answersRef.current = existingAnswers;
+      // 3. Initialize answers - restore any saved coding/SQL answers while preserving clean refresh for MCQs
+      const initialAnswers = {};
+      const initialDrafts = {};
+      const initialActiveLangs = {};
+
+      if (submissionData?.answers && typeof submissionData.answers === 'object') {
+        const rawAnswers = submissionData.answers instanceof Map
+          ? Object.fromEntries(submissionData.answers)
+          : submissionData.answers;
+
+        for (const [qId, ans] of Object.entries(rawAnswers)) {
+          if (ans && typeof ans === 'object' && ans.code !== undefined) {
+            initialAnswers[qId] = ans;
+            const lang = ans.language || 'python';
+            initialDrafts[qId] = { [lang]: ans.code };
+            initialActiveLangs[qId] = lang;
+          }
+        }
+      }
+
+      setAnswers(initialAnswers);
+      answersRef.current = initialAnswers;
+      setSelectedAnswers(initialAnswers);
+      setEditorDrafts(initialDrafts);
+      setActiveLanguageByQuestion((prev) => ({ ...prev, ...initialActiveLangs }));
+
+      // Reset any earlier backend draft answers for non-coding questions to ensure clean refresh behavior
+      if (submissionData?._id) {
+        try {
+          await submissionService.saveProgress(submissionData._id, initialAnswers);
+        } catch (resetErr) {
+          console.warn('[Attempt] Backend draft reset notice:', resetErr?.message);
+        }
+      }
 
       // 4. Initialize server-authoritative timer countdown
       if (submissionData.deadlineAt) {
@@ -287,44 +332,295 @@ const Attempt = () => {
     return `${mins}:${secs < 10 ? '0' : ''}${secs}`;
   };
 
-  // Perform granular autosave
-  const triggerAutosave = useCallback(
-    async (qId, answerValue) => {
-      if (!submission?._id || !qId) return;
+  const currentQuestion = questions[currentIdx];
+  const totalQuestions = questions.length;
+  const isLastQuestion = totalQuestions > 0 && currentIdx === totalQuestions - 1;
 
-      setSaveStatus('saving');
-      try {
-        await submissionService.autosaveAnswer(submission._id, qId, answerValue);
-        setSaveStatus('saved');
-        setLastSavedAt(new Date());
-      } catch (err) {
-        console.error('Autosave error:', err);
-        setSaveStatus('error');
+  const isQuestionAnswered = (ans) => {
+    if (ans === undefined || ans === null) return false;
+    if (typeof ans === 'object') {
+      if (ans.fileKey || ans.googleDocsUrl) return true;
+      if (typeof ans.code === 'string') return ans.code.trim().length > 0;
+      return false;
+    }
+    return String(ans).trim() !== '';
+  };
+
+  const answeredCount = Object.values(answers).filter(isQuestionAnswered).length;
+  const progressPercent = totalQuestions > 0 ? Math.round((answeredCount / totalQuestions) * 100) : 0;
+
+  // Coding helper handlers
+  const getStarterCode = useCallback((q, lang) => {
+    if (!q) return '';
+    const starters = q.codingConfig?.starterCode;
+    if (starters) {
+      if (typeof starters === 'object' && starters[lang]) {
+        return starters[lang];
       }
-    },
-    [submission?._id]
-  );
+      if (starters instanceof Map && starters.get(lang)) {
+        return starters.get(lang);
+      }
+    }
+    return '';
+  }, []);
 
-  // Handle answer changes
-  const handleAnswerChange = (qId, value) => {
-    setAnswers((prev) => {
-      const updated = {
+  const getActiveLanguage = useCallback((q) => {
+    if (!q) return 'python';
+    const qId = q._id;
+    if (activeLanguageByQuestion[qId]) {
+      return activeLanguageByQuestion[qId];
+    }
+    if (q.type === 'sql') {
+      return 'sqlite';
+    }
+    const allowed = (q.codingConfig?.allowedLanguages || []).filter((l) =>
+      ['python', 'javascript'].includes(l)
+    );
+    return q.codingConfig?.defaultLanguage || allowed[0] || 'python';
+  }, [activeLanguageByQuestion]);
+
+  const getCurrentCode = useCallback((q, lang) => {
+    if (!q) return '';
+    const qId = q._id;
+    if (editorDrafts[qId]?.[lang] !== undefined) {
+      return editorDrafts[qId][lang];
+    }
+    const saved = selectedAnswers[qId] !== undefined ? selectedAnswers[qId] : answers[qId];
+    if (saved && typeof saved === 'object' && saved.language === lang && saved.code !== undefined) {
+      return saved.code;
+    }
+    return getStarterCode(q, lang);
+  }, [editorDrafts, selectedAnswers, answers, getStarterCode]);
+
+  const handleLanguageSelect = (qId, lang) => {
+    setActiveLanguageByQuestion((prev) => ({
+      ...prev,
+      [qId]: lang,
+    }));
+    const q = questions.find((item) => item._id === qId);
+    if (q) {
+      const code = getCurrentCode(q, lang);
+      setSelectedAnswers((prev) => ({
         ...prev,
-        [qId]: value,
+        [qId]: { code, language: lang },
+      }));
+    }
+  };
+
+  const handleCodeChange = (qId, lang, newCode) => {
+    setEditorDrafts((prev) => ({
+      ...prev,
+      [qId]: {
+        ...(prev[qId] || {}),
+        [lang]: newCode,
+      },
+    }));
+    setSelectedAnswers((prev) => ({
+      ...prev,
+      [qId]: {
+        code: newCode,
+        language: lang,
+      },
+    }));
+  };
+
+  const openResetModal = (qId, lang) => {
+    setResetModalState({ isOpen: true, questionId: qId, language: lang });
+  };
+
+  const confirmResetToStarterCode = () => {
+    const { questionId: qId, language: lang } = resetModalState;
+    if (!qId) return;
+    const q = questions.find((item) => item._id === qId);
+    const starter = getStarterCode(q, lang);
+
+    setEditorDrafts((prev) => ({
+      ...prev,
+      [qId]: {
+        ...(prev[qId] || {}),
+        [lang]: starter,
+      },
+    }));
+    setSelectedAnswers((prev) => ({
+      ...prev,
+      [qId]: { code: starter, language: lang },
+    }));
+    setResetModalState({ isOpen: false, questionId: null, language: null });
+    toast.info('Code reset to instructor starter template.');
+  };
+
+  const handleRunCode = async (qId) => {
+    if (isExecutingByQuestion[qId] || !submission?._id) return;
+    const q = questions.find((item) => item._id === qId);
+    if (!q) return;
+
+    const lang = getActiveLanguage(q);
+    const code = getCurrentCode(q, lang);
+
+    if (!code || !code.trim()) {
+      toast.warning('Please enter some code before running.');
+      return;
+    }
+
+    const customStdin = showCustomStdinByQuestion[qId] ? (customStdinByQuestion[qId] || '') : '';
+
+    try {
+      setIsExecutingByQuestion((prev) => ({ ...prev, [qId]: true }));
+      const res = await submissionService.runCode(submission._id, {
+        questionId: qId,
+        code,
+        language: lang,
+        customStdin,
+      });
+
+      const execData = res.data?.data || res.data || res;
+      setExecutionResultsByQuestion((prev) => ({
+        ...prev,
+        [qId]: execData,
+      }));
+
+      if (execData.verdict === 'ACCEPTED') {
+        toast.success('Execution succeeded! Sample test case(s) passed.');
+      } else if (execData.verdict === 'WRONG_ANSWER') {
+        toast.warning('Output differed from expected sample results.');
+      } else if (execData.verdict === 'TIME_LIMIT_EXCEEDED') {
+        toast.error('Execution exceeded maximum CPU time limit.');
+      } else if (execData.verdict === 'COMPILATION_ERROR' || execData.verdict === 'RUNTIME_ERROR') {
+        toast.error(`Execution failed with ${execData.verdict.replace('_', ' ')}.`);
+      }
+    } catch (err) {
+      const errorMsg = err.response?.data?.message || err.message || 'Execution failed. Please check server connectivity.';
+      setExecutionResultsByQuestion((prev) => ({
+        ...prev,
+        [qId]: {
+          verdict: 'EXECUTION_FAILED',
+          stderr: errorMsg,
+          stdout: '',
+        },
+      }));
+      toast.error(errorMsg);
+    } finally {
+      setIsExecutingByQuestion((prev) => ({ ...prev, [qId]: false }));
+    }
+  };
+
+  // Handle immediate option selection or answer text input for current question
+  const handleOptionSelect = (qId, value) => {
+    setSelectedAnswers((prev) => ({
+      ...prev,
+      [qId]: value,
+    }));
+  };
+
+  // Save & Next: saves the currently selected answer to in-memory state and moves to the next question
+  const handleSaveAndNext = () => {
+    if (!currentQuestion) return;
+    const qId = currentQuestion._id;
+    let currentSelection =
+      selectedAnswers[qId] !== undefined ? selectedAnswers[qId] : answers[qId];
+
+    if (currentQuestion.type === 'code' || currentQuestion.type === 'sql') {
+      const activeLang = getActiveLanguage(currentQuestion);
+      const code = getCurrentCode(currentQuestion, activeLang);
+      currentSelection = {
+        code,
+        language: activeLang,
       };
+    }
+
+    setAnswers((prev) => {
+      const updated = { ...prev };
+      if (isQuestionAnswered(currentSelection)) {
+        updated[qId] = currentSelection;
+      } else {
+        delete updated[qId];
+      }
       answersRef.current = updated;
       return updated;
     });
 
-    // Debounce autosave
-    if (debounceTimerRef.current) {
-      clearTimeout(debounceTimerRef.current);
-    }
+    setSelectedAnswers((prev) => ({
+      ...prev,
+      [qId]: currentSelection,
+    }));
 
-    setSaveStatus('saving');
-    debounceTimerRef.current = setTimeout(() => {
-      triggerAutosave(qId, value);
-    }, 800);
+    setSaveStatus('saved');
+    setLastSavedAt(new Date());
+
+    if (!isLastQuestion) {
+      setCurrentIdx((prev) => Math.min(totalQuestions - 1, prev + 1));
+    } else {
+      toast.success('Answer saved.');
+    }
+  };
+
+  // Next Question: navigation alone must NOT save or overwrite existing saved answers
+  const handleNextQuestion = () => {
+    if (!currentQuestion) return;
+    const qId = currentQuestion._id;
+    const isCoding = currentQuestion.type === 'code' || currentQuestion.type === 'sql';
+    setSelectedAnswers((prev) => {
+      const updated = { ...prev };
+      if (isCoding) {
+        const activeLang = getActiveLanguage(currentQuestion);
+        const code = getCurrentCode(currentQuestion, activeLang);
+        updated[qId] = { code, language: activeLang };
+      } else if (answers[qId] !== undefined) {
+        updated[qId] = answers[qId];
+      } else {
+        delete updated[qId];
+      }
+      return updated;
+    });
+
+    setCurrentIdx((prev) => Math.min(totalQuestions - 1, prev + 1));
+  };
+
+  // Previous Question: navigation alone must NOT save or overwrite existing saved answers
+  const handlePrevQuestion = () => {
+    if (!currentQuestion) return;
+    const qId = currentQuestion._id;
+    const isCoding = currentQuestion.type === 'code' || currentQuestion.type === 'sql';
+    setSelectedAnswers((prev) => {
+      const updated = { ...prev };
+      if (isCoding) {
+        const activeLang = getActiveLanguage(currentQuestion);
+        const code = getCurrentCode(currentQuestion, activeLang);
+        updated[qId] = { code, language: activeLang };
+      } else if (answers[qId] !== undefined) {
+        updated[qId] = answers[qId];
+      } else {
+        delete updated[qId];
+      }
+      return updated;
+    });
+
+    setCurrentIdx((prev) => Math.max(0, prev - 1));
+  };
+
+  // Question Palette Jump: navigation alone must NOT save or overwrite existing saved answers
+  const handleJumpToQuestion = (targetIdx) => {
+    if (targetIdx === currentIdx || !currentQuestion) {
+      setCurrentIdx(targetIdx);
+      return;
+    }
+    const qId = currentQuestion._id;
+    const isCoding = currentQuestion.type === 'code' || currentQuestion.type === 'sql';
+    setSelectedAnswers((prev) => {
+      const updated = { ...prev };
+      if (isCoding) {
+        const activeLang = getActiveLanguage(currentQuestion);
+        const code = getCurrentCode(currentQuestion, activeLang);
+        updated[qId] = { code, language: activeLang };
+      } else if (answers[qId] !== undefined) {
+        updated[qId] = answers[qId];
+      } else {
+        delete updated[qId];
+      }
+      return updated;
+    });
+
+    setCurrentIdx(targetIdx);
   };
 
   // Document Submission Handlers (Phase 5)
@@ -360,6 +656,7 @@ const Attempt = () => {
       };
       answersRef.current = updated;
       setAnswers(updated);
+      setSelectedAnswers((prev) => ({ ...prev, [questionId]: savedAnswer }));
       setSaveStatus('saved');
       setLastSavedAt(new Date());
       setSelectedFiles((prev) => ({ ...prev, [questionId]: null }));
@@ -396,6 +693,7 @@ const Attempt = () => {
       };
       answersRef.current = updated;
       setAnswers(updated);
+      setSelectedAnswers((prev) => ({ ...prev, [questionId]: savedAnswer }));
       setSaveStatus('saved');
       setLastSavedAt(new Date());
       setGdocsUrls((prev) => ({ ...prev, [questionId]: '' }));
@@ -417,6 +715,11 @@ const Attempt = () => {
       delete updated[questionId];
       answersRef.current = updated;
       setAnswers(updated);
+      setSelectedAnswers((prev) => {
+        const next = { ...prev };
+        delete next[questionId];
+        return next;
+      });
       setSaveStatus('saved');
       setLastSavedAt(new Date());
       setSelectedFiles((prev) => ({ ...prev, [questionId]: null }));
@@ -451,15 +754,6 @@ const Attempt = () => {
     }
   };
 
-  const currentQuestion = questions[currentIdx];
-  const totalQuestions = questions.length;
-  const answeredCount = Object.values(answers).filter((a) => {
-    if (a === undefined || a === null) return false;
-    if (typeof a === 'object') return Boolean(a.fileKey || a.googleDocsUrl);
-    return String(a).trim() !== '';
-  }).length;
-  const progressPercent = totalQuestions > 0 ? Math.round((answeredCount / totalQuestions) * 100) : 0;
-  const isLastQuestion = currentIdx === totalQuestions - 1;
 
   // Phase 2A: Clipboard policy enforcement for written responses during active attempts
   const isClipboardRestricted = Boolean(
@@ -645,7 +939,7 @@ const Attempt = () => {
                   {currentQuestion?._id && (
                     <button
                       type="button"
-                      onClick={() => triggerAutosave(currentQuestion._id, answers[currentQuestion._id])}
+                      onClick={() => handleSaveAndNext()}
                       className="ml-1 text-[11px] font-semibold text-[#E05D38] underline hover:text-[#C84E2D] focus:outline-none focus:ring-1 focus:ring-[#E05D38] rounded"
                       aria-label="Retry saving answer"
                     >
@@ -709,9 +1003,23 @@ const Attempt = () => {
                     {currentQuestion.type?.replace('_', ' ')}
                   </Badge>
                 </div>
-                <Badge variant="sage" size="sm">
-                  {currentQuestion.points} Points
-                </Badge>
+                <div className="flex items-center space-x-2">
+                  {currentQuestion.type === 'mcq' &&
+                    (selectedAnswers[currentQuestion._id] !== undefined
+                      ? selectedAnswers[currentQuestion._id]
+                      : answers[currentQuestion._id]) && (
+                      <button
+                        type="button"
+                        onClick={() => handleOptionSelect(currentQuestion._id, null)}
+                        className="text-xs text-[#64748B] hover:text-[#E05D38] dark:text-[#94A3B8] dark:hover:text-[#F4A261] underline cursor-pointer"
+                      >
+                        Clear selection
+                      </button>
+                    )}
+                  <Badge variant="sage" size="sm">
+                    {currentQuestion.points} Points
+                  </Badge>
+                </div>
               </div>
 
               {/* Question Prompt */}
@@ -727,12 +1035,16 @@ const Attempt = () => {
                 {currentQuestion.type === 'mcq' && (
                   <div className="space-y-3">
                     {currentQuestion.options?.map((opt) => {
-                      const isSelected = answers[currentQuestion._id] === opt.id;
+                      const activeSelection =
+                        selectedAnswers[currentQuestion._id] !== undefined
+                          ? selectedAnswers[currentQuestion._id]
+                          : answers[currentQuestion._id];
+                      const isSelected = activeSelection === opt.id;
                       return (
                         <button
                           key={opt.id}
                           type="button"
-                          onClick={() => handleAnswerChange(currentQuestion._id, opt.id)}
+                          onClick={() => handleOptionSelect(currentQuestion._id, opt.id)}
                           className={`w-full text-left p-4 rounded-xl border transition-all flex items-start space-x-3 cursor-pointer ${
                             isSelected
                               ? 'border-[#E05D38] bg-[#FDECE2] dark:bg-[#341C16] text-[#1F2937] dark:text-[#F9FAFB] ring-1 ring-[#E05D38]'
@@ -771,8 +1083,12 @@ const Attempt = () => {
                     </div>
                     <textarea
                       rows={4}
-                      value={answers[currentQuestion._id] || ''}
-                      onChange={(e) => handleAnswerChange(currentQuestion._id, e.target.value)}
+                      value={
+                        selectedAnswers[currentQuestion._id] !== undefined
+                          ? selectedAnswers[currentQuestion._id]
+                          : (answers[currentQuestion._id] || '')
+                      }
+                      onChange={(e) => handleOptionSelect(currentQuestion._id, e.target.value)}
                       onCopyCapture={isClipboardRestricted ? (e) => handleClipboardBlocked('copy', e) : undefined}
                       onCutCapture={isClipboardRestricted ? (e) => handleClipboardBlocked('cut', e) : undefined}
                       onPasteCapture={isClipboardRestricted ? (e) => handleClipboardBlocked('paste', e) : undefined}
@@ -782,7 +1098,10 @@ const Attempt = () => {
                       className="w-full rounded-xl border border-[#EBE3D8] dark:border-[#2D3748] bg-white dark:bg-[#12161F] p-3.5 text-sm text-[#1F2937] dark:text-[#F9FAFB] focus:outline-none focus:border-[#E05D38] focus:ring-2 focus:ring-[#E05D38]/20 transition-all placeholder:text-[#64748B]/50"
                     />
                     <p className="text-[11px] text-[#64748B] dark:text-[#94A3B8] text-right">
-                      {(answers[currentQuestion._id] || '').length} characters entered
+                      {(selectedAnswers[currentQuestion._id] !== undefined
+                        ? selectedAnswers[currentQuestion._id]
+                        : (answers[currentQuestion._id] || '')
+                      ).length} characters entered
                     </p>
                   </div>
                 )}
@@ -812,8 +1131,12 @@ const Attempt = () => {
                     >
                       <ReactQuill
                         theme="snow"
-                        value={answers[currentQuestion._id] || ''}
-                        onChange={(content) => handleAnswerChange(currentQuestion._id, content)}
+                        value={
+                          selectedAnswers[currentQuestion._id] !== undefined
+                            ? selectedAnswers[currentQuestion._id]
+                            : (answers[currentQuestion._id] || '')
+                        }
+                        onChange={(content) => handleOptionSelect(currentQuestion._id, content)}
                         placeholder="Compose your comprehensive technical response with structured paragraphs and code snippets..."
                         modules={{
                           toolbar: [
@@ -832,12 +1155,16 @@ const Attempt = () => {
                 {currentQuestion.type === 'true_false' && (
                   <div className="grid grid-cols-2 gap-4">
                     {['true', 'false'].map((val) => {
-                      const isSelected = answers[currentQuestion._id] === val;
+                      const activeSelection =
+                        selectedAnswers[currentQuestion._id] !== undefined
+                          ? selectedAnswers[currentQuestion._id]
+                          : answers[currentQuestion._id];
+                      const isSelected = activeSelection === val;
                       return (
                         <button
                           key={val}
                           type="button"
-                          onClick={() => handleAnswerChange(currentQuestion._id, val)}
+                          onClick={() => handleOptionSelect(currentQuestion._id, val)}
                           className={`p-4 rounded-xl border text-center font-bold capitalize transition-all cursor-pointer ${
                             isSelected
                               ? 'border-[#E05D38] bg-[#E05D38] text-white shadow-warm-xs'
@@ -1129,6 +1456,375 @@ const Attempt = () => {
                     </div>
                   );
                 })()}
+
+                {/* 6. Coding & SQL Programming Questions (Phase 3) */}
+                {(currentQuestion.type === 'code' || currentQuestion.type === 'sql') && (() => {
+                  const qId = currentQuestion._id;
+                  const activeLang = getActiveLanguage(currentQuestion);
+                  const currentCode = getCurrentCode(currentQuestion, activeLang);
+                  const isExecuting = Boolean(isExecutingByQuestion[qId]);
+                  const execResult = executionResultsByQuestion[qId];
+                  const publicTestCases = (currentQuestion.codingConfig?.testCases || []).filter((tc) => !tc.isHidden);
+                  const isSql = currentQuestion.type === 'sql';
+
+                  // Approved language runtime options
+                  const allowedLangs = (currentQuestion.codingConfig?.allowedLanguages || ['python', 'javascript']).filter((l) =>
+                    ['python', 'javascript'].includes(l)
+                  );
+                  const safeAllowedLangs = allowedLangs.length > 0 ? allowedLangs : ['python', 'javascript'];
+
+                  // SQL dialect options (Active SQL examination is restricted to SQLite 3)
+                  const sqlDialects = ['sqlite'];
+
+                  return (
+                    <div className="space-y-4">
+                      {/* Technical Constraints Banner */}
+                      <div className="flex flex-wrap items-center gap-2 p-3 rounded-xl bg-slate-50 dark:bg-[#12161F] border border-[#EBE3D8] dark:border-[#2D3748] text-xs">
+                        <div className="flex items-center gap-1.5 text-slate-700 dark:text-slate-300 font-semibold">
+                          <Cpu className="w-4 h-4 text-[#E05D38]" />
+                          <span>CPU Limit: {currentQuestion.codingConfig?.cpuTimeLimitMs || 2000}ms</span>
+                        </div>
+                        <span className="text-slate-300 dark:text-slate-700">•</span>
+                        <div className="flex items-center gap-1.5 text-slate-700 dark:text-slate-300 font-semibold">
+                          <Layers className="w-4 h-4 text-[#3D8A78]" />
+                          <span>Memory Limit: {currentQuestion.codingConfig?.memoryLimitMb || 256}MB</span>
+                        </div>
+                        <span className="text-slate-300 dark:text-slate-700">•</span>
+                        <div className="flex items-center gap-1.5 text-slate-500">
+                          <span>Execution Mode: <strong className="text-slate-700 dark:text-slate-300 uppercase">{isSql ? `Isolated ${activeLang}` : 'Sandboxed Code'}</strong></span>
+                        </div>
+                      </div>
+
+                      {/* SQL Schema DDL Preview (if SQL question) */}
+                      {isSql && currentQuestion.codingConfig?.schemaDdl && (
+                        <div className="rounded-xl border border-emerald-200 dark:border-emerald-900/50 bg-emerald-50/40 dark:bg-emerald-950/20 p-3.5 space-y-2">
+                          <div className="flex items-center justify-between text-xs font-bold text-emerald-800 dark:text-emerald-300">
+                            <span className="flex items-center gap-1.5">
+                              <Database className="w-4 h-4 text-emerald-600" />
+                              <span>Database Schema & Tables (DDL)</span>
+                            </span>
+                            <span className="text-[11px] text-emerald-700 dark:text-emerald-400 font-normal">
+                              Tables and seed data available in execution sandbox
+                            </span>
+                          </div>
+                          <pre className="p-2.5 rounded-lg bg-white dark:bg-[#0E131F] border border-emerald-200/60 dark:border-emerald-900/40 font-mono text-xs text-slate-800 dark:text-slate-200 overflow-x-auto max-h-36">
+                            {currentQuestion.codingConfig.schemaDdl}
+                          </pre>
+                        </div>
+                      )}
+
+                      {/* Public Sample Test Cases */}
+                      {publicTestCases.length > 0 && (
+                        <div className="space-y-2">
+                          <label className="block text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                            Public Sample Test Cases ({publicTestCases.length})
+                          </label>
+                          <div className="space-y-2.5">
+                            {publicTestCases.map((tc, tcIdx) => (
+                              <div
+                                key={tc._id || tcIdx}
+                                className="p-3 rounded-xl border border-[#EBE3D8] dark:border-[#2D3748] bg-slate-50/50 dark:bg-[#12161F]/50 text-xs space-y-2"
+                              >
+                                <div className="flex items-center justify-between font-semibold text-slate-700 dark:text-slate-300">
+                                  <span>Sample Case #{tcIdx + 1}</span>
+                                  {tc.explanation && (
+                                    <span className="text-[11px] text-slate-500 font-normal italic">
+                                      {tc.explanation}
+                                    </span>
+                                  )}
+                                </div>
+                                {isSql ? (
+                                  <div className="space-y-1">
+                                    <span className="text-[10px] uppercase font-bold text-slate-400 block">Expected Results</span>
+                                    {tc.expectedColumns && tc.expectedColumns.length > 0 ? (
+                                      <div className="overflow-x-auto border border-slate-200 dark:border-slate-800 rounded-lg bg-white dark:bg-[#1A202C]">
+                                        <table className="min-w-full divide-y divide-slate-200 dark:divide-slate-800 text-[11px] font-mono">
+                                          <thead className="bg-slate-100 dark:bg-slate-800/60">
+                                            <tr>
+                                              {tc.expectedColumns.map((col, cIdx) => (
+                                                <th key={cIdx} className="px-2 py-1 text-left font-bold text-slate-700 dark:text-slate-300">
+                                                  {col}
+                                                </th>
+                                              ))}
+                                            </tr>
+                                          </thead>
+                                          <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                                            {(tc.expectedRows || []).slice(0, 5).map((row, rIdx) => (
+                                              <tr key={rIdx}>
+                                                {(Array.isArray(row) ? row : tc.expectedColumns.map((c) => row[c])).map((val, cellIdx) => (
+                                                  <td key={cellIdx} className="px-2 py-1 text-slate-600 dark:text-slate-300">
+                                                    {val === null ? <span className="text-amber-600 italic">NULL</span> : String(val)}
+                                                  </td>
+                                                ))}
+                                              </tr>
+                                            ))}
+                                          </tbody>
+                                        </table>
+                                      </div>
+                                    ) : (
+                                      <pre className="p-2 rounded-lg bg-white dark:bg-[#1A202C] border border-slate-200 dark:border-slate-800 font-mono text-[11px] overflow-x-auto max-h-24">
+                                        {tc.expectedOutput || '(empty expected output)'}
+                                      </pre>
+                                    )}
+                                  </div>
+                                ) : (
+                                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                    <div>
+                                      <span className="text-[10px] uppercase font-bold text-slate-400 block mb-1">Sample Input</span>
+                                      <pre className="p-2 rounded-lg bg-white dark:bg-[#1A202C] border border-slate-200 dark:border-slate-800 font-mono text-[11px] overflow-x-auto max-h-24">
+                                        {tc.input || '(empty input)'}
+                                      </pre>
+                                    </div>
+                                    <div>
+                                      <span className="text-[10px] uppercase font-bold text-slate-400 block mb-1">Expected Output</span>
+                                      <pre className="p-2 rounded-lg bg-white dark:bg-[#1A202C] border border-slate-200 dark:border-slate-800 font-mono text-[11px] overflow-x-auto max-h-24">
+                                        {tc.expectedOutput || '(empty output)'}
+                                      </pre>
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Language / SQL Dialect Selector & CodeMirror Editor */}
+                      <div className="space-y-2">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <div className="flex items-center space-x-2">
+                            <Code2 className="w-4 h-4 text-[#E05D38]" />
+                            <span className="text-xs font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300">
+                              {isSql ? 'SQL Dialect' : 'Language Runtime'}
+                            </span>
+                          </div>
+
+                          {!isSql ? (
+                            <div className="flex items-center gap-1.5 bg-slate-100 dark:bg-slate-800 p-1 rounded-xl">
+                              {safeAllowedLangs.map((lang) => (
+                                <button
+                                  key={lang}
+                                  type="button"
+                                  onClick={() => handleLanguageSelect(qId, lang)}
+                                  className={`px-3 py-1 text-xs font-semibold rounded-lg transition-all cursor-pointer ${
+                                    activeLang === lang
+                                      ? 'bg-white dark:bg-[#1A202C] text-[#E05D38] shadow-xs'
+                                      : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
+                                  }`}
+                                >
+                                  {lang === 'python' ? 'Python 3.11' : 'JavaScript (Node.js 20)'}
+                                </button>
+                              ))}
+                            </div>
+                          ) : (
+                            <div className="flex items-center gap-1.5 bg-slate-100 dark:bg-slate-800 p-1 rounded-xl">
+                              <span className="px-3 py-1 text-xs font-semibold rounded-lg bg-white dark:bg-[#1A202C] text-[#3D8A78] shadow-xs flex items-center gap-1.5">
+                                <span className="w-2 h-2 rounded-full bg-emerald-500 inline-block"></span>
+                                SQLite 3 (In-Memory Sandbox)
+                              </span>
+                            </div>
+                          )}
+                        </div>
+
+                        {/* CodeMirror Editor Component */}
+                        <CodeEditor
+                          value={currentCode}
+                          onChange={(newVal) => handleCodeChange(qId, activeLang, newVal)}
+                          language={activeLang}
+                          height="320px"
+                          minHeight="220px"
+                          placeholder={isSql ? '-- Enter your SQL query here...' : '# Enter your solution code here...'}
+                        />
+
+                        {/* Editor Action Toolbar */}
+                        <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
+                          <button
+                            type="button"
+                            onClick={() => openResetModal(qId, activeLang)}
+                            className="text-xs text-slate-500 hover:text-[#E05D38] flex items-center gap-1 cursor-pointer transition-colors"
+                            title="Revert editor to instructor starter code"
+                          >
+                            <RotateCcw className="w-3.5 h-3.5" />
+                            <span>Reset to Starter Code</span>
+                          </button>
+
+                          <div className="flex items-center gap-3">
+                            {!isSql && (
+                              <label className="flex items-center gap-1.5 text-xs text-slate-600 dark:text-slate-400 cursor-pointer select-none">
+                                <input
+                                  type="checkbox"
+                                  checked={Boolean(showCustomStdinByQuestion[qId])}
+                                  onChange={(e) =>
+                                    setShowCustomStdinByQuestion((prev) => ({
+                                      ...prev,
+                                      [qId]: e.target.checked,
+                                    }))
+                                  }
+                                  className="rounded border-slate-300 text-[#E05D38] focus:ring-[#E05D38]"
+                                />
+                                <span>Custom Stdin</span>
+                              </label>
+                            )}
+
+                            <Button
+                              type="button"
+                              variant="primary"
+                              size="sm"
+                              icon={Play}
+                              loading={isExecuting}
+                              disabled={isExecuting}
+                              onClick={() => handleRunCode(qId)}
+                              className="bg-emerald-600 hover:bg-emerald-700 text-white border-transparent"
+                            >
+                              {isExecuting ? 'Running...' : 'Run Code'}
+                            </Button>
+                          </div>
+                        </div>
+
+                        {/* Custom Stdin Box (if toggled) */}
+                        {showCustomStdinByQuestion[qId] && !isSql && (
+                          <div className="pt-2">
+                            <label className="block text-[11px] font-bold uppercase text-slate-500 mb-1">
+                              Custom Standard Input (stdin):
+                            </label>
+                            <textarea
+                              rows={2}
+                              value={customStdinByQuestion[qId] || ''}
+                              onChange={(e) =>
+                                setCustomStdinByQuestion((prev) => ({
+                                  ...prev,
+                                  [qId]: e.target.value,
+                                }))
+                              }
+                              placeholder="Enter stdin input to pass to standard input..."
+                              className="w-full p-2 rounded-lg font-mono text-xs border border-slate-200 dark:border-slate-700 bg-white dark:bg-[#1A202C] text-slate-800 dark:text-slate-200 focus:outline-none focus:border-[#E05D38]"
+                            />
+                          </div>
+                        )}
+
+                        {/* Execution Results Panel */}
+                        {execResult && (
+                          <div className="mt-4 p-4 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50/70 dark:bg-[#12161F] space-y-3">
+                            <div className="flex flex-wrap items-center justify-between gap-2 pb-2 border-b border-slate-200 dark:border-slate-800">
+                              <div className="flex items-center gap-2">
+                                <span
+                                  className={`px-2.5 py-1 rounded-lg text-xs font-bold uppercase tracking-wider ${
+                                    execResult.verdict === 'ACCEPTED'
+                                      ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 border border-emerald-300'
+                                      : execResult.verdict === 'WRONG_ANSWER'
+                                      ? 'bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-300 border border-rose-300'
+                                      : execResult.verdict === 'TIME_LIMIT_EXCEEDED'
+                                      ? 'bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300 border border-amber-300'
+                                      : 'bg-purple-100 text-purple-800 dark:bg-purple-950 dark:text-purple-300 border border-purple-300'
+                                  }`}
+                                >
+                                  {execResult.verdict?.replace('_', ' ')}
+                                </span>
+                                {execResult.passedCount !== undefined && execResult.totalCount !== undefined && (
+                                  <span className="text-xs text-slate-600 dark:text-slate-400">
+                                    ({execResult.passedCount} of {execResult.totalCount} sample test cases passed)
+                                  </span>
+                                )}
+                              </div>
+
+                              {execResult.executionTimeMs !== undefined && (
+                                <span className="text-xs text-slate-500 font-mono">
+                                  Runtime: <strong>{execResult.executionTimeMs}ms</strong>
+                                </span>
+                              )}
+                            </div>
+
+                            {/* Sample test cases breakdown */}
+                            {execResult.sampleResults && execResult.sampleResults.length > 0 && (
+                              <div className="space-y-2">
+                                <span className="text-[11px] font-bold text-slate-500 uppercase block">Sample Test Case Results</span>
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                  {execResult.sampleResults.map((stc, stcIdx) => (
+                                    <div
+                                      key={stcIdx}
+                                      className={`p-2.5 rounded-lg border text-xs ${
+                                        stc.passed
+                                          ? 'border-emerald-200 bg-emerald-50/50 dark:bg-emerald-950/20 text-emerald-900 dark:text-emerald-200'
+                                          : 'border-rose-200 bg-rose-50/50 dark:bg-rose-950/20 text-rose-900 dark:text-rose-200'
+                                      }`}
+                                    >
+                                      <div className="flex items-center justify-between font-bold mb-1">
+                                        <span>Sample #{stc.sampleIndex || stcIdx + 1}</span>
+                                        <span>{stc.passed ? '✓ Passed' : '✗ Failed'}</span>
+                                      </div>
+                                      {stc.explanation && <p className="text-[10px] text-slate-500 mb-1">{stc.explanation}</p>}
+                                      {stc.actualOutput && (
+                                        <div className="mt-1">
+                                          <span className="text-[10px] text-slate-400 uppercase block">Output</span>
+                                          <pre className="p-1 rounded bg-white dark:bg-slate-900 font-mono text-[10px] overflow-x-auto max-h-16">
+                                            {stc.actualOutput}
+                                          </pre>
+                                        </div>
+                                      )}
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+
+                            {/* SQL tabular result */}
+                            {execResult.columns && execResult.columns.length > 0 && (
+                              <div>
+                                <span className="text-[11px] font-bold text-slate-500 uppercase block mb-1">
+                                  Query Output ({execResult.rowCount !== undefined ? execResult.rowCount : (execResult.rows?.length || 0)} row{(execResult.rowCount === 1 || execResult.rows?.length === 1) ? '' : 's'})
+                                </span>
+                                <div className="overflow-x-auto border border-slate-200 dark:border-slate-800 rounded-lg bg-white dark:bg-[#1A202C] max-h-48">
+                                  <table className="min-w-full divide-y divide-slate-200 dark:divide-slate-800 text-xs font-mono">
+                                    <thead className="bg-slate-100 dark:bg-slate-800/80 sticky top-0">
+                                      <tr>
+                                        {execResult.columns.map((col, idx) => (
+                                          <th key={idx} className="px-2.5 py-1.5 text-left font-bold text-slate-700 dark:text-slate-300">
+                                            {col}
+                                          </th>
+                                        ))}
+                                      </tr>
+                                    </thead>
+                                    <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                                      {(execResult.rows || []).map((row, rIdx) => (
+                                        <tr key={rIdx} className="hover:bg-slate-50 dark:hover:bg-slate-800/40">
+                                          {(Array.isArray(row) ? row : execResult.columns.map((c) => row[c])).map((val, cIdx) => (
+                                            <td key={cIdx} className="px-2.5 py-1 text-slate-700 dark:text-slate-300">
+                                              {val === null ? <span className="text-amber-600 italic">NULL</span> : String(val)}
+                                            </td>
+                                          ))}
+                                        </tr>
+                                      ))}
+                                    </tbody>
+                                  </table>
+                                </div>
+                              </div>
+                            )}
+
+                            {/* Standard Output (stdout) */}
+                            {execResult.stdout && execResult.stdout.trim() && (
+                              <div>
+                                <span className="text-[11px] font-bold text-slate-500 uppercase block mb-1">Console Output (stdout)</span>
+                                <pre className="p-2.5 rounded-lg bg-slate-900 text-slate-100 font-mono text-xs overflow-x-auto max-h-40">
+                                  {execResult.stdout}
+                                </pre>
+                              </div>
+                            )}
+
+                            {/* Errors (stderr) */}
+                            {execResult.stderr && execResult.stderr.trim() && (
+                              <div>
+                                <span className="text-[11px] font-bold text-rose-500 uppercase block mb-1">Errors / Diagnostic Info</span>
+                                <pre className="p-2.5 rounded-lg bg-rose-50 dark:bg-rose-950/40 text-rose-800 dark:text-rose-200 border border-rose-200 dark:border-rose-900 font-mono text-xs overflow-x-auto max-h-40">
+                                  {execResult.stderr}
+                                </pre>
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })()}
               </div>
 
               {/* Navigation Controls */}
@@ -1137,33 +1833,43 @@ const Attempt = () => {
                   variant="outline"
                   size="sm"
                   icon={ChevronLeft}
-                  onClick={() => setCurrentIdx((prev) => Math.max(0, prev - 1))}
+                  onClick={handlePrevQuestion}
                   disabled={currentIdx === 0}
                 >
                   Previous<span className="hidden sm:inline"> Question</span>
                 </Button>
 
-                {isLastQuestion ? (
+                <div className="flex items-center gap-2">
                   <Button
                     variant="primary"
                     size="sm"
-                    icon={Send}
-                    iconPosition="right"
-                    onClick={() => setIsSubmitModalOpen(true)}
+                    onClick={handleSaveAndNext}
                   >
-                    Review & Submit
+                    Save & Next
                   </Button>
-                ) : (
-                  <Button
-                    variant="primary"
-                    size="sm"
-                    icon={ChevronRight}
-                    iconPosition="right"
-                    onClick={() => setCurrentIdx((prev) => Math.min(totalQuestions - 1, prev + 1))}
-                  >
-                    Next<span className="hidden sm:inline"> Question</span>
-                  </Button>
-                )}
+
+                  {isLastQuestion ? (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      icon={Send}
+                      iconPosition="right"
+                      onClick={() => setIsSubmitModalOpen(true)}
+                    >
+                      Review & Submit
+                    </Button>
+                  ) : (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      icon={ChevronRight}
+                      iconPosition="right"
+                      onClick={handleNextQuestion}
+                    >
+                      Next<span className="hidden sm:inline"> Question</span>
+                    </Button>
+                  )}
+                </div>
               </div>
             </Card>
           ) : (
@@ -1195,7 +1901,7 @@ const Attempt = () => {
                   <button
                     key={q._id}
                     type="button"
-                    onClick={() => setCurrentIdx(idx)}
+                    onClick={() => handleJumpToQuestion(idx)}
                     className={`h-10 rounded-xl text-xs font-bold transition-all flex items-center justify-center cursor-pointer ${
                       isCurrent
                         ? 'ring-2 ring-[#E05D38] border-[#E05D38] bg-[#E05D38] text-white shadow-warm-xs'

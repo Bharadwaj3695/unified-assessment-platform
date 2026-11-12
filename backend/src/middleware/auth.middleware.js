@@ -4,6 +4,8 @@ const { verifyAccessToken } = require('../utils/jwt');
 const { errorResponse } = require('../utils/response');
 // Import User model to retrieve database record for account status and session version validation
 const { User } = require('../models');
+// Import cookie clearing helper to purge stale/empty auth cookies when refresh validation fails
+const { clearAuthCookies } = require('../utils/cookie');
 
 // Authentication middleware verifying bearer tokens, enforcing active account status and session validity
 const authenticate = async (req, res, next) => {
@@ -79,6 +81,9 @@ const requireRefreshToken = (req, res, next) => {
     (hasAuth ? req.headers.authorization.split(' ')[1] : null);
 
   if (!token || typeof token !== 'string' || !token.trim()) {
+    if (req.cookies && (req.cookies.uap_refresh !== undefined || req.cookies.uap_csrf !== undefined)) {
+      clearAuthCookies(res);
+    }
     return errorResponse(res, 'Refresh token is required', 401);
   }
 

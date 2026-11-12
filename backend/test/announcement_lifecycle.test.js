@@ -77,7 +77,7 @@ describe('UAP Feature Verification: Persistent Scheduled Announcement System', (
       {
         message: 'Upcoming server maintenance on Friday night',
         targetAudience: 'all',
-        durationDays: 0,
+        durationDay: 0,
         durationHours: 2,
         durationMinutes: 0,
       },
@@ -120,7 +120,7 @@ describe('UAP Feature Verification: Persistent Scheduled Announcement System', (
     const published = await announcementService.publishImmediate(
       {
         message: 'Campus closed due to severe weather conditions',
-        durationDays: 0,
+        durationDay: 0,
         durationHours: 2,
         durationMinutes: 30,
         targetAudience: 'all',
@@ -164,7 +164,7 @@ describe('UAP Feature Verification: Persistent Scheduled Announcement System', (
       {
         message: 'Scheduled mid-term examinations begin tomorrow',
         startDate: futureStart.toISOString(),
-        durationDays: 1,
+        durationDay: 1,
         durationHours: 0,
         durationMinutes: 0,
         targetAudience: 'all',
@@ -225,7 +225,7 @@ describe('UAP Feature Verification: Persistent Scheduled Announcement System', (
     const published = await announcementService.publishImmediate(
       {
         message: 'Active announcement to be withdrawn',
-        durationDays: 1,
+        durationDay: 1,
         durationHours: 0,
         durationMinutes: 0,
       },
@@ -311,7 +311,7 @@ describe('UAP Feature Verification: Persistent Scheduled Announcement System', (
     const pubReq = {
       body: {
         message: 'HTTP Controller Integration Test Notice',
-        durationDays: 0,
+        durationDay: 0,
         durationHours: 3,
         durationMinutes: 0,
       },
@@ -338,7 +338,7 @@ describe('UAP Feature Verification: Persistent Scheduled Announcement System', (
   it('9. Route RBAC enforcement: student and instructor are rejected with HTTP 403 on mutation endpoints', async () => {
     const payload = {
       message: 'Unauthorized announcement attempt',
-      durationDays: 0,
+      durationDay: 0,
       durationHours: 1,
       durationMinutes: 0,
     };
@@ -408,7 +408,7 @@ describe('UAP Feature Verification: Persistent Scheduled Announcement System', (
       },
       body: JSON.stringify({
         message: 'Campus closed tomorrow for institutional convocation',
-        durationDays: 1,
+        durationDay: 1,
         durationHours: 0,
         durationMinutes: 0,
         targetAudience: 'all',
@@ -456,7 +456,7 @@ describe('UAP Feature Verification: Persistent Scheduled Announcement System', (
       },
       body: JSON.stringify({
         message: 'Canonical API path broadcast verification',
-        durationDays: 0,
+        durationDay: 0,
         durationHours: 4,
         durationMinutes: 15,
         targetAudience: 'all',

@@ -161,7 +161,7 @@ class AnnouncementService {
    * Save an announcement draft (not visible to users)
    */
   async saveDraft(data, user, ip = null) {
-    const { id, message, targetAudience = 'all', durationDays = 0, durationHours = 1, durationMinutes = 0 } = data;
+    const { id, message, targetAudience = 'all', durationDay = 0, durationHours = 1, durationMinutes = 0 } = data;
 
     let doc = null;
     if (id) {
@@ -171,7 +171,7 @@ class AnnouncementService {
     if (doc) {
       doc.message = message.trim();
       doc.targetAudience = targetAudience;
-      doc.durationDays = durationDays;
+      doc.durationDay = durationDay;
       doc.durationHours = durationHours;
       doc.durationMinutes = durationMinutes;
       doc.status = 'draft';
@@ -181,7 +181,7 @@ class AnnouncementService {
       doc = await Announcement.create({
         message: message.trim(),
         targetAudience,
-        durationDays,
+        durationDay,
         durationHours,
         durationMinutes,
         status: 'draft',
@@ -212,15 +212,15 @@ class AnnouncementService {
    * Synchronizes SystemSetting.announcementBanner for backward compatibility.
    */
   async publishImmediate(data, user, ip = null) {
-    const { id, message, targetAudience = 'all', durationDays = 0, durationHours = 0, durationMinutes = 0 } = data;
+    const { id, message, targetAudience = 'all', durationDay = 0, durationHours = 0, durationMinutes = 0 } = data;
     const now = new Date();
 
-    const totalMinutes = computeDurationMinutes(durationDays, durationHours, durationMinutes) || 60;
+    const totalMinutes = computeDurationMinutes(durationDay, durationHours, durationMinutes) || 60;
     const durationMs = totalMinutes * 60 * 1000;
     const expiryDate = new Date(now.getTime() + durationMs);
 
-    const numDays = Number(durationDays) || 0;
-    const numHours = Number(durationHours) || (totalMinutes === 60 && !numDays && !Number(durationMinutes) ? 1 : 0);
+    const numDay = Number(durationDay) || 0;
+    const numHours = Number(durationHours) || (totalMinutes === 60 && !numDay && !Number(durationMinutes) ? 1 : 0);
     const numMinutes = Number(durationMinutes) || 0;
 
     // Cancel any other currently active or scheduled announcements to enforce single global banner rule
@@ -250,7 +250,7 @@ class AnnouncementService {
       doc.status = 'published';
       doc.startDate = now;
       doc.expiryDate = expiryDate;
-      doc.durationDays = numDays;
+      doc.durationDay = numDay;
       doc.durationHours = numHours;
       doc.durationMinutes = numMinutes;
       doc.targetAudience = targetAudience;
@@ -264,7 +264,7 @@ class AnnouncementService {
         status: 'published',
         startDate: now,
         expiryDate,
-        durationDays: numDays,
+        durationDay: numDay,
         durationHours: numHours,
         durationMinutes: numMinutes,
         targetAudience,
@@ -304,7 +304,7 @@ class AnnouncementService {
    * Schedule an announcement for future publication.
    */
   async scheduleAnnouncement(data, user, ip = null) {
-    const { id, message, startDate, targetAudience = 'all', durationDays = 0, durationHours = 0, durationMinutes = 0 } = data;
+    const { id, message, startDate, targetAudience = 'all', durationDay = 0, durationHours = 0, durationMinutes = 0 } = data;
     const now = new Date();
 
     const start = new Date(startDate);
@@ -314,12 +314,12 @@ class AnnouncementService {
       throw err;
     }
 
-    const totalMinutes = computeDurationMinutes(durationDays, durationHours, durationMinutes) || 60;
+    const totalMinutes = computeDurationMinutes(durationDay, durationHours, durationMinutes) || 60;
     const durationMs = totalMinutes * 60 * 1000;
     const expiryDate = new Date(start.getTime() + durationMs);
 
-    const numDays = Number(durationDays) || 0;
-    const numHours = Number(durationHours) || (totalMinutes === 60 && !numDays && !Number(durationMinutes) ? 1 : 0);
+    const numDay = Number(durationDay) || 0;
+    const numHours = Number(durationHours) || (totalMinutes === 60 && !numDay && !Number(durationMinutes) ? 1 : 0);
     const numMinutes = Number(durationMinutes) || 0;
 
     // Cancel existing scheduled announcements to prevent conflicting schedules
@@ -349,7 +349,7 @@ class AnnouncementService {
       doc.status = 'scheduled';
       doc.startDate = start;
       doc.expiryDate = expiryDate;
-      doc.durationDays = numDays;
+      doc.durationDay = numDay;
       doc.durationHours = numHours;
       doc.durationMinutes = numMinutes;
       doc.targetAudience = targetAudience;
@@ -363,7 +363,7 @@ class AnnouncementService {
         status: 'scheduled',
         startDate: start,
         expiryDate,
-        durationDays: numDays,
+        durationDay: numDay,
         durationHours: numHours,
         durationMinutes: numMinutes,
         targetAudience,

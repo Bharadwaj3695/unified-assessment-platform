@@ -335,7 +335,7 @@ const EvaluationStudio = () => {
           {questions.map((q, idx) => {
             const qId = (q._id || q.id).toString();
             const studentAnswer = studentAnswers[qId];
-            const isSubjective = q.type === 'short_answer' || q.type === 'long_answer' || q.type === 'file_upload';
+            const isSubjective = q.type === 'short_answer' || q.type === 'long_answer' || q.type === 'file_upload' || q.type === 'code' || q.type === 'sql';
             const fb = questionFeedback[qId] || { pointsAwarded: '', comment: '' };
 
             return (
@@ -357,6 +357,10 @@ const EvaluationStudio = () => {
                           ? 'peach'
                           : q.type === 'long_answer'
                           ? 'sage'
+                          : q.type === 'code'
+                          ? 'terracotta'
+                          : q.type === 'sql'
+                          ? 'peach'
                           : 'secondary'
                       }
                       size="sm"
@@ -367,6 +371,10 @@ const EvaluationStudio = () => {
                         ? 'Short Answer'
                         : q.type === 'long_answer'
                         ? 'Long Essay'
+                        : q.type === 'code'
+                        ? 'Coding Problem'
+                        : q.type === 'sql'
+                        ? 'SQL Query'
                         : 'Document Submission'}
                     </Badge>
                   </div>
@@ -524,6 +532,26 @@ const EvaluationStudio = () => {
                         (No document submitted by student)
                       </p>
                     )
+                  ) : q.type === 'code' || q.type === 'sql' ? (
+                    <div className="space-y-2">
+                      <div className="flex items-center gap-2">
+                        <span className="text-[11px] font-semibold text-[#64748B] dark:text-[#94A3B8] uppercase">
+                          Language / Dialect:
+                        </span>
+                        <Badge variant="peach" size="sm">
+                          {typeof studentAnswer === 'object' && studentAnswer?.language
+                            ? studentAnswer.language.toUpperCase()
+                            : (q.codingConfig?.language ? q.codingConfig.language.toUpperCase() : 'CODE')}
+                        </Badge>
+                      </div>
+                      <pre className="p-3 rounded-xl bg-slate-900 text-slate-100 font-mono text-xs overflow-x-auto whitespace-pre leading-relaxed border border-slate-800">
+                        <code>
+                          {typeof studentAnswer === 'object' && studentAnswer?.code !== undefined
+                            ? studentAnswer.code
+                            : (typeof studentAnswer === 'string' ? studentAnswer : '(No code submitted)')}
+                        </code>
+                      </pre>
+                    </div>
                   ) : null}
                 </div>
 

@@ -32,8 +32,8 @@ const createQuestionValidator = validate([
   // Validate allowed question type formats
   body('type')
     .optional()
-    .isIn(['mcq', 'short_answer', 'long_answer', 'file_upload'])
-    .withMessage('Invalid question type. Allowed: mcq, short_answer, long_answer, file_upload'),
+    .isIn(['mcq', 'short_answer', 'long_answer', 'file_upload', 'code', 'sql'])
+    .withMessage('Invalid question type. Allowed: mcq, short_answer, long_answer, file_upload, code, sql'),
   // Validate points must be positive integer
   body('points')
     .optional()
@@ -60,6 +60,42 @@ const createQuestionValidator = validate([
   body('correctAnswer')
     .optional()
     .trim(),
+  body('codingConfig')
+    .optional()
+    .isObject()
+    .withMessage('codingConfig must be an object'),
+  body('codingConfig.executionCategory')
+    .optional()
+    .isIn(['code', 'sql'])
+    .withMessage('executionCategory must be one of: code, sql'),
+  body('codingConfig.sqlDialect')
+    .optional()
+    .isIn(['sqlite'])
+    .withMessage('sqlDialect must be sqlite'),
+  body('codingConfig.allowedLanguages')
+    .optional()
+    .isArray()
+    .withMessage('allowedLanguages must be an array')
+    .custom((langs) => {
+      const approved = ['python', 'javascript', 'sqlite'];
+      if (langs.some((l) => ['postgresql', 'mysql'].includes(String(l).toLowerCase()))) {
+        throw new Error('PostgreSQL and MySQL are rejected at the API boundary. Active SQL examination is restricted to SQLite only.');
+      }
+      if (!langs.every((l) => approved.includes(String(l).toLowerCase()))) {
+        throw new Error('Only Python, JavaScript, and SQLite are permitted');
+      }
+      return true;
+    }),
+  body('codingConfig.defaultLanguage')
+    .optional()
+    .isString()
+    .trim()
+    .isIn(['python', 'javascript', 'sqlite'])
+    .withMessage('defaultLanguage must be one of: python, javascript, sqlite'),
+  body('codingConfig.testCases')
+    .optional()
+    .isArray()
+    .withMessage('testCases must be an array'),
 ]);
 
 // Validation chain for modifying an existing Question Bank entry
@@ -73,8 +109,8 @@ const updateQuestionValidator = validate([
   // Validate updated question type
   body('type')
     .optional()
-    .isIn(['mcq', 'short_answer', 'long_answer', 'file_upload'])
-    .withMessage('Invalid question type. Allowed: mcq, short_answer, long_answer, file_upload'),
+    .isIn(['mcq', 'short_answer', 'long_answer', 'file_upload', 'code', 'sql'])
+    .withMessage('Invalid question type. Allowed: mcq, short_answer, long_answer, file_upload, code, sql'),
   // Validate updated point value
   body('points')
     .optional()
@@ -92,6 +128,42 @@ const updateQuestionValidator = validate([
     .toUpperCase()
     .isIn(['REMEMBER', 'UNDERSTAND', 'APPLY', 'ANALYZE', 'EVALUATE', 'CREATE'])
     .withMessage('Bloom taxonomy level must be one of: REMEMBER, UNDERSTAND, APPLY, ANALYZE, EVALUATE, CREATE'),
+  body('codingConfig')
+    .optional()
+    .isObject()
+    .withMessage('codingConfig must be an object'),
+  body('codingConfig.executionCategory')
+    .optional()
+    .isIn(['code', 'sql'])
+    .withMessage('executionCategory must be one of: code, sql'),
+  body('codingConfig.sqlDialect')
+    .optional()
+    .isIn(['sqlite'])
+    .withMessage('sqlDialect must be sqlite'),
+  body('codingConfig.allowedLanguages')
+    .optional()
+    .isArray()
+    .withMessage('allowedLanguages must be an array')
+    .custom((langs) => {
+      const approved = ['python', 'javascript', 'sqlite'];
+      if (langs.some((l) => ['postgresql', 'mysql'].includes(String(l).toLowerCase()))) {
+        throw new Error('PostgreSQL and MySQL are rejected at the API boundary. Active SQL examination is restricted to SQLite only.');
+      }
+      if (!langs.every((l) => approved.includes(String(l).toLowerCase()))) {
+        throw new Error('Only Python, JavaScript, and SQLite are permitted');
+      }
+      return true;
+    }),
+  body('codingConfig.defaultLanguage')
+    .optional()
+    .isString()
+    .trim()
+    .isIn(['python', 'javascript', 'sqlite'])
+    .withMessage('defaultLanguage must be one of: python, javascript, sqlite'),
+  body('codingConfig.testCases')
+    .optional()
+    .isArray()
+    .withMessage('testCases must be an array'),
 ]);
 
 // Validation chain for individual question review decisions ('ACCEPT' or 'REJECT')

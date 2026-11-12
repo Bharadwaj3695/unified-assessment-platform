@@ -3,6 +3,7 @@ const { Submission, Assessment, Question, User, Evaluation, Notification, Procto
 const emailService = require('./email.service');
 const proctoringService = require('./proctoring.service');
 const storageService = require('./storage.service');
+const executionClient = require('./executionClient.service');
 const { resolveGrade } = require('../utils/gradingScheme');
 
 class SubmissionService {
@@ -291,6 +292,289 @@ class SubmissionService {
     };
   }
 
+  /**
+   * Securely execute student source code or SQL query during an active attempt
+   * POST /api/submissions/:submissionId/run-code
+   */
+  async runCode(submissionId, studentId, { questionId, code, language, customStdin = '' }) {
+    if (!mongoose.Types.ObjectId.isValid(submissionId) || !mongoose.Types.ObjectId.isValid(questionId)) {
+      const error = new Error('Invalid submission or question ID format');
+      error.statusCode = 400;
+      throw error;
+    }
+
+    if (typeof code !== 'string' || !code.trim()) {
+      const error = new Error('Source code cannot be empty');
+      error.statusCode = 400;
+      throw error;
+    }
+
+    if (code.length > 65536) {
+      const error = new Error('Source code exceeds maximum size limit (64KB)');
+      error.statusCode = 400;
+      throw error;
+    }
+
+    const submission = await Submission.findById(submissionId);
+    if (!submission) {
+      const error = new Error('Submission not found');
+      error.statusCode = 404;
+      throw error;
+    }
+
+    // Ownership verification
+    if (submission.studentId.toString() !== studentId.toString()) {
+      const error = new Error('Access denied. You do not own this submission attempt.');
+      error.statusCode = 403;
+      throw error;
+    }
+
+    // Attempt status check
+    if (submission.status !== 'in_progress') {
+      const error = new Error('Cannot execute code on a submitted or finalized assessment.');
+      error.statusCode = 400;
+      throw error;
+    }
+
+    // Server-authoritative timer deadline check (with 30s network drift grace period)
+    const now = Date.now();
+    const deadlineTime = submission.deadlineAt ? new Date(submission.deadlineAt).getTime() : null;
+    if (deadlineTime && now > deadlineTime + 30000) {
+      const error = new Error('Assessment deadline has expired.');
+      error.statusCode = 400;
+      throw error;
+    }
+
+    const question = await Question.findById(questionId);
+    if (!question || question.assessmentId.toString() !== submission.assessmentId.toString()) {
+      const error = new Error('Question not found in this assessment');
+      error.statusCode = 404;
+      throw error;
+    }
+
+    // Verify question is assigned to this attempt if randomized pool is active
+    if (submission.assignedQuestionIds && submission.assignedQuestionIds.length > 0) {
+      const isAssigned = submission.assignedQuestionIds.some((id) => id.toString() === questionId.toString());
+      if (!isAssigned) {
+        const error = new Error('Question is not assigned to this student attempt');
+        error.statusCode = 403;
+        throw error;
+      }
+    }
+
+    if (!['code', 'sql'].includes(question.type)) {
+      const error = new Error('Code execution is only supported for coding and SQL questions');
+      error.statusCode = 400;
+      throw error;
+    }
+
+    const codingCfg = question.codingConfig || {};
+    const executionCategory = codingCfg.executionCategory || (question.type === 'sql' ? 'sql' : 'code');
+    const selectedLang = (language || '').toLowerCase().trim();
+
+    const timeoutMs = Math.min(codingCfg.cpuTimeLimitMs || 2000, 5000);
+    const memoryLimitMb = Math.min(codingCfg.memoryLimitMb || 256, 512);
+
+    if (executionCategory === 'code') {
+      const allowedLangs = (codingCfg.allowedLanguages || ['python', 'javascript']).filter((l) =>
+        ['python', 'javascript'].includes(l)
+      );
+      if (!allowedLangs.includes(selectedLang)) {
+        const error = new Error(`Language '${selectedLang}' is not permitted for this question. Allowed: ${allowedLangs.join(', ')}`);
+        error.statusCode = 400;
+        throw error;
+      }
+
+      // If student provided custom stdin, execute single run
+      if (typeof customStdin === 'string' && customStdin.trim().length > 0) {
+        const clientRes = await executionClient.executeCode({
+          language: selectedLang,
+          code,
+          stdin: customStdin,
+          timeoutMs,
+          memoryLimitMb,
+        });
+
+        if (!clientRes.ok || !clientRes.data?.success) {
+          const error = new Error(clientRes.data?.message || 'Code execution service error');
+          error.statusCode = clientRes.status || 500;
+          throw error;
+        }
+
+        const runRes = clientRes.data.data;
+
+        return {
+          verdict: runRes.verdict,
+          stdout: runRes.stdout,
+          stderr: runRes.stderr,
+          exitCode: runRes.exitCode,
+          executionTimeMs: runRes.executionTimeMs,
+          customRun: true,
+        };
+      }
+
+      // Evaluate against public sample test cases (strictly !isHidden)
+      const publicCases = (codingCfg.testCases || []).filter((tc) => !tc.isHidden);
+
+      if (publicCases.length === 0) {
+        const clientRes = await executionClient.executeCode({
+          language: selectedLang,
+          code,
+          stdin: '',
+          timeoutMs,
+          memoryLimitMb,
+        });
+
+        if (!clientRes.ok || !clientRes.data?.success) {
+          const error = new Error(clientRes.data?.message || 'Code execution service error');
+          error.statusCode = clientRes.status || 500;
+          throw error;
+        }
+
+        const runRes = clientRes.data.data;
+
+        return {
+          verdict: runRes.verdict,
+          stdout: runRes.stdout,
+          stderr: runRes.stderr,
+          exitCode: runRes.exitCode,
+          executionTimeMs: runRes.executionTimeMs,
+        };
+      }
+
+      // Run suite over public sample cases
+      const clientRes = await executionClient.executeSuite({
+        language: selectedLang,
+        code,
+        testCases: publicCases.map((tc) => ({
+          input: tc.input || '',
+          expectedOutput: tc.expectedOutput || '',
+          isHidden: false,
+          weight: tc.weight || 1,
+        })),
+        timeoutMs,
+        memoryLimitMb,
+      });
+
+      if (!clientRes.ok || !clientRes.data?.success) {
+        const error = new Error(clientRes.data?.message || 'Code execution service error');
+        error.statusCode = clientRes.status || 500;
+        throw error;
+      }
+
+      const suiteRes = clientRes.data.data;
+
+      const firstFail = (suiteRes.testCases || []).find((tc) => !tc.passed);
+      const overallVerdict = suiteRes.verdict || (firstFail ? firstFail.verdict : 'ACCEPTED');
+
+      return {
+        verdict: overallVerdict,
+        passedCount: suiteRes.passedCount,
+        totalCount: suiteRes.totalCount,
+        stdout: firstFail ? firstFail.actualOutput : (suiteRes.testCases?.[0]?.actualOutput || ''),
+        stderr: firstFail?.stderr || '',
+        executionTimeMs: suiteRes.testCases?.[0]?.executionTimeMs || 0,
+        sampleResults: (suiteRes.testCases || []).map((stc, idx) => ({
+          sampleIndex: idx + 1,
+          passed: stc.passed,
+          verdict: stc.verdict,
+          input: publicCases[idx]?.input || '',
+          expectedOutput: publicCases[idx]?.expectedOutput || '',
+          actualOutput: stc.actualOutput,
+          executionTimeMs: stc.executionTimeMs,
+          explanation: publicCases[idx]?.explanation || '',
+        })),
+      };
+    } else {
+      // executionCategory === 'sql'
+      const dialect = (selectedLang || codingCfg.sqlDialect || 'sqlite').toLowerCase();
+      if (['postgresql', 'postgres', 'mysql'].includes(dialect)) {
+        const error = new Error(`SQL dialect '${dialect}' is rejected at API boundary. Active SQL examination is restricted to SQLite only.`);
+        error.statusCode = 400;
+        throw error;
+      }
+      if (dialect !== 'sqlite') {
+        const error = new Error(`SQL dialect '${dialect}' is not supported. Permitted: sqlite`);
+        error.statusCode = 400;
+        throw error;
+      }
+
+      const publicCases = (codingCfg.testCases || []).filter((tc) => !tc.isHidden);
+      const casesToRun = publicCases.length > 0 ? publicCases : [null];
+      const sampleResults = [];
+      let overallVerdict = 'ACCEPTED';
+      let lastSqlRes = null;
+
+      for (let idx = 0; idx < casesToRun.length; idx++) {
+        const tc = casesToRun[idx];
+        let expectedOutput = null;
+        if (tc) {
+          if (tc.expectedColumns?.length > 0 || tc.expectedRows?.length > 0) {
+            expectedOutput = {
+              columns: tc.expectedColumns || [],
+              rows: tc.expectedRows || [],
+            };
+          } else if (tc.expectedOutput) {
+            expectedOutput = tc.expectedOutput;
+          }
+        }
+
+        let ddl = codingCfg.schemaDdl || '';
+        if (tc && tc.input && tc.input.trim()) {
+          ddl = `${ddl}\n${tc.input.trim()}`;
+        }
+
+        const clientRes = await executionClient.executeSql({
+          dialect,
+          schemaDdl: ddl,
+          query: code,
+          expectedOutput,
+          timeoutMs,
+        });
+
+        if (!clientRes.ok || !clientRes.data?.success) {
+          const error = new Error(clientRes.data?.message || 'SQL execution service error');
+          error.statusCode = clientRes.status || 500;
+          throw error;
+        }
+
+        const sqlRes = clientRes.data.data;
+        if (!lastSqlRes) lastSqlRes = sqlRes;
+        const passed = sqlRes.verdict === 'ACCEPTED';
+        if (!passed && overallVerdict === 'ACCEPTED') {
+          overallVerdict = sqlRes.verdict;
+        }
+
+        if (tc) {
+          sampleResults.push({
+            sampleIndex: idx + 1,
+            passed,
+            verdict: sqlRes.verdict,
+            expectedColumns: tc.expectedColumns,
+            expectedRows: tc.expectedRows,
+            actualColumns: sqlRes.columns,
+            actualRows: sqlRes.rows,
+            explanation: tc.explanation || `Sample query evaluation ${idx + 1}`,
+          });
+        }
+      }
+
+      return {
+        verdict: overallVerdict,
+        passedCount: sampleResults.filter((s) => s.passed).length,
+        totalCount: sampleResults.length,
+        stdout: lastSqlRes?.stdout || '',
+        stderr: lastSqlRes?.stderr || '',
+        exitCode: lastSqlRes?.exitCode || 0,
+        columns: lastSqlRes?.columns || [],
+        rows: lastSqlRes?.rows || [],
+        rowCount: lastSqlRes?.rowCount || 0,
+        executionTimeMs: lastSqlRes?.executionTimeMs || 0,
+        sampleResults: sampleResults.length > 0 ? sampleResults : undefined,
+      };
+    }
+  }
+
   async saveProgress(submissionId, studentId, answers) {
     const submission = await Submission.findOne({
       _id: submissionId,
@@ -318,8 +602,17 @@ class SubmissionService {
       throw error;
     }
 
-    const currentAnswers = submission.answers ? Object.fromEntries(submission.answers) : {};
-    submission.answers = { ...currentAnswers, ...(answers || {}) };
+    let normalizedAnswers = answers || {};
+    if (Array.isArray(answers)) {
+      normalizedAnswers = {};
+      for (const item of answers) {
+        if (item && item.questionId) {
+          normalizedAnswers[item.questionId.toString()] = item.answer;
+        }
+      }
+    }
+
+    submission.answers = normalizedAnswers;
 
     if (submission.startedAt) {
       submission.timeSpentSeconds = Math.max(
@@ -373,8 +666,20 @@ class SubmissionService {
       questions = await Question.find({ assessmentId: submission.assessmentId });
     }
 
-    const currentAnswers = submission.answers ? Object.fromEntries(submission.answers) : {};
-    const finalAnswers = { ...currentAnswers, ...(answers || {}) };
+    let normalizedAnswers = answers;
+    if (Array.isArray(answers)) {
+      normalizedAnswers = {};
+      for (const item of answers) {
+        if (item && item.questionId) {
+          normalizedAnswers[item.questionId.toString()] = item.answer;
+        }
+      }
+    }
+
+    const currentAnswers = submission.answers instanceof Map
+      ? Object.fromEntries(submission.answers)
+      : (submission.answers || {});
+    const finalAnswers = normalizedAnswers !== null && normalizedAnswers !== undefined ? normalizedAnswers : currentAnswers;
 
     let autoScore = 0;
     let totalPoints = 0;
@@ -391,7 +696,7 @@ class SubmissionService {
         ) {
           autoScore += q.points;
         }
-      } else if (q.type === 'short_answer' || q.type === 'long_answer' || q.type === 'code' || q.type === 'file_upload') {
+      } else if (q.type === 'short_answer' || q.type === 'long_answer' || q.type === 'code' || q.type === 'sql' || q.type === 'file_upload') {
         hasSubjective = true;
       }
     });
@@ -636,24 +941,58 @@ class SubmissionService {
       }
     }
 
-    // Student privacy: student callers must NEVER receive internal evaluator rubrics/metadata ('explanation').
-    // correctAnswer is only revealed if submission is evaluated and allowReview is true.
-    let questionProjection = '';
-    if (role === 'student') {
-      const allowReview =
-        submission.status === 'evaluated' && submission.assessmentId?.allowReview !== false;
-      questionProjection = allowReview ? '-explanation' : '-correctAnswer -explanation';
-    }
-
-    const questions = await Question.find({ assessmentId: submission.assessmentId._id })
-      .select(questionProjection)
+    // Query questions ordered by assessment index
+    const rawQuestions = await Question.find({ assessmentId: submission.assessmentId._id })
       .sort({ orderIndex: 1 });
 
     const json = submission.toJSON();
     json.assessment = json.assessmentId;
+
+    // Student privacy: student callers must NEVER receive internal evaluator rubrics/metadata ('explanation'),
+    // correct answer keys ('correctAnswer'), or hidden test cases.
     if (json.assessment) {
-      json.assessment.questions = questions;
+      json.assessment.questions = rawQuestions.map((q) => {
+        const qObj = q.toJSON();
+        if (role === 'student') {
+          delete qObj.correctAnswer;
+          delete qObj.explanation;
+          if (qObj.codingConfig && Array.isArray(qObj.codingConfig.testCases)) {
+            // Strictly filter out hidden test cases for student callers
+            qObj.codingConfig.testCases = qObj.codingConfig.testCases.filter((tc) => !tc.isHidden);
+          }
+        }
+        return qObj;
+      });
     }
+
+    // Ensure evaluated submissions have pointsAwarded populated for objective questions in questionFeedback
+    if (submission.status === 'evaluated' && json.evaluation) {
+      const qFb = json.evaluation.questionFeedback || {};
+      const answersMap = submission.answers instanceof Map
+        ? Object.fromEntries(submission.answers)
+        : (submission.answers || {});
+
+      rawQuestions.forEach((q) => {
+        const qId = q._id.toString();
+        if (q.type === 'mcq' || q.type === 'true_false') {
+          if (!qFb[qId] || qFb[qId].pointsAwarded === undefined) {
+            const studentAns = answersMap[qId];
+            const isCorrect =
+              studentAns !== undefined &&
+              q.correctAnswer !== undefined &&
+              q.correctAnswer !== null &&
+              String(studentAns).trim().toLowerCase() === String(q.correctAnswer).trim().toLowerCase();
+            qFb[qId] = {
+              ...(qFb[qId] || {}),
+              pointsAwarded: isCorrect ? q.points : 0,
+              comment: qFb[qId]?.comment || '',
+            };
+          }
+        }
+      });
+      json.evaluation.questionFeedback = qFb;
+    }
+
     json.student = json.studentId;
     delete json.assessmentId;
     delete json.studentId;
