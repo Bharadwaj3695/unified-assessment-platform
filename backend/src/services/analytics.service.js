@@ -35,10 +35,10 @@ class AnalyticsService {
   /**
    * Streak System Definition:
    * - Meaningful academic activity: Completing/submitting an assessment (status: 'submitted' or 'evaluated').
-   * - Timezone consistency: Dates are normalized to UTC calendar days (YYYY-MM-DD).
+   * - Timezone consistency: Dates are normalized to UTC calendar Day (YYYY-MM-DD).
    * - Same-day deduplication: Multiple assessments completed on the same UTC day count as 1 active day.
-   * - Consecutive days: A streak increments by 1 for each contiguous calendar day with at least one completion.
-   * - Current streak: Counts back from today (or yesterday, if no activity today yet). Breaks if gap >= 2 days.
+   * - Consecutive Day: A streak increments by 1 for each contiguous calendar day with at least one completion.
+   * - Current streak: Counts back from today (or yesterday, if no activity today yet). Breaks if gap >= 2 Day.
    * - Longest streak: The maximum consecutive day streak ever achieved across historical activity.
    */
   calculateStreaks(activityTimestamps) {
@@ -85,35 +85,35 @@ class AnalyticsService {
     for (let i = 1; i < uniqueDateStrs.length; i++) {
       const prevDate = new Date(uniqueDateStrs[i - 1] + 'T00:00:00.000Z').getTime();
       const currDate = new Date(uniqueDateStrs[i] + 'T00:00:00.000Z').getTime();
-      const diffDays = Math.round((currDate - prevDate) / MS_PER_DAY);
+      const diffDay = Math.round((currDate - prevDate) / MS_PER_DAY);
 
-      if (diffDays === 1) {
+      if (diffDay === 1) {
         tempStreak++;
         if (tempStreak > maxStreak) {
           maxStreak = tempStreak;
         }
-      } else if (diffDays > 1) {
+      } else if (diffDay > 1) {
         tempStreak = 1;
       }
     }
 
     // Calculate current streak
-    const todayStr = new Date().toISOString().split('T')[0];
-    const yesterdayStr = new Date(Date.now() - MS_PER_DAY).toISOString().split('T')[0];
+    const toDaytr = new Date().toISOString().split('T')[0];
+    const yesterDaytr = new Date(Date.now() - MS_PER_DAY).toISOString().split('T')[0];
     const lastDateStr = uniqueDateStrs[uniqueDateStrs.length - 1];
 
     let currentStreak = 0;
-    const streakActiveToday = lastDateStr === todayStr;
+    const streakActiveToday = lastDateStr === toDaytr;
 
     // Current streak is active if last completion was either today or yesterday
-    if (lastDateStr === todayStr || lastDateStr === yesterdayStr) {
+    if (lastDateStr === toDaytr || lastDateStr === yesterDaytr) {
       currentStreak = 1;
       for (let i = uniqueDateStrs.length - 1; i > 0; i--) {
         const currDate = new Date(uniqueDateStrs[i] + 'T00:00:00.000Z').getTime();
         const prevDate = new Date(uniqueDateStrs[i - 1] + 'T00:00:00.000Z').getTime();
-        const diffDays = Math.round((currDate - prevDate) / MS_PER_DAY);
+        const diffDay = Math.round((currDate - prevDate) / MS_PER_DAY);
 
-        if (diffDays === 1) {
+        if (diffDay === 1) {
           currentStreak++;
         } else {
           break;
@@ -165,17 +165,35 @@ class AnalyticsService {
     );
     const assessmentsCompleted = completedSubmissions.length;
 
-    const passedSubmissions = completedSubmissions.filter((s) => Boolean(s.passed));
+    // Submissions pending instructor evaluation
+    const pendingSubmissions = submissions.filter(
+      (s) =>
+        s.status === 'submitted' ||
+        (s.status !== 'in_progress' && s.evaluationStatus === 'pending')
+    );
+    const pendingEvaluations = pendingSubmissions.length;
+
+    // Strictly evaluated submissions (must not be pending evaluation)
+    const evaluatedSubmissions = submissions.filter(
+      (s) => s.status === 'evaluated' && s.evaluationStatus !== 'pending'
+    );
+    const evaluatedAssessments = evaluatedSubmissions.length;
+
+    // Passed and failed metrics computed strictly over evaluated assessments
+    const passedSubmissions = evaluatedSubmissions.filter((s) => Boolean(s.passed));
     const passedAssessments = passedSubmissions.length;
-    const failedAssessments = assessmentsCompleted - passedAssessments;
+    const failedAssessments = evaluatedAssessments - passedAssessments;
 
     const passRate =
-      assessmentsCompleted > 0 ? Math.round((passedAssessments / assessmentsCompleted) * 100) : 0;
+      evaluatedAssessments > 0 ? Math.round((passedAssessments / evaluatedAssessments) * 100) : 0;
 
     let overallAverageScore = null;
-    if (assessmentsCompleted > 0) {
-      const sumPercentage = completedSubmissions.reduce((acc, s) => acc + (s.percentage || 0), 0);
-      overallAverageScore = Math.round((sumPercentage / assessmentsCompleted) * 10) / 10;
+    const scoredSubmissions = evaluatedSubmissions.filter(
+      (s) => typeof s.percentage === 'number' && !isNaN(s.percentage)
+    );
+    if (scoredSubmissions.length > 0) {
+      const sumPercentage = scoredSubmissions.reduce((acc, s) => acc + s.percentage, 0);
+      overallAverageScore = Math.round((sumPercentage / scoredSubmissions.length) * 10) / 10;
     }
 
     // Historical streaks: Always computed over the entire academic history for completeness
@@ -189,7 +207,7 @@ class AnalyticsService {
 
     // Leaderboard Position: Determine overall rank across students
     let leaderboardPosition = null;
-    if (assessmentsCompleted > 0) {
+    if (evaluatedAssessments > 0 || assessmentsCompleted > 0) {
       try {
         const overallLeaderboard = await this.getLeaderboard({
           scope: 'overall',
@@ -212,24 +230,6 @@ class AnalyticsService {
 
     // 3. Subject/Category Performance Breakdown
     const categoryMap = new Map();
-    completedSubmissions.forEach((sub) => {
-      const categoryName = sub.assessmentId?.category || 'General';
-      if (!categoryMap.has(categoryName)) {
-        categoryMap.set(categoryName, {
-          category: categoryName,
-          assessmentsAttempted: 0,
-          assessmentsCompleted: 0,
-          passedCount: 0,
-          totalPercentage: 0,
-        });
-      }
-      const entry = categoryMap.get(categoryName);
-      entry.assessmentsCompleted++;
-      if (sub.passed) entry.passedCount++;
-      entry.totalPercentage += sub.percentage || 0;
-    });
-
-    // Also account for in_progress attempts under each category
     submissions.forEach((sub) => {
       const categoryName = sub.assessmentId?.category || 'General';
       if (!categoryMap.has(categoryName)) {
@@ -237,47 +237,90 @@ class AnalyticsService {
           category: categoryName,
           assessmentsAttempted: 0,
           assessmentsCompleted: 0,
+          pendingEvaluations: 0,
+          evaluatedAssessments: 0,
           passedCount: 0,
+          failedCount: 0,
           totalPercentage: 0,
+          scoredCount: 0,
         });
       }
       const entry = categoryMap.get(categoryName);
       entry.assessmentsAttempted++;
+
+      const isPending =
+        sub.status === 'submitted' ||
+        (sub.status !== 'in_progress' && sub.evaluationStatus === 'pending');
+      const isEvaluated = sub.status === 'evaluated' && sub.evaluationStatus !== 'pending';
+
+      if (sub.status === 'submitted' || sub.status === 'evaluated') {
+        entry.assessmentsCompleted++;
+      }
+      if (isPending) {
+        entry.pendingEvaluations++;
+      }
+      if (isEvaluated) {
+        entry.evaluatedAssessments++;
+        if (Boolean(sub.passed)) {
+          entry.passedCount++;
+        } else {
+          entry.failedCount++;
+        }
+        if (typeof sub.percentage === 'number' && !isNaN(sub.percentage)) {
+          entry.totalPercentage += sub.percentage;
+          entry.scoredCount++;
+        }
+      }
     });
 
     const categoryPerformance = Array.from(categoryMap.values()).map((cat) => ({
       category: cat.category,
       assessmentsAttempted: cat.assessmentsAttempted,
       assessmentsCompleted: cat.assessmentsCompleted,
+      pendingEvaluations: cat.pendingEvaluations,
+      evaluatedAssessments: cat.evaluatedAssessments,
       averageScore:
-        cat.assessmentsCompleted > 0
-          ? Math.round((cat.totalPercentage / cat.assessmentsCompleted) * 10) / 10
+        cat.scoredCount > 0
+          ? Math.round((cat.totalPercentage / cat.scoredCount) * 10) / 10
           : 0,
       passRate:
-        cat.assessmentsCompleted > 0
-          ? Math.round((cat.passedCount / cat.assessmentsCompleted) * 100)
+        cat.evaluatedAssessments > 0
+          ? Math.round((cat.passedCount / cat.evaluatedAssessments) * 100)
           : 0,
     }));
 
     // 4. Recent Performance: latest completed/evaluated assessments (top 5)
-    const recentResults = completedSubmissions.slice(0, 5).map((sub) => ({
-      id: sub._id.toString(),
-      assessmentId: sub.assessmentId?._id?.toString() || null,
-      assessmentTitle: sub.assessmentId?.title || 'Assessment',
-      category: sub.assessmentId?.category || 'General',
-      date: sub.submittedAt || sub.createdAt,
-      score: sub.score,
-      totalPoints: sub.totalPoints,
-      percentage: sub.percentage,
-      passed: Boolean(sub.passed),
-      resultStatus: sub.resultStatus || (sub.passed ? 'passed' : 'failed'),
-      status: sub.status,
-    }));
+    const recentResults = completedSubmissions.slice(0, 5).map((sub) => {
+      const isPending =
+        sub.status === 'submitted' ||
+        (sub.status !== 'in_progress' && sub.evaluationStatus === 'pending');
+      const isEvaluated = sub.status === 'evaluated' && sub.evaluationStatus !== 'pending';
+
+      return {
+        id: sub._id.toString(),
+        assessmentId: sub.assessmentId?._id?.toString() || null,
+        assessmentTitle: sub.assessmentId?.title || 'Assessment',
+        category: sub.assessmentId?.category || 'General',
+        date: sub.submittedAt || sub.createdAt,
+        score: isEvaluated ? sub.score : null,
+        totalPoints: sub.totalPoints,
+        percentage: isEvaluated ? sub.percentage : null,
+        passed: isEvaluated ? Boolean(sub.passed) : null,
+        resultStatus: isEvaluated
+          ? sub.resultStatus || (sub.passed ? 'passed' : 'failed')
+          : isPending
+          ? 'pending_evaluation'
+          : 'in_progress',
+        status: sub.status,
+      };
+    });
 
     return {
       overallAverageScore,
       assessmentsAttempted,
       assessmentsCompleted,
+      pendingEvaluations,
+      evaluatedAssessments,
       passedAssessments,
       failedAssessments,
       passRate,
@@ -288,7 +331,7 @@ class AnalyticsService {
       leaderboardPosition,
       categoryPerformance,
       recentResults,
-      hasData: assessmentsCompleted > 0,
+      hasData: evaluatedAssessments > 0,
     };
   }
 
@@ -313,7 +356,8 @@ class AnalyticsService {
 
     const query = {
       studentId: studentObjectId,
-      status: { $in: ['submitted', 'evaluated'] },
+      status: 'evaluated',
+      evaluationStatus: { $ne: 'pending' },
     };
 
     if (dateRange) {
@@ -325,22 +369,25 @@ class AnalyticsService {
       .populate('assessmentId', 'title category totalPoints passingScore')
       .sort({ submittedAt: 1, createdAt: 1 });
 
-    const trends = submissions.map((s) => {
-      const dateVal = s.submittedAt || s.createdAt;
-      return {
-        id: s._id.toString(),
-        date: dateVal ? new Date(dateVal).toISOString().split('T')[0] : '',
-        timestamp: dateVal,
-        assessmentId: s.assessmentId?._id?.toString() || '',
-        assessmentTitle: s.assessmentId?.title || 'Assessment',
-        category: s.assessmentId?.category || 'General',
-        percentage: s.percentage || 0,
-        score: s.score || 0,
-        totalPoints: s.totalPoints || 100,
-        passingScore: s.assessmentId?.passingScore ?? 60,
-        passed: Boolean(s.passed),
-      };
-    });
+    const trends = submissions
+      .filter((s) => typeof s.percentage === 'number' && !isNaN(s.percentage))
+      .map((s) => {
+        const dateVal = s.submittedAt || s.createdAt;
+        return {
+          id: s._id.toString(),
+          date: dateVal ? new Date(dateVal).toISOString().split('T')[0] : '',
+          timestamp: dateVal,
+          assessmentId: s.assessmentId?._id?.toString() || '',
+          assessmentTitle: s.assessmentId?.title || 'Assessment',
+          category: s.assessmentId?.category || 'General',
+          percentage: s.percentage,
+          score: s.score,
+          totalPoints: s.totalPoints || s.assessmentId?.totalPoints || 100,
+          passingScore: s.assessmentId?.passingScore ?? 60,
+          passed: Boolean(s.passed),
+          resultStatus: s.resultStatus || (s.passed ? 'passed' : 'failed'),
+        };
+      });
 
     return trends;
   }
@@ -375,7 +422,7 @@ class AnalyticsService {
     return {
       studentId,
       ...streakResult,
-      totalActivityDays: timestamps.length > 0 ? new Set(timestamps.map((t) => new Date(t).toISOString().split('T')[0])).size : 0,
+      totalActivityDay: timestamps.length > 0 ? new Set(timestamps.map((t) => new Date(t).toISOString().split('T')[0])).size : 0,
     };
   }
 
@@ -959,8 +1006,8 @@ class AnalyticsService {
     }
 
     // Activity trendline: Submissions completed per day
-    const daysLimit = options.dateFilter === 'last_month' ? 30 : 7;
-    const sinceDate = new Date(Date.now() - daysLimit * 24 * 60 * 60 * 1000);
+    const DayLimit = options.dateFilter === 'last_month' ? 30 : 7;
+    const sinceDate = new Date(Date.now() - DayLimit * 24 * 60 * 60 * 1000);
 
     const activityAgg = await Submission.aggregate([
       {

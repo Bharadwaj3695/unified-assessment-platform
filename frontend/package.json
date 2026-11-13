@@ -9,6 +9,10 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@codemirror/lang-javascript": "^6.2.5",
+    "@codemirror/lang-python": "^6.2.1",
+    "@codemirror/lang-sql": "^6.10.0",
+    "@uiw/react-codemirror": "^4.25.12",
     "axios": "^1.7.9",
     "formik": "^2.4.6",
     "lucide-react": "^0.469.0",

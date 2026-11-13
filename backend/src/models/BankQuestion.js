@@ -1,6 +1,81 @@
 // Import Mongoose ODM library for schema definition and collection operations
 const mongoose = require('mongoose');
 
+// Sub-schema representing an automated test case for coding questions in Question Bank
+const bankTestCaseSchema = new mongoose.Schema(
+  {
+    input: { type: String, default: '' },
+    expectedOutput: { type: String, required: true },
+    expectedColumns: { type: [String], default: [] },
+    expectedRows: { type: mongoose.Schema.Types.Mixed, default: [] },
+    isHidden: { type: Boolean, default: false },
+    weight: { type: Number, default: 1, min: 1 },
+    explanation: { type: String, default: '' },
+    description: { type: String, default: '' },
+    isEnabled: { type: Boolean, default: true },
+  },
+  { _id: true }
+);
+
+// Sub-schema defining runtime environment and execution limits for Question Bank items
+const bankCodingConfigSchema = new mongoose.Schema(
+  {
+    problemTitle: { type: String, default: '' },
+    problemDescription: { type: String, default: '' },
+    constraints: { type: String, default: '' },
+    inputFormat: { type: String, default: '' },
+    outputFormat: { type: String, default: '' },
+    sampleInput: { type: String, default: '' },
+    sampleOutput: { type: String, default: '' },
+    executionCategory: {
+      type: String,
+      enum: ['code', 'sql'],
+      default: 'code',
+    },
+    allowedLanguages: {
+      type: [String],
+      enum: ['python', 'javascript', 'sqlite', 'postgresql', 'mysql'],
+      default: ['python', 'javascript'],
+    },
+    defaultLanguage: {
+      type: String,
+      enum: ['python', 'javascript', 'sqlite', 'postgresql', 'mysql'],
+      default: 'python',
+    },
+    sqlDialect: {
+      type: String,
+      enum: ['sqlite', 'postgresql', 'mysql'],
+      default: 'sqlite',
+    },
+    starterCode: {
+      type: Map,
+      of: String,
+      default: {},
+    },
+    schemaDdl: {
+      type: String,
+      default: '',
+    },
+    cpuTimeLimitMs: {
+      type: Number,
+      default: 2000,
+      min: 500,
+      max: 10000,
+    },
+    memoryLimitMb: {
+      type: Number,
+      default: 256,
+      min: 64,
+      max: 512,
+    },
+    testCases: {
+      type: [bankTestCaseSchema],
+      default: [],
+    },
+  },
+  { _id: false }
+);
+
 // Schema representing a reusable question bank repository entry with versioning and AI classification
 const bankQuestionSchema = new mongoose.Schema(
   {
@@ -54,7 +129,7 @@ const bankQuestionSchema = new mongoose.Schema(
       // String type storing format classification
       type: String,
       // Permitted question types
-      enum: ['mcq', 'short_answer', 'long_answer', 'file_upload'],
+      enum: ['mcq', 'short_answer', 'long_answer', 'file_upload', 'code', 'sql'],
       // Default to multiple-choice
       default: 'mcq',
       // Mandatory question format
@@ -79,6 +154,11 @@ const bankQuestionSchema = new mongoose.Schema(
       default: null,
       // Automatically trim whitespace
       trim: true,
+    },
+    // Coding and SQL configuration for code questions
+    codingConfig: {
+      type: bankCodingConfigSchema,
+      default: () => ({}),
     },
     // Solution explanation or pedagogical feedback shown during review
     explanation: {

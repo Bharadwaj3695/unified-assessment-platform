@@ -25,7 +25,7 @@ const AnnouncementEditorSection = ({ onMessageSync = null, initialMessage = '' }
   const [message, setMessage] = useState(initialMessage || '');
   const [startMode, setStartMode] = useState('immediate'); // 'immediate' | 'scheduled'
   const [startDate, setStartDate] = useState('');
-  const [durationDays, setDurationDays] = useState(0);
+  const [durationDay, setDurationDay] = useState(0);
   const [durationHours, setDurationHours] = useState(2);
   const [durationMinutes, setDurationMinutes] = useState(30);
   const [targetAudience, setTargetAudience] = useState('all');
@@ -62,12 +62,12 @@ const AnnouncementEditorSection = ({ onMessageSync = null, initialMessage = '' }
           // Pre-populate fields on initial load only, or on explicit refresh
           if (!isInitializedRef.current || isRefresh) {
             setMessage(doc.message || '');
-            if (doc.durationDays || doc.durationHours || doc.durationMinutes) {
-              setDurationDays(doc.durationDays || 0);
+            if (doc.durationDay || doc.durationHours || doc.durationMinutes) {
+              setDurationDay(doc.durationDay || 0);
               setDurationHours(doc.durationHours || 0);
               setDurationMinutes(doc.durationMinutes || 0);
             } else {
-              setDurationDays(0);
+              setDurationDay(0);
               setDurationHours(2);
               setDurationMinutes(30);
             }
@@ -119,11 +119,11 @@ const AnnouncementEditorSection = ({ onMessageSync = null, initialMessage = '' }
 
   // Compute total duration in minutes
   const totalDurationMinutes = useMemo(() => {
-    const d = parseInt(durationDays, 10) || 0;
+    const d = parseInt(durationDay, 10) || 0;
     const h = parseInt(durationHours, 10) || 0;
     const m = parseInt(durationMinutes, 10) || 0;
     return (d * 24 * 60) + (h * 60) + m;
-  }, [durationDays, durationHours, durationMinutes]);
+  }, [durationDay, durationHours, durationMinutes]);
 
   // Compute calculated expiry timestamp
   const computedExpiry = useMemo(() => {
@@ -162,7 +162,7 @@ const AnnouncementEditorSection = ({ onMessageSync = null, initialMessage = '' }
       if (totalDurationMinutes <= 0) {
         newErrors.duration = 'Total duration must be greater than 0 minutes.';
       } else if (totalDurationMinutes > 365 * 24 * 60) {
-        newErrors.duration = 'Duration cannot exceed 365 days.';
+        newErrors.duration = 'Duration cannot exceed 365 Day.';
       }
 
       if (startMode === 'scheduled') {
@@ -229,7 +229,7 @@ const AnnouncementEditorSection = ({ onMessageSync = null, initialMessage = '' }
         id: currentAnnouncement?._id || currentAnnouncement?.id,
         message: trimmedMessage,
         targetAudience,
-        durationDays: Number(durationDays) || 0,
+        durationDay: Number(durationDay) || 0,
         durationHours: Number(durationHours) || 0,
         durationMinutes: Number(durationMinutes) || 0,
       });
@@ -253,7 +253,7 @@ const AnnouncementEditorSection = ({ onMessageSync = null, initialMessage = '' }
       await announcementService.publishImmediate({
         id: currentAnnouncement?._id || currentAnnouncement?.id,
         message: trimmedMessage,
-        durationDays: Number(durationDays) || 0,
+        durationDay: Number(durationDay) || 0,
         durationHours: Number(durationHours) || 0,
         durationMinutes: Number(durationMinutes) || 0,
         targetAudience,
@@ -280,7 +280,7 @@ const AnnouncementEditorSection = ({ onMessageSync = null, initialMessage = '' }
         id: currentAnnouncement?._id || currentAnnouncement?.id,
         message: trimmedMessage,
         startDate: new Date(startDate).toISOString(),
-        durationDays: Number(durationDays) || 0,
+        durationDay: Number(durationDay) || 0,
         durationHours: Number(durationHours) || 0,
         durationMinutes: Number(durationMinutes) || 0,
         targetAudience,
@@ -556,16 +556,16 @@ const AnnouncementEditorSection = ({ onMessageSync = null, initialMessage = '' }
           Announcement Active Duration <span className="text-red-500">*</span>
         </label>
 
-        {/* 3 duration inputs: Days, Hours, Minutes */}
+        {/* 3 duration inputs: Day, Hours, Minutes */}
         <div className="grid grid-cols-3 gap-3">
           <div>
-            <span className="block text-[11px] text-slate-500 dark:text-slate-400 mb-1">Days</span>
+            <span className="block text-[11px] text-slate-500 dark:text-slate-400 mb-1">Day</span>
             <input
               type="number"
               min="0"
               max="365"
-              value={durationDays}
-              onChange={(e) => setDurationDays(Math.max(0, parseInt(e.target.value, 10) || 0))}
+              value={durationDay}
+              onChange={(e) => setDurationDay(Math.max(0, parseInt(e.target.value, 10) || 0))}
               className="w-full px-3 py-1.5 rounded-xl text-xs border border-surface-light-border dark:border-surface-dark-border bg-white dark:bg-surface-dark-muted text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-brand-primary"
             />
           </div>
@@ -610,7 +610,7 @@ const AnnouncementEditorSection = ({ onMessageSync = null, initialMessage = '' }
               {formatDateTime(computedExpiry)}
             </span>{' '}
             <span className="text-slate-500 dark:text-slate-400">
-              ({durationDays}d {durationHours}h {durationMinutes}m after{' '}
+              ({durationDay}d {durationHours}h {durationMinutes}m after{' '}
               {startMode === 'immediate' ? 'effective immediate launch' : 'scheduled start'}
               )
             </span>

@@ -89,7 +89,7 @@ const sessionSchema = new mongoose.Schema(
       type: Date,
       default: Date.now,
     },
-    // Overall expiration timestamp of the session (e.g. 30 days from creation/renewal)
+    // Overall expiration timestamp of the session (e.g. 30 Day from creation/renewal)
     expiresAt: {
       type: Date,
       required: true,

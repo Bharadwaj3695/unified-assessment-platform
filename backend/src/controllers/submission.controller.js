@@ -28,6 +28,21 @@ class SubmissionController {
     }
   }
 
+  async runCode(req, res, next) {
+    try {
+      const { submissionId } = req.params;
+      const { questionId, code, language, customStdin } = req.body;
+      const result = await submissionService.runCode(
+        submissionId,
+        req.user.id,
+        { questionId, code, language, customStdin }
+      );
+      return successResponse(res, 'Code executed successfully', result);
+    } catch (err) {
+      next(err);
+    }
+  }
+
   async saveProgress(req, res, next) {
     try {
       const { answers } = req.body;

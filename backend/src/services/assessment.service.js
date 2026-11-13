@@ -1,6 +1,7 @@
 const mongoose = require('mongoose');
 const { Assessment, Question, User, Notification } = require('../models');
 const emailService = require('./email.service');
+const executionClient = require('./executionClient.service');
 const { validateGradingScheme, DEFAULT_GRADING_SCHEME } = require('../utils/gradingScheme');
 
 class AssessmentService {
@@ -99,6 +100,9 @@ class AssessmentService {
 
     let totalPoints = 0;
     if (questions && questions.length > 0) {
+      if (status === 'published') {
+        questions.forEach((q, idx) => this.validateQuestionForPublish(q, idx));
+      }
       totalPoints = questions.reduce((sum, q) => sum + (parseInt(q.points, 10) || 5), 0);
     }
 
@@ -133,6 +137,7 @@ class AssessmentService {
         points: parseInt(q.points, 10) || 5,
         orderIndex: idx,
         fileUploadConfig: q.fileUploadConfig || undefined,
+        codingConfig: q.codingConfig || undefined,
         bankQuestionId: q.bankQuestionId || null,
         questionBankId: q.questionBankId || null,
         questionBankVersion: q.questionBankVersion || null,
@@ -238,6 +243,10 @@ class AssessmentService {
     }
 
     if (questions && Array.isArray(questions)) {
+      const isPublishing = assessment.status === 'published' || fields.status === 'published';
+      if (isPublishing) {
+        questions.forEach((q, idx) => this.validateQuestionForPublish(q, idx));
+      }
       await Question.deleteMany({ assessmentId });
 
       let calculatedPoints = 0;
@@ -254,6 +263,7 @@ class AssessmentService {
           points: pts,
           orderIndex: idx,
           fileUploadConfig: q.fileUploadConfig || undefined,
+          codingConfig: q.codingConfig || undefined,
           bankQuestionId: q.bankQuestionId || null,
           questionBankId: q.questionBankId || null,
           questionBankVersion: q.questionBankVersion || null,
@@ -445,6 +455,16 @@ class AssessmentService {
     }
 
     const assessmentJson = assessment.toJSON();
+    if (isStudent && questions.length > 0) {
+      questions = questions.map((q) => {
+        const qObj = q.toObject ? q.toObject() : (q.toJSON ? q.toJSON() : { ...q });
+        if (qObj.codingConfig && Array.isArray(qObj.codingConfig.testCases)) {
+          // Strictly strip hidden test cases for student callers to prevent cheating
+          qObj.codingConfig.testCases = qObj.codingConfig.testCases.filter((tc) => !tc.isHidden);
+        }
+        return qObj;
+      });
+    }
     assessmentJson.questions = questions;
     return assessmentJson;
   }
@@ -466,6 +486,397 @@ class AssessmentService {
     await Question.deleteMany({ assessmentId });
     await Assessment.findByIdAndDelete(assessmentId);
     return { message: 'Assessment and associated questions deleted successfully' };
+  }
+
+  /**
+   * Validate a coding question before publication to ensure test cases and environments are consistent
+   */
+  validateQuestionForPublish(q, idx = 0) {
+    const qName = q.questionText ? `"${q.questionText.slice(0, 30)}..."` : `Question ${idx + 1}`;
+    if (!q.questionText || !q.questionText.trim()) {
+      const err = new Error(`Problem statement/question text is required for ${qName}`);
+      err.statusCode = 400;
+      throw err;
+    }
+
+    if (q.type === 'code' || q.type === 'sql') {
+      const cfg = q.codingConfig || {};
+      const testCases = cfg.testCases || [];
+      const enabledCases = testCases.filter((tc) => tc && tc.isEnabled !== false);
+      if (enabledCases.length === 0) {
+        const err = new Error(`Coding question ${qName} requires at least one valid enabled test case before publishing.`);
+        err.statusCode = 400;
+        throw err;
+      }
+
+      for (let i = 0; i < enabledCases.length; i++) {
+        const tc = enabledCases[i];
+        const isSql = q.type === 'sql' || cfg.executionCategory === 'sql';
+        const hasExpected = (tc.expectedOutput && String(tc.expectedOutput).trim().length > 0) ||
+          (isSql && (tc.expectedColumns?.length > 0 || tc.expectedRows?.length > 0));
+        if (!hasExpected) {
+          const err = new Error(`Test case ${i + 1} for ${qName} is missing expected output.`);
+          err.statusCode = 400;
+          throw err;
+        }
+      }
+
+      const langs = cfg.allowedLanguages || [];
+      const approved = ['python', 'javascript', 'sqlite'];
+      if (!langs.some((l) => approved.includes(String(l).toLowerCase()))) {
+        const err = new Error(`Coding question ${qName} must enable at least one supported language (${approved.join(', ')}).`);
+        err.statusCode = 400;
+        throw err;
+      }
+    }
+  }
+
+  /**
+   * Secure faculty test code execution for IDE validation
+   */
+  async testFacultyCode(user, { language, code, stdin = '', schemaDdl = '', testCase = null, testCases = null, timeoutMs = 2000, memoryLimitMb = 256 }) {
+    if (!code || typeof code !== 'string' || !code.trim()) {
+      const error = new Error('Source code cannot be empty');
+      error.statusCode = 400;
+      throw error;
+    }
+
+    const lang = (language || 'python').toLowerCase().trim();
+    const approvedLanguages = ['python', 'javascript', 'sqlite'];
+    if (!approvedLanguages.includes(lang)) {
+      const error = new Error(`Language '${language}' is not permitted. Permitted: ${approvedLanguages.join(', ')}`);
+      error.statusCode = 400;
+      throw error;
+    }
+
+    const tMs = Math.max(500, Math.min(10000, Number(timeoutMs) || 2000));
+    const mMb = Math.max(64, Math.min(512, Number(memoryLimitMb) || 256));
+
+    // Case 1: Run All Test Cases (Suite)
+    if (Array.isArray(testCases) && testCases.length > 0) {
+      const enabledCases = testCases.filter((tc) => tc && tc.isEnabled !== false);
+      if (enabledCases.length === 0) {
+        return {
+          verdict: 'NO_TESTS',
+          totalCount: 0,
+          passedCount: 0,
+          failedCount: 0,
+          testCases: [],
+          message: 'No enabled test cases to run.',
+        };
+      }
+
+      if (lang === 'sqlite') {
+        const results = [];
+        let passedCount = 0;
+        let totalWeight = 0;
+        let passedWeight = 0;
+
+        for (let i = 0; i < enabledCases.length; i++) {
+          const tc = enabledCases[i];
+          const weight = typeof tc.weight === 'number' && tc.weight > 0 ? tc.weight : 1;
+          totalWeight += weight;
+
+          let expectedOut = null;
+          if (tc.expectedColumns?.length > 0 || tc.expectedRows?.length > 0) {
+            expectedOut = {
+              columns: tc.expectedColumns || [],
+              rows: tc.expectedRows || [],
+            };
+          } else if (tc.expectedOutput) {
+            expectedOut = tc.expectedOutput;
+          }
+
+          let ddl = schemaDdl || '';
+          if (tc.input && tc.input.trim()) {
+            ddl = ddl ? `${ddl}\n${tc.input.trim()}` : tc.input.trim();
+          }
+
+          const clientRes = await executionClient.executeSql({
+            dialect: 'sqlite',
+            schemaDdl: ddl,
+            query: code,
+            expectedOutput: expectedOut,
+            timeoutMs: tMs,
+          });
+
+          if (!clientRes.ok || !clientRes.data?.success) {
+            const error = new Error(clientRes.data?.message || 'SQL execution failed');
+            error.statusCode = clientRes.status || 500;
+            throw error;
+          }
+
+          const sqlRes = clientRes.data.data;
+          const passed = sqlRes.verdict === 'ACCEPTED';
+          if (passed) {
+            passedCount++;
+            passedWeight += weight;
+          }
+
+          results.push({
+            testCaseId: tc.id || tc._id || `tc-${i + 1}`,
+            testCaseIndex: i + 1,
+            description: tc.description || tc.explanation || `Test Case ${i + 1}`,
+            input: tc.input || '',
+            expectedOutput: tc.expectedOutput || '',
+            expectedColumns: tc.expectedColumns || [],
+            expectedRows: tc.expectedRows || [],
+            actualOutput: sqlRes.rows ? JSON.stringify(sqlRes.rows) : '',
+            actualColumns: sqlRes.columns || [],
+            actualRows: sqlRes.rows || [],
+            passed,
+            verdict: sqlRes.verdict,
+            executionTimeMs: sqlRes.executionTimeMs || 0,
+            stderr: sqlRes.stderr || '',
+            weight,
+            isHidden: Boolean(tc.isHidden),
+          });
+        }
+
+        const overallVerdict =
+          passedCount === enabledCases.length
+            ? 'ACCEPTED'
+            : passedCount === 0
+            ? results[0]?.verdict || 'WRONG_ANSWER'
+            : 'PARTIAL_SUCCESS';
+
+        return {
+          verdict: overallVerdict,
+          totalCount: enabledCases.length,
+          passedCount,
+          failedCount: enabledCases.length - passedCount,
+          totalWeight,
+          passedWeight,
+          testCases: results,
+        };
+      }
+
+      // Python / JavaScript suite execution with full faculty visibility
+      const clientRes = await executionClient.executeSuite({
+        language: lang,
+        code,
+        schemaDdl,
+        testCases: enabledCases.map((tc) => ({
+          input: tc.input || '',
+          expectedOutput: tc.expectedOutput || '',
+          isHidden: false, // Disclose actual vs expected to authoring faculty
+          weight: tc.weight || 1,
+        })),
+        timeoutMs: tMs,
+        memoryLimitMb: mMb,
+        isFaculty: true,
+      });
+
+      if (!clientRes.ok || !clientRes.data?.success) {
+        const error = new Error(clientRes.data?.message || 'Execution failed');
+        error.statusCode = clientRes.status || 500;
+        throw error;
+      }
+
+      const suiteData = clientRes.data.data;
+      const mappedTestCases = (suiteData.testCases || []).map((stc, idx) => {
+        const originalTc = enabledCases[idx] || {};
+        return {
+          testCaseId: originalTc.id || originalTc._id || `tc-${idx + 1}`,
+          testCaseIndex: idx + 1,
+          description: originalTc.description || originalTc.explanation || `Test Case ${idx + 1}`,
+          input: originalTc.input || '',
+          expectedOutput: originalTc.expectedOutput || '',
+          actualOutput: stc.actualOutput !== undefined ? stc.actualOutput : '',
+          stderr: stc.stderr || '',
+          passed: Boolean(stc.passed),
+          verdict: stc.verdict || (stc.passed ? 'ACCEPTED' : 'WRONG_ANSWER'),
+          executionTimeMs: stc.executionTimeMs || 0,
+          weight: originalTc.weight || 1,
+          isHidden: Boolean(originalTc.isHidden),
+        };
+      });
+
+      return {
+        verdict: suiteData.verdict,
+        totalCount: enabledCases.length,
+        passedCount: suiteData.passedCount,
+        failedCount: enabledCases.length - suiteData.passedCount,
+        totalWeight: suiteData.totalWeight,
+        passedWeight: suiteData.passedWeight,
+        testCases: mappedTestCases,
+      };
+    }
+
+    // Case 2: Run Individual Test Case
+    if (testCase && typeof testCase === 'object') {
+      if (lang === 'sqlite') {
+        let expectedOut = null;
+        if (testCase.expectedColumns?.length > 0 || testCase.expectedRows?.length > 0) {
+          expectedOut = {
+            columns: testCase.expectedColumns || [],
+            rows: testCase.expectedRows || [],
+          };
+        } else if (testCase.expectedOutput) {
+          expectedOut = testCase.expectedOutput;
+        }
+
+        let ddl = schemaDdl || '';
+        if (testCase.input && testCase.input.trim()) {
+          ddl = ddl ? `${ddl}\n${testCase.input.trim()}` : testCase.input.trim();
+        }
+
+        const clientRes = await executionClient.executeSql({
+          dialect: 'sqlite',
+          schemaDdl: ddl,
+          query: code,
+          expectedOutput: expectedOut,
+          timeoutMs: tMs,
+        });
+
+        if (!clientRes.ok || !clientRes.data?.success) {
+          const error = new Error(clientRes.data?.message || 'SQL execution failed');
+          error.statusCode = clientRes.status || 500;
+          throw error;
+        }
+
+        const sqlRes = clientRes.data.data;
+        return {
+          verdict: sqlRes.verdict,
+          passed: sqlRes.verdict === 'ACCEPTED',
+          stdout: sqlRes.rows ? JSON.stringify(sqlRes.rows, null, 2) : '',
+          stderr: sqlRes.stderr || '',
+          columns: sqlRes.columns || [],
+          rows: sqlRes.rows || [],
+          executionTimeMs: sqlRes.executionTimeMs || 0,
+          actualOutput: sqlRes.rows ? JSON.stringify(sqlRes.rows) : '',
+          expectedOutput: testCase.expectedOutput || '',
+        };
+      }
+
+      const clientRes = await executionClient.executeCode({
+        language: lang,
+        code,
+        stdin: testCase.input || '',
+        expectedOutput: testCase.expectedOutput || null,
+        timeoutMs: tMs,
+        memoryLimitMb: mMb,
+      });
+
+      if (!clientRes.ok || !clientRes.data?.success) {
+        const error = new Error(clientRes.data?.message || 'Code execution failed');
+        error.statusCode = clientRes.status || 500;
+        throw error;
+      }
+
+      const runRes = clientRes.data.data;
+      return {
+        verdict: runRes.verdict,
+        passed: runRes.verdict === 'ACCEPTED',
+        stdout: runRes.stdout || '',
+        stderr: runRes.stderr || '',
+        exitCode: runRes.exitCode,
+        executionTimeMs: runRes.executionTimeMs || 0,
+        actualOutput: runRes.stdout || '',
+        expectedOutput: testCase.expectedOutput || '',
+      };
+    }
+
+    // Case 3: Ad-hoc Run with custom stdin or default
+    if (lang === 'sqlite') {
+      const clientRes = await executionClient.executeSql({
+        dialect: 'sqlite',
+        schemaDdl: schemaDdl || '',
+        query: code,
+        timeoutMs: tMs,
+      });
+
+      if (!clientRes.ok || !clientRes.data?.success) {
+        const error = new Error(clientRes.data?.message || 'SQL execution failed');
+        error.statusCode = clientRes.status || 500;
+        throw error;
+      }
+
+      const sqlRes = clientRes.data.data;
+      return {
+        verdict: sqlRes.verdict,
+        stdout: sqlRes.rows ? JSON.stringify(sqlRes.rows, null, 2) : '',
+        stderr: sqlRes.stderr || '',
+        columns: sqlRes.columns || [],
+        rows: sqlRes.rows || [],
+        executionTimeMs: sqlRes.executionTimeMs || 0,
+      };
+    }
+
+    const clientRes = await executionClient.executeCode({
+      language: lang,
+      code,
+      stdin: stdin || '',
+      timeoutMs: tMs,
+      memoryLimitMb: mMb,
+    });
+
+    if (!clientRes.ok || !clientRes.data?.success) {
+      const error = new Error(clientRes.data?.message || 'Code execution failed');
+      error.statusCode = clientRes.status || 500;
+      throw error;
+    }
+
+    const runRes = clientRes.data.data;
+    return {
+      verdict: runRes.verdict,
+      stdout: runRes.stdout || '',
+      stderr: runRes.stderr || '',
+      exitCode: runRes.exitCode,
+      executionTimeMs: runRes.executionTimeMs || 0,
+    };
+  }
+
+  /**
+   * Question validation utility returning detailed audit report
+   */
+  async validateQuestion(user, question) {
+    const errors = [];
+    const warnings = [];
+
+    if (!question || typeof question !== 'object') {
+      return { valid: false, errors: ['Question payload is required'], warnings: [] };
+    }
+
+    if (!question.questionText || !question.questionText.trim()) {
+      errors.push('Problem statement / question prompt is required.');
+    }
+
+    if (question.type === 'code' || question.type === 'sql') {
+      const cfg = question.codingConfig || {};
+      const testCases = cfg.testCases || [];
+      const enabledCases = testCases.filter((tc) => tc && tc.isEnabled !== false);
+
+      if (enabledCases.length === 0) {
+        errors.push('At least one enabled test case is required.');
+      }
+
+      const hasHidden = enabledCases.some((tc) => Boolean(tc.isHidden));
+      if (!hasHidden) {
+        warnings.push('No hidden test cases are configured. Adding hidden test cases is recommended for secure grading.');
+      }
+
+      const langs = cfg.allowedLanguages || [];
+      const approved = ['python', 'javascript', 'sqlite'];
+      if (!langs.some((l) => approved.includes(String(l).toLowerCase()))) {
+        errors.push(`At least one supported language (${approved.join(', ')}) must be enabled.`);
+      }
+
+      testCases.forEach((tc, idx) => {
+        const isSql = question.type === 'sql' || cfg.executionCategory === 'sql';
+        const hasOut = (tc.expectedOutput && String(tc.expectedOutput).trim().length > 0) ||
+          (isSql && (tc.expectedColumns?.length > 0 || tc.expectedRows?.length > 0));
+        if (!hasOut) {
+          errors.push(`Test case #${idx + 1} is missing an expected output.`);
+        }
+      });
+    }
+
+    return {
+      valid: errors.length === 0,
+      errors,
+      warnings,
+    };
   }
 
   async getApprovedTemplates() {

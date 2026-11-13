@@ -30,7 +30,7 @@ const logger = require('../utils/logger');
 // Import built-in Node.js crypto module for cryptographically secure random bytes and UUIDs
 const crypto = require('crypto');
 // Import AES-256-GCM recovery encryption and token hashing utilities
-const { encryptRecoveryToken, decryptRecoveryToken, hashToken } = require('../utils/sessionCrypto');
+const { encryptRecoveryToken, decryptRecoveryToken, hashToken, getActiveKeyVersion } = require('../utils/sessionCrypto');
 
 // Define AuthService class encapsulating authentication, registration, MFA, and session logic
 class AuthService {
@@ -3337,6 +3337,22 @@ class AuthService {
 
     const now = new Date();
 
+    // Explicit rejection of expired sessions (application-level defense against TTL sweeper latency)
+    if (session.expiresAt && new Date(session.expiresAt) <= now) {
+      if (session.status === 'active') {
+        await Session.findByIdAndUpdate(session._id, {
+          $set: {
+            status: 'revoked',
+            revokedAt: now,
+            revocationReason: 'session_expired',
+          },
+        });
+      }
+      const error = new Error('Session has expired. Please sign in again.');
+      error.statusCode = 401;
+      throw error;
+    }
+
     // Construct fresh JWT payload
     const tokenPayload = {
       id: user._id.toString(),
@@ -3355,11 +3371,16 @@ class AuthService {
       const newRefreshTokenHash = hashToken(newRefreshToken);
       const graceExpiresAt = new Date(now.getTime() + 30 * 1000); // 30-second recovery grace window
 
-      const encryptedReplacementToken = encryptRecoveryToken(newRefreshToken, {
-        familyId: session.familyId,
-        userId: user._id.toString(),
-        parentTokenHash: presentedHash,
-      });
+      const activeKeyVersion = getActiveKeyVersion();
+      const encryptedReplacementToken = encryptRecoveryToken(
+        newRefreshToken,
+        {
+          familyId: session.familyId,
+          userId: user._id.toString(),
+          parentTokenHash: presentedHash,
+        },
+        activeKeyVersion
+      );
 
       const rotationEntry = {
         tokenHash: presentedHash,
@@ -3375,12 +3396,13 @@ class AuthService {
         ? currentRotations.slice(0, currentRotations.length - 3).map((r) => r.tokenHash)
         : [];
 
-      // Atomic CAS update: only updates if currentTokenHash and status remain unchanged
+      // Atomic CAS update: only updates if currentTokenHash, status remain unchanged, and session has not expired
       const updatedSession = await Session.findOneAndUpdate(
         {
           _id: session._id,
           currentTokenHash: presentedHash,
           status: 'active',
+          expiresAt: { $gt: now },
         },
         {
           $set: {
@@ -3408,6 +3430,12 @@ class AuthService {
         const freshSession = await Session.findById(session._id);
         if (!freshSession || freshSession.status !== 'active') {
           const error = new Error('Session has been revoked. Please sign in again.');
+          error.statusCode = 401;
+          throw error;
+        }
+
+        if (freshSession.expiresAt && new Date(freshSession.expiresAt) <= now) {
+          const error = new Error('Session has expired. Please sign in again.');
           error.statusCode = 401;
           throw error;
         }

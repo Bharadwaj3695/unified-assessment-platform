@@ -30,7 +30,7 @@ const normalizeDob = (val) => {
   // Check if value is a numeric Excel date serial number
   if (typeof val === 'number') {
     // Excel numeric date conversion
-    // Convert Excel serial number (days since 1899-12-30) to JavaScript Date object
+    // Convert Excel serial number (Day since 1899-12-30) to JavaScript Date object
     const d = new Date(Math.round((val - 25569) * 86400 * 1000));
     // Verify the converted date is valid before returning YYYY-MM-DD slice
     return isNaN(d.getTime()) ? null : d.toISOString().slice(0, 10);

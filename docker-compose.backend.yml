@@ -1,0 +1,72 @@
+# UAP Backend & Database Modular Docker Compose Configuration
+# Usage: docker compose -f docker-compose.backend.yml up -d
+
+services:
+  uap-mongodb:
+    image: mongo:7.0-jammy
+    container_name: uap-mongodb
+    restart: unless-stopped
+    environment:
+      MONGO_INITDB_DATABASE: unified_assessment
+    volumes:
+      - uap_mongodb_data:/data/db
+    networks:
+      - uap-db-net
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  uap-backend:
+    image: uap-backend:latest
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.dev
+    container_name: uap-backend
+    restart: unless-stopped
+    ports:
+      - "5000:5000"
+    environment:
+      PORT: 5000
+      NODE_ENV: development
+      CLIENT_URL: http://localhost:5173
+      MONGODB_URI: mongodb://uap-mongodb:27017/unified_assessment
+      EXECUTION_SERVICE_URL: http://uap-code-executor:5050
+      EXECUTION_SERVICE_API_KEY: ${EXECUTION_SERVICE_API_KEY:-dev_uap_exec_internal_secret_key_32bytes!!}
+    depends_on:
+      uap-mongodb:
+        condition: service_healthy
+    volumes:
+      - ./backend:/app
+      - /app/node_modules
+      - uap_uploads_data:/app/uploads
+    networks:
+      - uap-public-net
+      - uap-db-net
+      - uap-exec-net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/api/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+networks:
+  uap-public-net:
+    name: uap-public-net
+    driver: bridge
+  uap-db-net:
+    name: uap-db-net
+    driver: bridge
+    internal: true
+  uap-exec-net:
+    name: uap-exec-net
+    driver: bridge
+
+volumes:
+  uap_mongodb_data:
+    name: unifiedassessmentplatformoriginal_uap_mongodb_data
+    external: true
+  uap_uploads_data:
+    name: unifiedassessmentplatformoriginal_uap_uploads_data
+    external: true

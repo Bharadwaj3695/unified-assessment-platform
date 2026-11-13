@@ -708,6 +708,152 @@ const seedPhase6AnalyticsData = async () => {
   // End ins02 check
   }
 
+  // 3b. Seed UAP Assignment 01 Programming & SQL Assessment for ins01 in draft/unassigned mode
+  let asmtAssignment01 = await Assessment.findOne({ title: 'UAP – Programming & SQL Assessment 01' });
+  if (!asmtAssignment01) {
+    asmtAssignment01 = await Assessment.create({
+      title: 'UAP – Programming & SQL Assessment 01',
+      description: 'Practical assessment covering Python programming, JavaScript problem-solving and SQLite query writing.',
+      category: 'Computer Science',
+      instructorId: ins01._id,
+      durationMinutes: 60,
+      totalPoints: 30,
+      passingScore: 60,
+      status: 'published',
+      accessType: 'public',
+      allowReview: true,
+    });
+
+    await Question.create([
+      {
+        assessmentId: asmtAssignment01._id,
+        orderIndex: 0,
+        type: 'code',
+        questionText: 'Given an array of integers, find the second-largest distinct element.\n\nConstraint:\nAt least two distinct values are guaranteed.',
+        points: 10,
+        codingConfig: {
+          executionCategory: 'code',
+          allowedLanguages: ['python'],
+          defaultLanguage: 'python',
+          starterCode: {
+            python: `import sys\n\ndef second_largest_distinct(nums):\n    # TODO: Implement solution to find the second-largest distinct element\n    pass\n\ndef main():\n    input_data = sys.stdin.read().split()\n    if not input_data:\n        return\n    n = int(input_data[0])\n    nums = [int(x) for x in input_data[1:n+1]]\n    print(second_largest_distinct(nums))\n\nif __name__ == '__main__':\n    main()\n`,
+          },
+          testCases: [
+            { input: '5\n10 5 8 10 3', expectedOutput: '8', isHidden: false, weight: 2, explanation: 'Sample public test case 1' },
+            { input: '6\n1 2 3 4 5 6', expectedOutput: '5', isHidden: false, weight: 2, explanation: 'Sample public test case 2' },
+            { input: '5\n9 9 7 7 5', expectedOutput: '7', isHidden: false, weight: 2, explanation: 'Sample public test case 3' },
+            { input: '5\n-10 -20 -5 -30 -15', expectedOutput: '-10', isHidden: true, weight: 2, explanation: 'Hidden: Negative numbers handling' },
+            { input: '7\n100 50 100 75 25 75 10', expectedOutput: '75', isHidden: true, weight: 2, explanation: 'Hidden: Multiple duplicates and ordering' },
+          ],
+        },
+      },
+      {
+        assessmentId: asmtAssignment01._id,
+        orderIndex: 1,
+        type: 'code',
+        questionText: 'Given a sentence, calculate the frequency of each word.\n\nRules:\n- Case-insensitive comparison.\n- Ignore punctuation.\n- Sort words alphabetically.\n- Print each word followed by its frequency, separated by one space.\n- Print one word per line.',
+        points: 10,
+        codingConfig: {
+          executionCategory: 'code',
+          allowedLanguages: ['javascript'],
+          defaultLanguage: 'javascript',
+          starterCode: {
+            javascript: `const fs = require('fs');\n\nfunction wordFrequency(text) {\n  // TODO: Calculate word frequencies ignoring case and punctuation, sorted alphabetically\n}\n\nfunction main() {\n  const input = fs.readFileSync(0, 'utf-8');\n  if (!input || !input.trim()) return;\n  wordFrequency(input);\n}\n\nmain();\n`,
+          },
+          testCases: [
+            { input: 'Hello world hello JavaScript world', expectedOutput: 'hello 2\njavascript 1\nworld 2', isHidden: false, weight: 2, explanation: 'Sample public test case 1' },
+            { input: 'apple banana apple', expectedOutput: 'apple 2\nbanana 1', isHidden: false, weight: 2, explanation: 'Sample public test case 2' },
+            { input: 'Cat cat DOG dog dog', expectedOutput: 'cat 2\ndog 3', isHidden: false, weight: 2, explanation: 'Sample public test case 3' },
+            { input: 'Hello, HELLO! World.', expectedOutput: 'hello 2\nworld 1', isHidden: true, weight: 2, explanation: 'Hidden: Punctuation and mixed casing' },
+            { input: 'one two three two one one', expectedOutput: 'one 3\nthree 1\ntwo 2', isHidden: true, weight: 2, explanation: 'Hidden: Number words frequency' },
+          ],
+        },
+      },
+      {
+        assessmentId: asmtAssignment01._id,
+        orderIndex: 2,
+        type: 'sql',
+        questionText: 'Write an SQLite query to retrieve employees whose salary is greater than the average salary of their own department.\n\nRequired output columns, in order:\n- name\n- department\n- salary\n\nRequired ordering:\n- department ascending\n- salary descending\n- name ascending',
+        points: 10,
+        codingConfig: {
+          executionCategory: 'sql',
+          sqlDialect: 'sqlite',
+          allowedLanguages: ['sqlite'],
+          defaultLanguage: 'sqlite',
+          schemaDdl: `CREATE TABLE employees (\n    id INTEGER PRIMARY KEY,\n    name TEXT NOT NULL,\n    department TEXT NOT NULL,\n    salary REAL NOT NULL\n);\n\nINSERT INTO employees VALUES\n(1, 'Alice', 'IT', 60000),\n(2, 'Bob', 'IT', 40000),\n(3, 'Charlie', 'IT', 80000),\n(4, 'David', 'HR', 30000),\n(5, 'Eva', 'HR', 50000),\n(6, 'Frank', 'HR', 40000);`,
+          starterCode: {
+            sqlite: `-- Write an SQLite query to retrieve employees whose salary is greater than the average salary of their own department.\n-- Output columns: name, department, salary\n-- Order by: department ASC, salary DESC, name ASC\n\nSELECT name, department, salary\nFROM employees\n-- Complete query here\n;\n`,
+          },
+          testCases: [
+            {
+              input: '',
+              expectedColumns: ['name', 'department', 'salary'],
+              expectedRows: [['Eva', 'HR', 50000], ['Charlie', 'IT', 80000]],
+              expectedOutput: JSON.stringify({ columns: ['name', 'department', 'salary'], rows: [['Eva', 'HR', 50000], ['Charlie', 'IT', 80000]], ordered: true }),
+              isHidden: false,
+              weight: 2,
+              explanation: 'Sample public test case 1 (default seed data)',
+            },
+            {
+              input: `DELETE FROM employees;\nINSERT INTO employees VALUES (1, 'John', 'Sales', 20000), (2, 'Mary', 'Sales', 40000), (3, 'Sam', 'Sales', 60000);`,
+              expectedColumns: ['name', 'department', 'salary'],
+              expectedRows: [['Sam', 'Sales', 60000]],
+              expectedOutput: JSON.stringify({ columns: ['name', 'department', 'salary'], rows: [['Sam', 'Sales', 60000]], ordered: true }),
+              isHidden: false,
+              weight: 2,
+              explanation: 'Public Case 2: One department with salaries 20000, 40000 and 60000.',
+            },
+            {
+              input: `DELETE FROM employees;\nINSERT INTO employees VALUES (1, 'A', 'Finance', 10000), (2, 'B', 'Finance', 30000), (3, 'C', 'Marketing', 50000), (4, 'D', 'Marketing', 90000);`,
+              expectedColumns: ['name', 'department', 'salary'],
+              expectedRows: [['B', 'Finance', 30000], ['D', 'Marketing', 90000]],
+              expectedOutput: JSON.stringify({ columns: ['name', 'department', 'salary'], rows: [['B', 'Finance', 30000], ['D', 'Marketing', 90000]], ordered: true }),
+              isHidden: false,
+              weight: 2,
+              explanation: 'Public Case 3: Multiple departments with different average salaries.',
+            },
+            {
+              input: `DELETE FROM employees;\nINSERT INTO employees VALUES (1, 'Kelly', 'Support', 50000), (2, 'Liam', 'Support', 50000), (3, 'Mia', 'Support', 50000);`,
+              expectedColumns: ['name', 'department', 'salary'],
+              expectedRows: [],
+              expectedOutput: JSON.stringify({ columns: ['name', 'department', 'salary'], rows: [], ordered: true }),
+              isHidden: true,
+              weight: 1,
+              explanation: 'Hidden: Equal salaries within a department (none strictly greater).',
+            },
+            {
+              input: `DELETE FROM employees;\nINSERT INTO employees VALUES (1, 'SoloA', 'Legal', 90000);`,
+              expectedColumns: ['name', 'department', 'salary'],
+              expectedRows: [],
+              expectedOutput: JSON.stringify({ columns: ['name', 'department', 'salary'], rows: [], ordered: true }),
+              isHidden: true,
+              weight: 1,
+              explanation: 'Hidden: Departments containing only one employee (salary equals average, so none qualify).',
+            },
+            {
+              input: `DELETE FROM employees;\nINSERT INTO employees VALUES (1, 'Dave', 'DeptA', 60000), (2, 'Don', 'DeptA', 20000), (3, 'Victor', 'DeptB', 60000), (4, 'Walter', 'DeptB', 100000);`,
+              expectedColumns: ['name', 'department', 'salary'],
+              expectedRows: [['Dave', 'DeptA', 60000], ['Walter', 'DeptB', 100000]],
+              expectedOutput: JSON.stringify({ columns: ['name', 'department', 'salary'], rows: [['Dave', 'DeptA', 60000], ['Walter', 'DeptB', 100000]], ordered: true }),
+              isHidden: true,
+              weight: 1,
+              explanation: 'Hidden: Overlapping salary values across departments.',
+            },
+            {
+              input: `DELETE FROM employees;\nINSERT INTO employees VALUES (1, 'Zara', 'R&D', 75000), (2, 'Alex', 'R&D', 75000), (3, 'Ben', 'R&D', 40000);`,
+              expectedColumns: ['name', 'department', 'salary'],
+              expectedRows: [['Alex', 'R&D', 75000], ['Zara', 'R&D', 75000]],
+              expectedOutput: JSON.stringify({ columns: ['name', 'department', 'salary'], rows: [['Alex', 'R&D', 75000], ['Zara', 'R&D', 75000]], ordered: true }),
+              isHidden: true,
+              weight: 1,
+              explanation: 'Hidden: Duplicate salary tie-break by name ascending (Alex before Zara).',
+            },
+          ],
+        },
+      },
+    ]);
+  }
+
   // 4. Submissions for std01 with consecutive dates for streak calculation
   // Check if student 01 already has a submission record for assessment 1
   const existingSub1 = await Submission.findOne({ studentId: std01._id, assessmentId: asmt1._id });

@@ -240,14 +240,14 @@ const NotificationPopover = () => {
     const diffMins = Math.floor(diffMs / 60000);
     // Compute elapsed hours
     const diffHours = Math.floor(diffMins / 60);
-    // Compute elapsed days
-    const diffDays = Math.floor(diffHours / 24);
+    // Compute elapsed Day
+    const diffDay = Math.floor(diffHours / 24);
 
     // Return human-friendly relative duration
     if (diffMins < 1) return 'Just now';
     if (diffMins < 60) return `${diffMins}m ago`;
     if (diffHours < 24) return `${diffHours}h ago`;
-    if (diffDays === 1) return 'Yesterday';
+    if (diffDay === 1) return 'Yesterday';
     // Format older dates with short month and day
     return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
   };

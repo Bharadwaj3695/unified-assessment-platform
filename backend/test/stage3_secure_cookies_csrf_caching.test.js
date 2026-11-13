@@ -8,6 +8,8 @@ const app = require('../src/app');
 const env = require('../src/config/env');
 const { User, Session, AuditLog, Submission, Assessment } = require('../src/models');
 const { hashToken } = require('../src/utils/sessionCrypto');
+const { generateRefreshToken } = require('../src/utils/jwt');
+const { generateCsrfToken } = require('../src/utils/cookie');
 const authService = require('../src/services/auth.service');
 
 describe('Stage 3: Secure Cookies, Session Lifecycle, CSRF & HTTP Caching', () => {
@@ -347,6 +349,41 @@ describe('Stage 3: Secure Cookies, Session Lifecycle, CSRF & HTTP Caching', () =
 
       // Restore password
       await authService.changePassword(studentUser._id, 'Student@NewPass123', 'Student@123');
+    });
+
+    it('4.3 Stale refresh cookie for nonexistent user (e.g. after DB restart) must return 401 and clear cookies', async () => {
+      const nonExistentUserId = new mongoose.Types.ObjectId();
+      const staleRefreshToken = generateRefreshToken({
+        id: nonExistentUserId.toString(),
+        role: 'student',
+        email: 'ghost_student@uap.edu',
+      });
+      const csrfToken = generateCsrfToken();
+
+      const res = await fetch(`${baseUrl}/api/auth/refresh`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Cookie: `uap_refresh=${staleRefreshToken}; uap_csrf=${csrfToken}`,
+          'X-CSRF-Token': csrfToken,
+        },
+      });
+
+      assert.strictEqual(res.status, 401);
+      const data = await res.json();
+      assert.strictEqual(data.message, 'User not found');
+
+      // Verify that the stale cookies are cleared on the client via Set-Cookie headers
+      const setCookies = res.headers.getSetCookie ? res.headers.getSetCookie() : [res.headers.get('set-cookie')];
+      const clearedRefresh = setCookies.filter((c) => c && c.includes('uap_refresh='));
+      const clearedCsrf = setCookies.find((c) => c && c.includes('uap_csrf='));
+
+      assert.ok(clearedRefresh.length >= 1, 'Must emit Set-Cookie clearing uap_refresh');
+      assert.ok(clearedCsrf, 'Must emit Set-Cookie clearing uap_csrf');
+      assert.match(clearedRefresh[0], /Max-Age=0/i);
+      assert.match(clearedRefresh[0], /1970/i);
+      assert.match(clearedCsrf, /Max-Age=0/i);
+      assert.match(clearedCsrf, /1970/i);
     });
   });
 

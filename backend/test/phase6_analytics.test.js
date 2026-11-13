@@ -370,7 +370,7 @@ describe('Phase 6 Verification Suite: Performance, Leaderboard, Streaks & Analyt
     assert.ok(trends[0].date);
   });
 
-  // 7. Streak System: Same-Day Multiple, Consecutive Days, Missed-Day Reset, Longest Streak
+  // 7. Streak System: Same-Day Multiple, Consecutive Day, Missed-Day Reset, Longest Streak
   it('9. should handle same-day multiple assessments without double-counting streak', () => {
     const sameDay = [
       new Date('2026-09-01T10:00:00.000Z'),
@@ -381,7 +381,7 @@ describe('Phase 6 Verification Suite: Performance, Leaderboard, Streaks & Analyt
     assert.strictEqual(streak.longestStreak, 1, 'Multiple same-day exams must count as 1 day');
   });
 
-  it('10. should correctly calculate longest streak with missed days in between', () => {
+  it('10. should correctly calculate longest streak with missed Day in between', () => {
     const dates = [
       new Date('2026-08-01T10:00:00.000Z'),
       new Date('2026-08-02T10:00:00.000Z'),
@@ -391,7 +391,7 @@ describe('Phase 6 Verification Suite: Performance, Leaderboard, Streaks & Analyt
       new Date('2026-08-06T10:00:00.000Z'), // 2-day streak
     ];
     const streak = analyticsService.calculateStreaks(dates);
-    assert.strictEqual(streak.longestStreak, 3, 'Longest historical streak was 3 days');
+    assert.strictEqual(streak.longestStreak, 3, 'Longest historical streak was 3 Day');
     assert.strictEqual(streak.currentStreak, 0, 'Current streak should be 0 because last active was in August');
   });
 
@@ -400,22 +400,22 @@ describe('Phase 6 Verification Suite: Performance, Leaderboard, Streaks & Analyt
     const dayMs = 86400000;
     const today = new Date(now);
     const yesterday = new Date(now - dayMs);
-    const twoDaysAgo = new Date(now - 2 * dayMs);
+    const twoDayAgo = new Date(now - 2 * dayMs);
 
-    const activeDates = [twoDaysAgo, yesterday, today];
+    const activeDates = [twoDayAgo, yesterday, today];
     const streak = analyticsService.calculateStreaks(activeDates);
     assert.strictEqual(streak.currentStreak, 3);
     assert.strictEqual(streak.longestStreak, 3);
     assert.strictEqual(streak.streakActiveToday, true);
   });
 
-  it('12. should reset current streak to 0 when last activity was 2 or more days ago', () => {
+  it('12. should reset current streak to 0 when last activity was 2 or more Day ago', () => {
     const now = Date.now();
     const dayMs = 86400000;
-    const threeDaysAgo = new Date(now - 3 * dayMs);
-    const twoDaysAgo = new Date(now - 2 * dayMs);
+    const threeDayAgo = new Date(now - 3 * dayMs);
+    const twoDayAgo = new Date(now - 2 * dayMs);
 
-    const brokenDates = [threeDaysAgo, twoDaysAgo];
+    const brokenDates = [threeDayAgo, twoDayAgo];
     const streak = analyticsService.calculateStreaks(brokenDates);
     assert.strictEqual(streak.currentStreak, 0, 'Missed yesterday means current streak resets to 0');
     assert.strictEqual(streak.longestStreak, 2);
