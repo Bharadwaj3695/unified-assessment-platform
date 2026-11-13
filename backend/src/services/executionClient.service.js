@@ -98,7 +98,7 @@ class ExecutionClientService {
   /**
    * Execute code or SQL query against a complete suite of test cases
    */
-  async executeSuite({ language, code, testCases, schemaDdl = '', timeoutMs = 2000, memoryLimitMb = 256 }) {
+  async executeSuite({ language, code, testCases, schemaDdl = '', timeoutMs = 2000, memoryLimitMb = 256, isFaculty = false }) {
     return await this._request('/api/v1/execute-suite', 'POST', {
       language,
       code,
@@ -106,6 +106,7 @@ class ExecutionClientService {
       testCases,
       timeoutMs,
       memoryLimitMb,
+      isFaculty,
     });
   }
 

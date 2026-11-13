@@ -133,10 +133,15 @@ const EvaluationStudio = () => {
     fetchSubmission();
   }, [fetchSubmission]);
 
+  // Score input errors state (tracks inline validation errors per question)
+  const [scoreErrors, setScoreErrors] = useState({});
+  const [executingTestsByQuestion, setExecutingTestsByQuestion] = useState({});
+  const [testResultsByQuestion, setTestResultsByQuestion] = useState({});
+
   const questions = submission?.assessment?.questions || [];
   const subjectiveQuestions = useMemo(() => {
     return questions.filter(
-      (q) => q.type === 'short_answer' || q.type === 'long_answer' || q.type === 'file_upload'
+      (q) => q.type === 'short_answer' || q.type === 'long_answer' || q.type === 'file_upload' || q.type === 'code' || q.type === 'sql'
     );
   }, [questions]);
 
@@ -167,6 +172,10 @@ const EvaluationStudio = () => {
   const passingScore = submission?.assessment?.passingScore || 60;
   const isPassing = livePercentage >= passingScore;
 
+  const hasScoreErrors = useMemo(() => {
+    return Object.values(scoreErrors).some((err) => Boolean(err));
+  }, [scoreErrors]);
+
   const handleFeedbackChange = (qId, field, value) => {
     setQuestionFeedback((prev) => ({
       ...prev,
@@ -175,9 +184,84 @@ const EvaluationStudio = () => {
         [field]: value,
       },
     }));
+
+    if (field === 'pointsAwarded') {
+      const q = questions.find((item) => (item._id || item.id).toString() === qId.toString());
+      const maxPts = q ? q.points : 100;
+      let error = null;
+
+      if (value !== '' && value !== undefined && value !== null) {
+        const num = Number(value);
+        if (isNaN(num)) {
+          error = 'Score must be a valid number';
+        } else if (num < 0) {
+          error = 'Award score cannot be negative';
+        } else if (num > maxPts) {
+          error = `Award score (${num}) cannot exceed maximum allowed marks (${maxPts})`;
+        } else if (Math.round(num * 100) / 100 !== num) {
+          error = 'Award score cannot exceed 2 decimal places';
+        }
+      }
+
+      setScoreErrors((prev) => ({
+        ...prev,
+        [qId]: error,
+      }));
+    }
+  };
+
+  const handleRunStudentCodeTests = async (q) => {
+    const qId = (q._id || q.id).toString();
+    const studentAns = studentAnswers[qId];
+    const code = typeof studentAns === 'object' ? studentAns?.code : (typeof studentAns === 'string' ? studentAns : '');
+    const lang = (typeof studentAns === 'object' && studentAns?.language) ? studentAns.language : (q.codingConfig?.defaultLanguage || 'python');
+
+    if (!code || !code.trim()) {
+      toast.error('Student did not submit code for this question');
+      return;
+    }
+
+    const testCases = q.codingConfig?.testCases || [];
+    if (testCases.length === 0) {
+      toast.error('No test cases configured for this question');
+      return;
+    }
+
+    setExecutingTestsByQuestion((prev) => ({ ...prev, [qId]: true }));
+    try {
+      const res = await instructorService.testCode({
+        language: lang,
+        code,
+        schemaDdl: q.codingConfig?.schemaDdl || '',
+        testCases,
+        timeoutMs: q.codingConfig?.cpuTimeLimitMs || 2000,
+        memoryLimitMb: q.codingConfig?.memoryLimitMb || 256,
+      });
+
+      const data = res.data || res;
+      setTestResultsByQuestion((prev) => ({ ...prev, [qId]: data }));
+      toast.success(`Evaluated: ${data.passedCount}/${data.totalCount} test cases passed`);
+    } catch (err) {
+      toast.error(err.message || 'Execution error running test suite');
+    } finally {
+      setExecutingTestsByQuestion((prev) => ({ ...prev, [qId]: false }));
+    }
+  };
+
+  const handleApplyTestCaseScore = (qId, maxPoints) => {
+    const testResult = testResultsByQuestion[qId];
+    if (!testResult || testResult.totalCount === 0) return;
+    const computedScore = Math.round((testResult.passedCount / testResult.totalCount) * maxPoints * 10) / 10;
+    handleFeedbackChange(qId, 'pointsAwarded', String(computedScore));
+    toast.success(`Applied score: ${computedScore} / ${maxPoints} points based on automated test cases`);
   };
 
   const handleSaveEvaluation = async (isFinal) => {
+    if (hasScoreErrors) {
+      toast.error('Please resolve score validation errors before saving evaluation.');
+      return;
+    }
+
     // Validation
     const feedbackPayload = {};
     for (const q of subjectiveQuestions) {
@@ -198,7 +282,7 @@ const EvaluationStudio = () => {
           return;
         }
         if (pts > q.points) {
-          toast.error(`Awarded points (${pts}) cannot exceed max question points (${q.points}).`);
+          toast.error(`Awarded points (${pts}) cannot exceed maximum allowed points (${q.points}).`);
           return;
         }
         feedbackPayload[qId] = {
@@ -310,6 +394,7 @@ const EvaluationStudio = () => {
             size="md"
             icon={Save}
             loading={isSaving}
+            disabled={isSaving || hasScoreErrors}
             loadingText="Saving Draft..."
             onClick={() => handleSaveEvaluation(false)}
           >
@@ -320,7 +405,7 @@ const EvaluationStudio = () => {
             variant="primary"
             size="md"
             icon={Send}
-            disabled={isSaving}
+            disabled={isSaving || hasScoreErrors}
             onClick={() => setConfirmModal(true)}
           >
             Finalize Evaluation
@@ -533,17 +618,44 @@ const EvaluationStudio = () => {
                       </p>
                     )
                   ) : q.type === 'code' || q.type === 'sql' ? (
-                    <div className="space-y-2">
-                      <div className="flex items-center gap-2">
-                        <span className="text-[11px] font-semibold text-[#64748B] dark:text-[#94A3B8] uppercase">
-                          Language / Dialect:
-                        </span>
-                        <Badge variant="peach" size="sm">
-                          {typeof studentAnswer === 'object' && studentAnswer?.language
-                            ? studentAnswer.language.toUpperCase()
-                            : (q.codingConfig?.language ? q.codingConfig.language.toUpperCase() : 'CODE')}
-                        </Badge>
+                    <div className="space-y-3">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div className="flex items-center gap-2">
+                          <span className="text-[11px] font-semibold text-[#64748B] dark:text-[#94A3B8] uppercase">
+                            Language / Dialect:
+                          </span>
+                          <Badge variant="peach" size="sm">
+                            {typeof studentAnswer === 'object' && studentAnswer?.language
+                              ? studentAnswer.language.toUpperCase()
+                              : (q.codingConfig?.language ? q.codingConfig.language.toUpperCase() : 'CODE')}
+                          </Badge>
+                        </div>
+
+                        {/* Automated Test Suite Evaluation Button */}
+                        <div className="flex items-center gap-2">
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            loading={Boolean(executingTestsByQuestion[qId])}
+                            disabled={Boolean(executingTestsByQuestion[qId])}
+                            onClick={() => handleRunStudentCodeTests(q)}
+                            className="text-xs text-[#E05D38] border-[#E05D38]/30 hover:bg-[#FFF4ED]"
+                          >
+                            Run Test Suite
+                          </Button>
+                          {testResultsByQuestion[qId] && (
+                            <button
+                              type="button"
+                              onClick={() => handleApplyTestCaseScore(qId, q.points)}
+                              className="px-2.5 py-1 rounded-lg text-xs font-semibold bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 hover:bg-emerald-100 transition-colors cursor-pointer"
+                            >
+                              Auto-score: {testResultsByQuestion[qId].passedCount}/{testResultsByQuestion[qId].totalCount} Passed
+                            </button>
+                          )}
+                        </div>
                       </div>
+
                       <pre className="p-3 rounded-xl bg-slate-900 text-slate-100 font-mono text-xs overflow-x-auto whitespace-pre leading-relaxed border border-slate-800">
                         <code>
                           {typeof studentAnswer === 'object' && studentAnswer?.code !== undefined
@@ -551,6 +663,37 @@ const EvaluationStudio = () => {
                             : (typeof studentAnswer === 'string' ? studentAnswer : '(No code submitted)')}
                         </code>
                       </pre>
+
+                      {/* Automated Test Run Results Table if executed */}
+                      {testResultsByQuestion[qId] && (
+                        <div className="p-3 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/40 space-y-2">
+                          <div className="flex items-center justify-between text-xs font-bold text-slate-700 dark:text-slate-300">
+                            <span>Automated Test Evaluation: {testResultsByQuestion[qId].verdict}</span>
+                            <span className="text-[11px] font-normal text-slate-500">
+                              {testResultsByQuestion[qId].passedCount} of {testResultsByQuestion[qId].totalCount} test cases passed
+                            </span>
+                          </div>
+                          <div className="space-y-1 max-h-48 overflow-y-auto">
+                            {(testResultsByQuestion[qId].testCases || []).map((tcr, tcrIdx) => (
+                              <div
+                                key={tcrIdx}
+                                className={`p-2 rounded-lg text-xs font-mono border flex items-center justify-between ${
+                                  tcr.passed
+                                    ? 'bg-emerald-50/40 border-emerald-200 text-emerald-900 dark:bg-emerald-950/20 dark:text-emerald-200'
+                                    : 'bg-rose-50/40 border-rose-200 text-rose-900 dark:bg-rose-950/20 dark:text-rose-200'
+                                }`}
+                              >
+                                <span className="font-sans font-bold">
+                                  {tcr.description || `Case #${tcrIdx + 1}`} ({tcr.isHidden ? 'Hidden' : 'Public'})
+                                </span>
+                                <span className="font-sans font-semibold">
+                                  {tcr.passed ? '✓ Pass' : `✗ Fail: expected ${tcr.expectedOutput || 'rows'}, got ${tcr.actualOutput || 'differed'}`}
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
                     </div>
                   ) : null}
                 </div>
@@ -563,22 +706,33 @@ const EvaluationStudio = () => {
                         <Award className="w-3.5 h-3.5 mr-1.5 text-[#E05D38]" />
                         Award Score (0 to {q.points} Points) *
                       </label>
-                      <div className="flex items-center space-x-2">
-                        <input
-                          type="number"
-                          min="0"
-                          max={q.points}
-                          step="0.5"
-                          value={fb.pointsAwarded}
-                          onChange={(e) =>
-                            handleFeedbackChange(qId, 'pointsAwarded', e.target.value)
-                          }
-                          placeholder={`0 - ${q.points}`}
-                          className="w-24 px-3 py-1.5 text-xs text-center font-bold bg-white dark:bg-[#12161F] border border-[#E05D38]/50 rounded-xl focus:outline-none focus:border-[#E05D38] focus:ring-2 focus:ring-[#E05D38]/20 text-[#1F2937] dark:text-[#F9FAFB]"
-                        />
-                        <span className="text-xs font-semibold text-[#64748B] dark:text-[#94A3B8]">
-                          / {q.points} pts
-                        </span>
+                      <div className="flex flex-col items-end">
+                        <div className="flex items-center space-x-2">
+                          <input
+                            type="number"
+                            min="0"
+                            max={q.points}
+                            step="0.5"
+                            value={fb.pointsAwarded}
+                            onChange={(e) =>
+                              handleFeedbackChange(qId, 'pointsAwarded', e.target.value)
+                            }
+                            placeholder={`0 - ${q.points}`}
+                            className={`w-28 px-3 py-1.5 text-xs text-center font-bold bg-white dark:bg-[#12161F] rounded-xl focus:outline-none focus:ring-2 text-[#1F2937] dark:text-[#F9FAFB] ${
+                              scoreErrors[qId]
+                                ? 'border-2 border-rose-500 focus:border-rose-500 focus:ring-rose-500/20 text-rose-600'
+                                : 'border border-[#E05D38]/50 focus:border-[#E05D38] focus:ring-[#E05D38]/20'
+                            }`}
+                          />
+                          <span className="text-xs font-semibold text-[#64748B] dark:text-[#94A3B8]">
+                            / {q.points} pts
+                          </span>
+                        </div>
+                        {scoreErrors[qId] && (
+                          <p className="text-[11px] text-rose-600 dark:text-rose-400 font-semibold mt-1 text-right">
+                            {scoreErrors[qId]}
+                          </p>
+                        )}
                       </div>
                     </div>
 
@@ -1009,6 +1163,7 @@ const EvaluationStudio = () => {
               variant="primary"
               size="sm"
               loading={isSaving}
+              disabled={isSaving || hasScoreErrors}
               loadingText="Publishing Grade..."
               onClick={() => handleSaveEvaluation(true)}
             >

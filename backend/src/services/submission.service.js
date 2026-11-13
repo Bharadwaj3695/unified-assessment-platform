@@ -165,24 +165,35 @@ class SubmissionService {
         ? assignedQuestions.reduce((sum, q) => sum + (q.points || 5), 0)
         : assessment.totalPoints || 100;
 
-    const submission = await Submission.create({
-      studentId,
-      assessmentId,
-      answers: {},
-      score: 0,
-      autoScore: 0,
-      manualScore: 0,
-      finalScore: 0,
-      totalPoints: calculatedTotalPoints,
-      percentage: 0,
-      passed: false,
-      status: 'in_progress',
-      resultStatus: 'pending_evaluation',
-      evaluationStatus: 'pending',
-      startedAt,
-      deadlineAt,
-      assignedQuestionIds,
-    });
+    let submission;
+    try {
+      submission = await Submission.create({
+        studentId,
+        assessmentId,
+        answers: {},
+        score: 0,
+        autoScore: 0,
+        manualScore: 0,
+        finalScore: 0,
+        totalPoints: calculatedTotalPoints,
+        percentage: 0,
+        passed: false,
+        status: 'in_progress',
+        resultStatus: 'pending_evaluation',
+        evaluationStatus: 'pending',
+        startedAt,
+        deadlineAt,
+        assignedQuestionIds,
+      });
+    } catch (createErr) {
+      if (createErr.code === 11000) {
+        existing = await Submission.findOne({ studentId, assessmentId });
+        if (existing) {
+          return existing;
+        }
+      }
+      throw createErr;
+    }
 
     if (assessment.proctoringEnabled) {
       const session = await proctoringService.createSession({

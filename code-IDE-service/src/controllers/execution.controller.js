@@ -105,6 +105,7 @@ class ExecutionController {
         testCases: req.body.testCases,
         timeoutMs: req.body.timeoutMs,
         memoryLimitMb: req.body.memoryLimitMb,
+        isFaculty: Boolean(req.body.isFaculty),
       });
 
       return res.status(200).json({

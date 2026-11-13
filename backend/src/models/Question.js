@@ -18,6 +18,10 @@ const testCaseSchema = new mongoose.Schema(
     weight: { type: Number, default: 1, min: 1 },
     // Explanatory note or problem rationale
     explanation: { type: String, default: '' },
+    // Short title / test case description (e.g. TC01 - Basic positive integers)
+    description: { type: String, default: '' },
+    // Enable or disable test case from evaluation
+    isEnabled: { type: Boolean, default: true },
   },
   { _id: true }
 );
@@ -25,6 +29,14 @@ const testCaseSchema = new mongoose.Schema(
 // Sub-schema defining runtime environment and execution limits for coding questions
 const codingConfigSchema = new mongoose.Schema(
   {
+    // Problem configuration metadata
+    problemTitle: { type: String, default: '' },
+    problemDescription: { type: String, default: '' },
+    constraints: { type: String, default: '' },
+    inputFormat: { type: String, default: '' },
+    outputFormat: { type: String, default: '' },
+    sampleInput: { type: String, default: '' },
+    sampleOutput: { type: String, default: '' },
     // High-level category: programming language runtime ('code') vs isolated relational DB ('sql')
     executionCategory: {
       type: String,

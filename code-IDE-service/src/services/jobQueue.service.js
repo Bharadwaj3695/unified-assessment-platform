@@ -87,7 +87,7 @@ class JobQueueService {
   /**
    * Internal suite execution processor
    */
-  async _processSuite({ language, code, testCases, timeoutMs, memoryLimitMb, schemaDdl = '' }) {
+  async _processSuite({ language, code, testCases, timeoutMs, memoryLimitMb, schemaDdl = '', isFaculty = false }) {
     const results = [];
     let passedCount = 0;
     let totalWeight = 0;
@@ -126,12 +126,14 @@ class JobQueueService {
         passedWeight += weight;
       }
 
+      const shouldMask = Boolean(tc.isHidden) && !isFaculty;
+
       results.push({
         testCaseIndex: i,
-        input: tc.isHidden ? '[HIDDEN]' : tc.input,
-        expectedOutput: tc.isHidden ? '[HIDDEN]' : tc.expectedOutput,
-        actualOutput: tc.isHidden ? (passed ? '[HIDDEN]' : 'Output differed') : runResult.stdout,
-        stderr: tc.isHidden ? '' : (runResult.stderr || ''),
+        input: shouldMask ? '[HIDDEN]' : tc.input,
+        expectedOutput: shouldMask ? '[HIDDEN]' : tc.expectedOutput,
+        actualOutput: shouldMask ? (passed ? '[HIDDEN]' : 'Output differed') : runResult.stdout,
+        stderr: shouldMask ? '' : (runResult.stderr || ''),
         passed,
         verdict: runResult.verdict,
         executionTimeMs: runResult.executionTimeMs,

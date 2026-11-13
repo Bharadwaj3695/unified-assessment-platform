@@ -13,8 +13,10 @@ import Modal from '../../components/ui/Modal';
 import Spinner from '../../components/ui/Spinner';
 import PageLoader from '../../components/ui/PageLoader';
 import ErrorState from '../../components/ui/ErrorState';
+import EmptyState from '../../components/ui/EmptyState';
 import ProgressBar from '../../components/ui/ProgressBar';
 import CodeEditor from '../../components/common/CodeEditor';
+import StudentCodeIDE from '../../components/student/StudentCodeIDE';
 import {
   Clock,
   CheckCircle,
@@ -335,6 +337,7 @@ const Attempt = () => {
   const currentQuestion = questions[currentIdx];
   const totalQuestions = questions.length;
   const isLastQuestion = totalQuestions > 0 && currentIdx === totalQuestions - 1;
+  const isCodingQuestion = Boolean(currentQuestion && (currentQuestion.type === 'code' || currentQuestion.type === 'sql'));
 
   const isQuestionAnswered = (ans) => {
     if (ans === undefined || ans === null) return false;
@@ -868,7 +871,7 @@ const Attempt = () => {
   }
 
   return (
-    <div className="max-w-6xl mx-auto space-y-6 pb-12">
+    <div className={`${isCodingQuestion ? 'max-w-7xl' : 'max-w-6xl'} mx-auto space-y-6 pb-12`}>
       {/* Sticky Top Bar: Exam Title, Progress & Server Timer */}
       <div className="sticky top-0 z-30 bg-white/95 dark:bg-[#1A202C]/95 backdrop-blur-md border border-[#EBE3D8] dark:border-[#2D3748] py-2.5 sm:py-3 px-3 sm:px-6 rounded-2xl shadow-warm-xs transition-all">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 sm:gap-4">
@@ -988,9 +991,9 @@ const Attempt = () => {
       </div>
 
       {/* Main Attempt Grid: Question Engine + Navigation Palette */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-        {/* Left 8 Cols: Active Question Workspace */}
-        <div className="lg:col-span-8 space-y-6">
+      <div className={`grid grid-cols-1 ${isCodingQuestion ? 'xl:grid-cols-12' : 'lg:grid-cols-12'} gap-6`}>
+        {/* Active Question Workspace */}
+        <div className={`${isCodingQuestion ? 'xl:col-span-9 lg:col-span-8' : 'lg:col-span-8'} space-y-6`}>
           {currentQuestion ? (
             <Card>
               {/* Question Header */}
@@ -1022,12 +1025,14 @@ const Attempt = () => {
                 </div>
               </div>
 
-              {/* Question Prompt */}
-              <div className="py-5">
-                <h3 className="text-base sm:text-lg font-semibold text-[#1F2937] dark:text-[#F9FAFB] leading-relaxed">
-                  {currentQuestion.questionText}
-                </h3>
-              </div>
+              {/* Question Prompt (shown for standard questions; coding questions render detailed specifications inside IDE) */}
+              {!isCodingQuestion && (
+                <div className="py-5">
+                  <h3 className="text-base sm:text-lg font-semibold text-[#1F2937] dark:text-[#F9FAFB] leading-relaxed">
+                    {currentQuestion.questionText}
+                  </h3>
+                </div>
+              )}
 
               {/* Question Inputs by Type */}
               <div className="pt-2 pb-6">
@@ -1457,372 +1462,46 @@ const Attempt = () => {
                   );
                 })()}
 
-                {/* 6. Coding & SQL Programming Questions (Phase 3) */}
+                {/* 6. Coding & SQL Programming Questions (Phase 2 Clean Student IDE) */}
                 {(currentQuestion.type === 'code' || currentQuestion.type === 'sql') && (() => {
                   const qId = currentQuestion._id;
                   const activeLang = getActiveLanguage(currentQuestion);
                   const currentCode = getCurrentCode(currentQuestion, activeLang);
                   const isExecuting = Boolean(isExecutingByQuestion[qId]);
                   const execResult = executionResultsByQuestion[qId];
-                  const publicTestCases = (currentQuestion.codingConfig?.testCases || []).filter((tc) => !tc.isHidden);
-                  const isSql = currentQuestion.type === 'sql';
-
-                  // Approved language runtime options
-                  const allowedLangs = (currentQuestion.codingConfig?.allowedLanguages || ['python', 'javascript']).filter((l) =>
-                    ['python', 'javascript'].includes(l)
-                  );
-                  const safeAllowedLangs = allowedLangs.length > 0 ? allowedLangs : ['python', 'javascript'];
-
-                  // SQL dialect options (Active SQL examination is restricted to SQLite 3)
-                  const sqlDialects = ['sqlite'];
 
                   return (
-                    <div className="space-y-4">
-                      {/* Technical Constraints Banner */}
-                      <div className="flex flex-wrap items-center gap-2 p-3 rounded-xl bg-slate-50 dark:bg-[#12161F] border border-[#EBE3D8] dark:border-[#2D3748] text-xs">
-                        <div className="flex items-center gap-1.5 text-slate-700 dark:text-slate-300 font-semibold">
-                          <Cpu className="w-4 h-4 text-[#E05D38]" />
-                          <span>CPU Limit: {currentQuestion.codingConfig?.cpuTimeLimitMs || 2000}ms</span>
-                        </div>
-                        <span className="text-slate-300 dark:text-slate-700">•</span>
-                        <div className="flex items-center gap-1.5 text-slate-700 dark:text-slate-300 font-semibold">
-                          <Layers className="w-4 h-4 text-[#3D8A78]" />
-                          <span>Memory Limit: {currentQuestion.codingConfig?.memoryLimitMb || 256}MB</span>
-                        </div>
-                        <span className="text-slate-300 dark:text-slate-700">•</span>
-                        <div className="flex items-center gap-1.5 text-slate-500">
-                          <span>Execution Mode: <strong className="text-slate-700 dark:text-slate-300 uppercase">{isSql ? `Isolated ${activeLang}` : 'Sandboxed Code'}</strong></span>
-                        </div>
-                      </div>
-
-                      {/* SQL Schema DDL Preview (if SQL question) */}
-                      {isSql && currentQuestion.codingConfig?.schemaDdl && (
-                        <div className="rounded-xl border border-emerald-200 dark:border-emerald-900/50 bg-emerald-50/40 dark:bg-emerald-950/20 p-3.5 space-y-2">
-                          <div className="flex items-center justify-between text-xs font-bold text-emerald-800 dark:text-emerald-300">
-                            <span className="flex items-center gap-1.5">
-                              <Database className="w-4 h-4 text-emerald-600" />
-                              <span>Database Schema & Tables (DDL)</span>
-                            </span>
-                            <span className="text-[11px] text-emerald-700 dark:text-emerald-400 font-normal">
-                              Tables and seed data available in execution sandbox
-                            </span>
-                          </div>
-                          <pre className="p-2.5 rounded-lg bg-white dark:bg-[#0E131F] border border-emerald-200/60 dark:border-emerald-900/40 font-mono text-xs text-slate-800 dark:text-slate-200 overflow-x-auto max-h-36">
-                            {currentQuestion.codingConfig.schemaDdl}
-                          </pre>
-                        </div>
-                      )}
-
-                      {/* Public Sample Test Cases */}
-                      {publicTestCases.length > 0 && (
-                        <div className="space-y-2">
-                          <label className="block text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
-                            Public Sample Test Cases ({publicTestCases.length})
-                          </label>
-                          <div className="space-y-2.5">
-                            {publicTestCases.map((tc, tcIdx) => (
-                              <div
-                                key={tc._id || tcIdx}
-                                className="p-3 rounded-xl border border-[#EBE3D8] dark:border-[#2D3748] bg-slate-50/50 dark:bg-[#12161F]/50 text-xs space-y-2"
-                              >
-                                <div className="flex items-center justify-between font-semibold text-slate-700 dark:text-slate-300">
-                                  <span>Sample Case #{tcIdx + 1}</span>
-                                  {tc.explanation && (
-                                    <span className="text-[11px] text-slate-500 font-normal italic">
-                                      {tc.explanation}
-                                    </span>
-                                  )}
-                                </div>
-                                {isSql ? (
-                                  <div className="space-y-1">
-                                    <span className="text-[10px] uppercase font-bold text-slate-400 block">Expected Results</span>
-                                    {tc.expectedColumns && tc.expectedColumns.length > 0 ? (
-                                      <div className="overflow-x-auto border border-slate-200 dark:border-slate-800 rounded-lg bg-white dark:bg-[#1A202C]">
-                                        <table className="min-w-full divide-y divide-slate-200 dark:divide-slate-800 text-[11px] font-mono">
-                                          <thead className="bg-slate-100 dark:bg-slate-800/60">
-                                            <tr>
-                                              {tc.expectedColumns.map((col, cIdx) => (
-                                                <th key={cIdx} className="px-2 py-1 text-left font-bold text-slate-700 dark:text-slate-300">
-                                                  {col}
-                                                </th>
-                                              ))}
-                                            </tr>
-                                          </thead>
-                                          <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                                            {(tc.expectedRows || []).slice(0, 5).map((row, rIdx) => (
-                                              <tr key={rIdx}>
-                                                {(Array.isArray(row) ? row : tc.expectedColumns.map((c) => row[c])).map((val, cellIdx) => (
-                                                  <td key={cellIdx} className="px-2 py-1 text-slate-600 dark:text-slate-300">
-                                                    {val === null ? <span className="text-amber-600 italic">NULL</span> : String(val)}
-                                                  </td>
-                                                ))}
-                                              </tr>
-                                            ))}
-                                          </tbody>
-                                        </table>
-                                      </div>
-                                    ) : (
-                                      <pre className="p-2 rounded-lg bg-white dark:bg-[#1A202C] border border-slate-200 dark:border-slate-800 font-mono text-[11px] overflow-x-auto max-h-24">
-                                        {tc.expectedOutput || '(empty expected output)'}
-                                      </pre>
-                                    )}
-                                  </div>
-                                ) : (
-                                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                                    <div>
-                                      <span className="text-[10px] uppercase font-bold text-slate-400 block mb-1">Sample Input</span>
-                                      <pre className="p-2 rounded-lg bg-white dark:bg-[#1A202C] border border-slate-200 dark:border-slate-800 font-mono text-[11px] overflow-x-auto max-h-24">
-                                        {tc.input || '(empty input)'}
-                                      </pre>
-                                    </div>
-                                    <div>
-                                      <span className="text-[10px] uppercase font-bold text-slate-400 block mb-1">Expected Output</span>
-                                      <pre className="p-2 rounded-lg bg-white dark:bg-[#1A202C] border border-slate-200 dark:border-slate-800 font-mono text-[11px] overflow-x-auto max-h-24">
-                                        {tc.expectedOutput || '(empty output)'}
-                                      </pre>
-                                    </div>
-                                  </div>
-                                )}
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      )}
-
-                      {/* Language / SQL Dialect Selector & CodeMirror Editor */}
-                      <div className="space-y-2">
-                        <div className="flex flex-wrap items-center justify-between gap-2">
-                          <div className="flex items-center space-x-2">
-                            <Code2 className="w-4 h-4 text-[#E05D38]" />
-                            <span className="text-xs font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300">
-                              {isSql ? 'SQL Dialect' : 'Language Runtime'}
-                            </span>
-                          </div>
-
-                          {!isSql ? (
-                            <div className="flex items-center gap-1.5 bg-slate-100 dark:bg-slate-800 p-1 rounded-xl">
-                              {safeAllowedLangs.map((lang) => (
-                                <button
-                                  key={lang}
-                                  type="button"
-                                  onClick={() => handleLanguageSelect(qId, lang)}
-                                  className={`px-3 py-1 text-xs font-semibold rounded-lg transition-all cursor-pointer ${
-                                    activeLang === lang
-                                      ? 'bg-white dark:bg-[#1A202C] text-[#E05D38] shadow-xs'
-                                      : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
-                                  }`}
-                                >
-                                  {lang === 'python' ? 'Python 3.11' : 'JavaScript (Node.js 20)'}
-                                </button>
-                              ))}
-                            </div>
-                          ) : (
-                            <div className="flex items-center gap-1.5 bg-slate-100 dark:bg-slate-800 p-1 rounded-xl">
-                              <span className="px-3 py-1 text-xs font-semibold rounded-lg bg-white dark:bg-[#1A202C] text-[#3D8A78] shadow-xs flex items-center gap-1.5">
-                                <span className="w-2 h-2 rounded-full bg-emerald-500 inline-block"></span>
-                                SQLite 3 (In-Memory Sandbox)
-                              </span>
-                            </div>
-                          )}
-                        </div>
-
-                        {/* CodeMirror Editor Component */}
-                        <CodeEditor
-                          value={currentCode}
-                          onChange={(newVal) => handleCodeChange(qId, activeLang, newVal)}
-                          language={activeLang}
-                          height="320px"
-                          minHeight="220px"
-                          placeholder={isSql ? '-- Enter your SQL query here...' : '# Enter your solution code here...'}
-                        />
-
-                        {/* Editor Action Toolbar */}
-                        <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
-                          <button
-                            type="button"
-                            onClick={() => openResetModal(qId, activeLang)}
-                            className="text-xs text-slate-500 hover:text-[#E05D38] flex items-center gap-1 cursor-pointer transition-colors"
-                            title="Revert editor to instructor starter code"
-                          >
-                            <RotateCcw className="w-3.5 h-3.5" />
-                            <span>Reset to Starter Code</span>
-                          </button>
-
-                          <div className="flex items-center gap-3">
-                            {!isSql && (
-                              <label className="flex items-center gap-1.5 text-xs text-slate-600 dark:text-slate-400 cursor-pointer select-none">
-                                <input
-                                  type="checkbox"
-                                  checked={Boolean(showCustomStdinByQuestion[qId])}
-                                  onChange={(e) =>
-                                    setShowCustomStdinByQuestion((prev) => ({
-                                      ...prev,
-                                      [qId]: e.target.checked,
-                                    }))
-                                  }
-                                  className="rounded border-slate-300 text-[#E05D38] focus:ring-[#E05D38]"
-                                />
-                                <span>Custom Stdin</span>
-                              </label>
-                            )}
-
-                            <Button
-                              type="button"
-                              variant="primary"
-                              size="sm"
-                              icon={Play}
-                              loading={isExecuting}
-                              disabled={isExecuting}
-                              onClick={() => handleRunCode(qId)}
-                              className="bg-emerald-600 hover:bg-emerald-700 text-white border-transparent"
-                            >
-                              {isExecuting ? 'Running...' : 'Run Code'}
-                            </Button>
-                          </div>
-                        </div>
-
-                        {/* Custom Stdin Box (if toggled) */}
-                        {showCustomStdinByQuestion[qId] && !isSql && (
-                          <div className="pt-2">
-                            <label className="block text-[11px] font-bold uppercase text-slate-500 mb-1">
-                              Custom Standard Input (stdin):
-                            </label>
-                            <textarea
-                              rows={2}
-                              value={customStdinByQuestion[qId] || ''}
-                              onChange={(e) =>
-                                setCustomStdinByQuestion((prev) => ({
-                                  ...prev,
-                                  [qId]: e.target.value,
-                                }))
-                              }
-                              placeholder="Enter stdin input to pass to standard input..."
-                              className="w-full p-2 rounded-lg font-mono text-xs border border-slate-200 dark:border-slate-700 bg-white dark:bg-[#1A202C] text-slate-800 dark:text-slate-200 focus:outline-none focus:border-[#E05D38]"
-                            />
-                          </div>
-                        )}
-
-                        {/* Execution Results Panel */}
-                        {execResult && (
-                          <div className="mt-4 p-4 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50/70 dark:bg-[#12161F] space-y-3">
-                            <div className="flex flex-wrap items-center justify-between gap-2 pb-2 border-b border-slate-200 dark:border-slate-800">
-                              <div className="flex items-center gap-2">
-                                <span
-                                  className={`px-2.5 py-1 rounded-lg text-xs font-bold uppercase tracking-wider ${
-                                    execResult.verdict === 'ACCEPTED'
-                                      ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 border border-emerald-300'
-                                      : execResult.verdict === 'WRONG_ANSWER'
-                                      ? 'bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-300 border border-rose-300'
-                                      : execResult.verdict === 'TIME_LIMIT_EXCEEDED'
-                                      ? 'bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300 border border-amber-300'
-                                      : 'bg-purple-100 text-purple-800 dark:bg-purple-950 dark:text-purple-300 border border-purple-300'
-                                  }`}
-                                >
-                                  {execResult.verdict?.replace('_', ' ')}
-                                </span>
-                                {execResult.passedCount !== undefined && execResult.totalCount !== undefined && (
-                                  <span className="text-xs text-slate-600 dark:text-slate-400">
-                                    ({execResult.passedCount} of {execResult.totalCount} sample test cases passed)
-                                  </span>
-                                )}
-                              </div>
-
-                              {execResult.executionTimeMs !== undefined && (
-                                <span className="text-xs text-slate-500 font-mono">
-                                  Runtime: <strong>{execResult.executionTimeMs}ms</strong>
-                                </span>
-                              )}
-                            </div>
-
-                            {/* Sample test cases breakdown */}
-                            {execResult.sampleResults && execResult.sampleResults.length > 0 && (
-                              <div className="space-y-2">
-                                <span className="text-[11px] font-bold text-slate-500 uppercase block">Sample Test Case Results</span>
-                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                                  {execResult.sampleResults.map((stc, stcIdx) => (
-                                    <div
-                                      key={stcIdx}
-                                      className={`p-2.5 rounded-lg border text-xs ${
-                                        stc.passed
-                                          ? 'border-emerald-200 bg-emerald-50/50 dark:bg-emerald-950/20 text-emerald-900 dark:text-emerald-200'
-                                          : 'border-rose-200 bg-rose-50/50 dark:bg-rose-950/20 text-rose-900 dark:text-rose-200'
-                                      }`}
-                                    >
-                                      <div className="flex items-center justify-between font-bold mb-1">
-                                        <span>Sample #{stc.sampleIndex || stcIdx + 1}</span>
-                                        <span>{stc.passed ? '✓ Passed' : '✗ Failed'}</span>
-                                      </div>
-                                      {stc.explanation && <p className="text-[10px] text-slate-500 mb-1">{stc.explanation}</p>}
-                                      {stc.actualOutput && (
-                                        <div className="mt-1">
-                                          <span className="text-[10px] text-slate-400 uppercase block">Output</span>
-                                          <pre className="p-1 rounded bg-white dark:bg-slate-900 font-mono text-[10px] overflow-x-auto max-h-16">
-                                            {stc.actualOutput}
-                                          </pre>
-                                        </div>
-                                      )}
-                                    </div>
-                                  ))}
-                                </div>
-                              </div>
-                            )}
-
-                            {/* SQL tabular result */}
-                            {execResult.columns && execResult.columns.length > 0 && (
-                              <div>
-                                <span className="text-[11px] font-bold text-slate-500 uppercase block mb-1">
-                                  Query Output ({execResult.rowCount !== undefined ? execResult.rowCount : (execResult.rows?.length || 0)} row{(execResult.rowCount === 1 || execResult.rows?.length === 1) ? '' : 's'})
-                                </span>
-                                <div className="overflow-x-auto border border-slate-200 dark:border-slate-800 rounded-lg bg-white dark:bg-[#1A202C] max-h-48">
-                                  <table className="min-w-full divide-y divide-slate-200 dark:divide-slate-800 text-xs font-mono">
-                                    <thead className="bg-slate-100 dark:bg-slate-800/80 sticky top-0">
-                                      <tr>
-                                        {execResult.columns.map((col, idx) => (
-                                          <th key={idx} className="px-2.5 py-1.5 text-left font-bold text-slate-700 dark:text-slate-300">
-                                            {col}
-                                          </th>
-                                        ))}
-                                      </tr>
-                                    </thead>
-                                    <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                                      {(execResult.rows || []).map((row, rIdx) => (
-                                        <tr key={rIdx} className="hover:bg-slate-50 dark:hover:bg-slate-800/40">
-                                          {(Array.isArray(row) ? row : execResult.columns.map((c) => row[c])).map((val, cIdx) => (
-                                            <td key={cIdx} className="px-2.5 py-1 text-slate-700 dark:text-slate-300">
-                                              {val === null ? <span className="text-amber-600 italic">NULL</span> : String(val)}
-                                            </td>
-                                          ))}
-                                        </tr>
-                                      ))}
-                                    </tbody>
-                                  </table>
-                                </div>
-                              </div>
-                            )}
-
-                            {/* Standard Output (stdout) */}
-                            {execResult.stdout && execResult.stdout.trim() && (
-                              <div>
-                                <span className="text-[11px] font-bold text-slate-500 uppercase block mb-1">Console Output (stdout)</span>
-                                <pre className="p-2.5 rounded-lg bg-slate-900 text-slate-100 font-mono text-xs overflow-x-auto max-h-40">
-                                  {execResult.stdout}
-                                </pre>
-                              </div>
-                            )}
-
-                            {/* Errors (stderr) */}
-                            {execResult.stderr && execResult.stderr.trim() && (
-                              <div>
-                                <span className="text-[11px] font-bold text-rose-500 uppercase block mb-1">Errors / Diagnostic Info</span>
-                                <pre className="p-2.5 rounded-lg bg-rose-50 dark:bg-rose-950/40 text-rose-800 dark:text-rose-200 border border-rose-200 dark:border-rose-900 font-mono text-xs overflow-x-auto max-h-40">
-                                  {execResult.stderr}
-                                </pre>
-                              </div>
-                            )}
-                          </div>
-                        )}
-                      </div>
-                    </div>
+                    <StudentCodeIDE
+                      question={currentQuestion}
+                      activeLanguage={activeLang}
+                      onLanguageChange={(lang) => handleLanguageSelect(qId, lang)}
+                      code={currentCode}
+                      onCodeChange={(newVal) => handleCodeChange(qId, activeLang, newVal)}
+                      onResetCode={() => openResetModal(qId, activeLang)}
+                      onRunCode={() => handleRunCode(qId)}
+                      isExecuting={isExecuting}
+                      executionResult={execResult}
+                      customStdin={customStdinByQuestion[qId] || ''}
+                      onCustomStdinChange={(val) =>
+                        setCustomStdinByQuestion((prev) => ({
+                          ...prev,
+                          [qId]: val,
+                        }))
+                      }
+                      showCustomStdin={Boolean(showCustomStdinByQuestion[qId])}
+                      onToggleCustomStdin={(show) =>
+                        setShowCustomStdinByQuestion((prev) => ({
+                          ...prev,
+                          [qId]: show,
+                        }))
+                      }
+                      onClearOutput={() =>
+                        setExecutionResultsByQuestion((prev) => ({
+                          ...prev,
+                          [qId]: null,
+                        }))
+                      }
+                    />
                   );
                 })()}
               </div>
@@ -1880,8 +1559,8 @@ const Attempt = () => {
           )}
         </div>
 
-        {/* Right 4 Cols: Question Navigation Palette */}
-        <div className="lg:col-span-4 space-y-4">
+        {/* Question Navigation Palette */}
+        <div className={`${isCodingQuestion ? 'xl:col-span-3 lg:col-span-4' : 'lg:col-span-4'} space-y-4`}>
           <Card
             title="Question Palette"
             subtitle={`${answeredCount} of ${totalQuestions} answered`}

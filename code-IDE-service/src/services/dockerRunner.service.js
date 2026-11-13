@@ -39,14 +39,19 @@ class DockerRunnerService {
 
   /**
    * Normalize output text for whitespace-agnostic comparison
+   * Preserves inner line indentation (critical for pyramid/nested pattern questions)
+   * while neutralizing carriage returns, trailing whitespace, and terminal blank lines.
    */
   normalizeOutput(str) {
     if (typeof str !== 'string') return '';
     return str
+      .replace(/\r\n/g, '\n')
+      .replace(/\r/g, '\n')
       .split('\n')
       .map((line) => line.trimEnd())
       .join('\n')
-      .trim();
+      .replace(/^\n+/, '')
+      .replace(/\n+$/, '');
   }
 
   /**

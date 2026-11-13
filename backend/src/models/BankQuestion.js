@@ -11,6 +11,8 @@ const bankTestCaseSchema = new mongoose.Schema(
     isHidden: { type: Boolean, default: false },
     weight: { type: Number, default: 1, min: 1 },
     explanation: { type: String, default: '' },
+    description: { type: String, default: '' },
+    isEnabled: { type: Boolean, default: true },
   },
   { _id: true }
 );
@@ -18,6 +20,13 @@ const bankTestCaseSchema = new mongoose.Schema(
 // Sub-schema defining runtime environment and execution limits for Question Bank items
 const bankCodingConfigSchema = new mongoose.Schema(
   {
+    problemTitle: { type: String, default: '' },
+    problemDescription: { type: String, default: '' },
+    constraints: { type: String, default: '' },
+    inputFormat: { type: String, default: '' },
+    outputFormat: { type: String, default: '' },
+    sampleInput: { type: String, default: '' },
+    sampleOutput: { type: String, default: '' },
     executionCategory: {
       type: String,
       enum: ['code', 'sql'],
