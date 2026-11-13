@@ -80,6 +80,41 @@ const evaluationSchema = new mongoose.Schema(
       // Default to current timestamp
       default: Date.now,
     },
+    // Final percentage score achieved (0% - 100%)
+    percentage: {
+      type: Number,
+      default: 0,
+      min: 0,
+      max: 100,
+    },
+    // Computed academic letter grade (e.g. 'A+', 'A', 'B+', 'B', 'C', 'F')
+    grade: {
+      type: String,
+      default: null,
+      trim: true,
+    },
+    // Qualitative descriptive grade label (e.g. 'Outstanding', 'Try Again')
+    gradeLabel: {
+      type: String,
+      default: null,
+      trim: true,
+    },
+    // Authoritative pass/fail status outcome
+    passed: {
+      type: Boolean,
+      default: false,
+    },
+    // Flag indicating whether student meets criteria for an accredited certificate award
+    certificateEligible: {
+      type: Boolean,
+      default: false,
+    },
+    // Outcome guidance feedback (encouraging feedback for non-passing attempts)
+    outcomeFeedback: {
+      type: String,
+      default: '',
+      trim: true,
+    },
   },
   {
     // Automatically manage createdAt and updatedAt timestamps

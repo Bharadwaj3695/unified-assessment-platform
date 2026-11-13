@@ -1,8 +1,16 @@
 import { ShieldCheck, CheckCircle2 } from 'lucide-react';
+import AppFooter from './AppFooter';
 
-const Footer = () => {
+const Footer = ({ variant = 'marketing' }) => {
+  if (variant === 'compact') {
+    return <AppFooter />;
+  }
+
   return (
-    <footer className="border-t border-surface-light-border dark:border-surface-dark-border bg-white/80 dark:bg-surface-dark/80 backdrop-blur-xs transition-colors duration-150">
+    <footer
+      data-testid="marketing-footer"
+      className="mt-auto border-t border-surface-light-border dark:border-surface-dark-border bg-white/80 dark:bg-surface-dark/80 backdrop-blur-xs transition-colors duration-150"
+    >
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-7 lg:py-8">
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-6 lg:gap-8 mb-6 lg:mb-8">
           {/* Brand Column */}
@@ -109,11 +117,11 @@ const Footer = () => {
         </div>
 
         {/* Bottom Bar */}
-        <div className="border-t border-surface-light-border dark:border-surface-dark-border pt-4 sm:pt-5 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-slate-500 dark:text-slate-400">
-          <p>
+        <div className="border-t border-surface-light-border dark:border-surface-dark-border pt-4 sm:pt-5 flex flex-col sm:flex-row items-center justify-between gap-2.5 sm:gap-3 text-xs text-slate-500 dark:text-slate-400">
+          <p className="text-center sm:text-left">
             © {new Date().getFullYear()} Unified Assessment Platform (UAP). All rights reserved.
           </p>
-          <p className="flex items-center space-x-2">
+          <p className="flex flex-wrap items-center justify-center sm:justify-end gap-x-2 gap-y-0.5 text-center sm:text-right">
             <span>Academic & Technical Evaluation Suite</span>
             <span>·</span>
             <span className="font-medium text-brand-terracotta dark:text-brand-peach">Production Grade</span>
@@ -124,4 +132,5 @@ const Footer = () => {
   );
 };
 
+export { AppFooter };
 export default Footer;

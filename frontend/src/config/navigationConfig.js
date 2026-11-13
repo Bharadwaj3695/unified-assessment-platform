@@ -6,6 +6,8 @@ import {
   BookOpen,
   // Icon for submissions and evaluated exams
   FileCheck2,
+  // Icon for certificates, credentials, and achievements
+  Award,
   // Icon for user profile and personal settings
   User,
   // Icon for assessment creation actions
@@ -69,22 +71,22 @@ export const studentNavigation = {
       ],
     // Conclude student-workspace section
     },
-    // Academic suite section containing assessments and submissions
+    // Assessment & Certification section containing assessments, certifications, and submissions
     {
       // Unique section identifier
       id: 'student-academics',
       // Section header title text
-      title: 'Academic Suite',
+      title: 'Assessment & Certification',
       // Flag allowing the section to be collapsed or expanded
       collapsible: true,
-      // Array of navigation items for academics
+      // Array of navigation items for assessment and certification
       items: [
-        // Navigation item linking to assessment exam catalog
+        // Navigation item linking to assessment exam catalog (My Assessments)
         {
           // Unique item identifier
           id: 'student-assessments',
           // Display label in navigation menu
-          name: 'Assessments',
+          name: 'My Assessments',
           // Target URL path to assessment catalog
           path: '/student/catalog',
           // Lucide icon representing courses and examinations
@@ -94,6 +96,22 @@ export const studentNavigation = {
           // Description of assessment section contents
           description: 'Browse available course exams, quizzes, and timed tests',
         // Conclude student-assessments item definition
+        },
+        // Navigation item linking to student certifications
+        {
+          // Unique item identifier
+          id: 'student-certifications',
+          // Display label in navigation menu
+          name: 'My Certifications',
+          // Target URL path to student certifications
+          path: '/student/certifications',
+          // Lucide icon representing accredited awards and certificates
+          icon: Award,
+          // URL prefix patterns matching student certification routes
+          matchPatterns: ['/student/certifications', '/student/my-certifications'],
+          // Description of certifications section contents
+          description: 'View and download earned course certificates and accredited credentials',
+        // Conclude student-certifications item definition
         },
         // Navigation item linking to exam submissions history
         {

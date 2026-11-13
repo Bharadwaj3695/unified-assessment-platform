@@ -44,8 +44,8 @@ import ActivityBarChart from '../../components/charts/ActivityBarChart';
 import { AdminHeroIllustration } from '../../components/illustrations';
 // Import TwoFactorAuthSection component allowing administrator to configure multi-factor authentication
 import TwoFactorAuthSection from '../../components/auth/TwoFactorAuthSection';
-// Import ProfilePhotoUploader component for profile picture management
-import ProfilePhotoUploader from '../../components/common/ProfilePhotoUploader';
+// Import AnnouncementEditorSection component for managing persistent broadcast announcements
+import AnnouncementEditorSection from '../../components/admin/AnnouncementEditorSection';
 // Import structured Table components for rendering tabulated data records
 import {
   Table, // Base table wrapper component
@@ -63,7 +63,6 @@ import {
   Award,// Icon representing verified or active user status
   UserX, // Icon representing user revocation or deactivation
   Eye, // Icon for inspecting detailed user information
-  Search, // Icon for search input fields
   CheckCircle, // Icon for confirming account approvals
   XCircle, // Icon for rejecting registration applications
   RefreshCw, // Icon for manual data synchronization trigger
@@ -73,6 +72,7 @@ import {
   Archive, // Icon for archiving assessments
   Save,// Icon for operational configuration parameters
   Power,
+  PowerOff,
   Edit, // Icon for modifying registry records
   Trash2, // Icon for deleting registry records
   Plus, // Icon for creating new registry entries
@@ -162,8 +162,22 @@ const AdminDashboard = () => {
   // State variable tracking the active user management sub-section: 'pending', 'all', or 'registry'
   const [userSection, setUserSection] = useState('pending'); // 'pending', 'all', or 'registry'
 
-  // Pending registration queue state: search query, role filter, selected user IDs, and bulk approval modal
-  const [pendingSearch, setPendingSearch] = useState('');
+  // State tracking whether manual refresh is currently in progress
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  // Reference tracking active refresh requests to avoid stale responses
+  const refreshRequestIdRef = useRef(0);
+  const dashboardRequestIdRef = useRef(0);
+  // Mounted reference to prevent state updates on unmounted component
+  const isMountedRef = useRef(true);
+
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
+
+  // Pending registration queue state: role filter, selected user IDs, and bulk approval modal
   const [pendingRoleFilter, setPendingRoleFilter] = useState('all');
   const [selectedPendingUserIds, setSelectedPendingUserIds] = useState([]);
   const [isBulkApproveModalOpen, setIsBulkApproveModalOpen] = useState(false);
@@ -172,8 +186,8 @@ const AdminDashboard = () => {
 
   // All accounts directory bulk selection and modal state
   const [selectedAllUserIds, setSelectedAllUserIds] = useState([]);
-  const [isBulkRevokeModalOpen, setIsBulkRevokeModalOpen] = useState(false);
-  const [bulkRevokeReason, setBulkRevokeReason] = useState('');
+  const [isBulkDeactivateModalOpen, setIsBulkDeactivateModalOpen] = useState(false);
+  const [bulkDeactivateReason, setBulkDeactivateReason] = useState('');
   const [isBulkApproveAllModalOpen, setIsBulkApproveAllModalOpen] = useState(false);
   const [isBulkRejectAllModalOpen, setIsBulkRejectAllModalOpen] = useState(false);
   const [bulkRejectAllReason, setBulkRejectAllReason] = useState('');
@@ -238,9 +252,11 @@ const AdminDashboard = () => {
   const [isApproveModalOpen, setIsApproveModalOpen] = useState(false);
   // State flag controlling visibility of registration rejection confirmation modal
   const [isRejectModalOpen, setIsRejectModalOpen] = useState(false);
-  // State flag controlling visibility of active access revocation confirmation modal
-  const [isRevokeModalOpen, setIsRevokeModalOpen] = useState(false);
-  // State string holding administrative reason for account rejection or revocation
+  // State flag controlling visibility of account status confirmation modal (activate/deactivate)
+  const [isStatusConfirmModalOpen, setIsStatusConfirmModalOpen] = useState(false);
+  // Action type for account status modal ('activate' | 'deactivate')
+  const [statusActionType, setStatusActionType] = useState('deactivate');
+  // State string holding administrative reason for account rejection or deactivation
   const [actionReason, setActionReason] = useState('');
   // State variable storing role to assign during account approval
   const [assignedRole, setAssignedRole] = useState('student');
@@ -253,6 +269,7 @@ const AdminDashboard = () => {
 
   // Memoized callback function to fetch core telemetry and dashboard data from the backend
   const loadDashboardData = useCallback(async () => {
+    const reqId = ++dashboardRequestIdRef.current;
     // Set loading indicator to true before issuing network requests
     setIsLoading(true);
     // Clear any previous error message state
@@ -267,22 +284,30 @@ const AdminDashboard = () => {
         analyticsService.getAdminOverview().catch(() => null), // Fallback on error to null analytics
       ]);
 
-      // Populate dashboard stats state with response data
-      setStats(statsData);
-      // Populate pending registrations state with response array or fallback empty array
-      setPendingUsers(pendingData || []);
-      // Populate assessments state with returned array data
-      setAssessments(assessmentsRes.data || assessmentsRes.assessments || []);
-      // Populate alerts state if response exists
-      if (alertsRes) setAlertsData(alertsRes);
-      // Populate platform analytics state if response exists
-      if (analyticsRes) setPlatformAnalytics(analyticsRes);
+      if (isMountedRef.current && reqId === dashboardRequestIdRef.current) {
+        // Populate dashboard stats state with response data
+        setStats(statsData);
+        // Populate pending registrations state with response array or fallback empty array
+        setPendingUsers(pendingData || []);
+        // Populate assessments state with returned array data
+        setAssessments(assessmentsRes.data || assessmentsRes.assessments || []);
+        // Populate alerts state if response exists
+        if (alertsRes) setAlertsData(alertsRes);
+        // Populate platform analytics state if response exists
+        if (analyticsRes) setPlatformAnalytics(analyticsRes);
+      }
+      return { statsData, pendingData, assessmentsRes, alertsRes, analyticsRes };
     } catch (err) {
-      // Catch network or authorization errors and store human-readable message
-      setError(err.message || 'Failed to load administrator data from server.');
+      if (isMountedRef.current && reqId === dashboardRequestIdRef.current) {
+        // Catch network or authorization errors and store human-readable message
+        setError(err.message || 'Failed to load administrator data from server.');
+      }
+      throw err;
     } finally {
-      // Ensure loading indicator is deactivated upon completion of requests
-      setIsLoading(false);
+      if (isMountedRef.current && reqId === dashboardRequestIdRef.current) {
+        // Ensure loading indicator is deactivated upon completion of requests
+        setIsLoading(false);
+      }
     }
   }, []); // Empty dependency array ensures reference stability
 
@@ -431,10 +456,64 @@ const AdminDashboard = () => {
     }
   }, [registryPage, registrySearch, registryStatusFilter]); // Recreate callback when registry pagination or filters change
 
+  // Handler for manual dashboard refresh with loading states, stale-request protection, and error handling
+  const handleRefreshData = useCallback(async () => {
+    // Guard against duplicate refresh requests while already in progress
+    if (isRefreshing) return;
+
+    setIsRefreshing(true);
+    const reqId = ++refreshRequestIdRef.current;
+
+    try {
+      // Prepare parallel refresh promises for core telemetry and current tab datasets
+      const refreshPromises = [loadDashboardData()];
+
+      if (activeTab === 'users') {
+        if (userSection === 'all') {
+          refreshPromises.push(loadUsersList());
+        } else if (userSection === 'registry') {
+          refreshPromises.push(loadRegistryList());
+        }
+      } else if (activeTab === 'assessments') {
+        refreshPromises.push(loadAssessmentsList());
+      } else if (activeTab === 'logs') {
+        refreshPromises.push(loadLogsList());
+      } else if (activeTab === 'settings') {
+        refreshPromises.push(loadSettings());
+      }
+
+      await Promise.all(refreshPromises);
+
+      if (isMountedRef.current && reqId === refreshRequestIdRef.current) {
+        toast.success('Admin dashboard data refreshed successfully');
+      }
+    } catch (err) {
+      if (isMountedRef.current && reqId === refreshRequestIdRef.current) {
+        toast.error(err?.message || 'Failed to refresh administrator data. Please try again.');
+      }
+    } finally {
+      if (isMountedRef.current && reqId === refreshRequestIdRef.current) {
+        setIsRefreshing(false);
+      }
+    }
+  }, [
+    isRefreshing,
+    activeTab,
+    userSection,
+    loadDashboardData,
+    loadUsersList,
+    loadRegistryList,
+    loadAssessmentsList,
+    loadLogsList,
+    loadSettings,
+  ]);
+
   // Initial effect hook to trigger initial dashboard data loading on mount
   useEffect(() => {
-    // Execute dashboard data loader
-    loadDashboardData();
+    // Execute dashboard data loader with error boundary catch
+    loadDashboardData().catch((err) => {
+      console.warn('[AdminDashboard] Initial load error:', err?.message || err);
+    });
   }, [loadDashboardData]); // Dependency array referencing stable loader callback
 
   // Effect hook to process deep-linked applicant or user inspections from notifications
@@ -492,9 +571,6 @@ const AdminDashboard = () => {
       }
 
       if (applicantEmail) {
-        // Pre-fill pending search filter so the table filters directly to this applicant
-        setPendingSearch(applicantEmail);
-
         try {
           // Query pending users matching this email
           const pendingRes = await adminService.getPendingUsers();
@@ -870,26 +946,16 @@ const AdminDashboard = () => {
     }
   };
 
-  // Filter pending users by search string and role filter
+  // Filter pending users by role filter
   const filteredPendingUsers = useMemo(() => {
     return pendingUsers.filter((u) => {
       // Role filter: 'all', 'student', or 'instructor'
       if (pendingRoleFilter !== 'all' && u.role !== pendingRoleFilter) {
         return false;
       }
-      // Search query across name, email, studentId, facultyId, instituteCode
-      if (pendingSearch.trim()) {
-        const q = pendingSearch.trim().toLowerCase();
-        const nameMatch = u.name?.toLowerCase().includes(q);
-        const emailMatch = u.email?.toLowerCase().includes(q);
-        const studentIdMatch = u.studentId?.toLowerCase().includes(q);
-        const facultyIdMatch = u.facultyId?.toLowerCase().includes(q);
-        const instituteMatch = u.instituteCode?.toLowerCase().includes(q);
-        return Boolean(nameMatch || emailMatch || studentIdMatch || facultyIdMatch || instituteMatch);
-      }
       return true;
     });
-  }, [pendingUsers, pendingRoleFilter, pendingSearch]);
+  }, [pendingUsers, pendingRoleFilter]);
 
   // Reconcile selected user IDs with visible filtered users to prevent accidental approval of hidden records
   useEffect(() => {
@@ -985,27 +1051,27 @@ const AdminDashboard = () => {
     );
   };
 
-  // Handler confirming bulk revocation of active users
-  const handleConfirmBulkRevoke = async () => {
+  // Handler confirming bulk deactivation of active users
+  const handleConfirmBulkDeactivate = async () => {
     const activeIds = selectedActiveUsers.map((u) => (u._id || u.id).toString());
     if (activeIds.length === 0) {
-      toast.warning('No active users selected for revocation.');
+      toast.warning('No active users selected for deactivation.');
       return;
     }
 
     try {
       setIsActionSubmitting(true);
-      const res = await adminService.bulkRevokeUsers(activeIds, {
-        reason: bulkRevokeReason.trim() || 'Account access revoked by administrator',
+      const res = await adminService.bulkDeactivateUsers(activeIds, {
+        reason: bulkDeactivateReason.trim() || 'Account access deactivated by administrator',
       });
 
-      toast.success(res.message || `${res.data?.revokedCount || activeIds.length} active account(s) revoked successfully`);
+      toast.success(res.message || `${res.data?.deactivatedCount || activeIds.length} active account(s) deactivated successfully`);
       setSelectedAllUserIds([]);
-      setIsBulkRevokeModalOpen(false);
+      setIsBulkDeactivateModalOpen(false);
       loadDashboardData();
       loadUsersList();
     } catch (err) {
-      toast.error(err.message || 'Failed to bulk revoke users');
+      toast.error(err.message || 'Failed to bulk deactivate users');
     } finally {
       setIsActionSubmitting(false);
     }
@@ -1059,73 +1125,36 @@ const AdminDashboard = () => {
     }
   };
 
-  // Handler restoring an individual revoked or deactivated user account
-  const handleRestoreUser = async (targetUser) => {
-    try {
-      setIsActionSubmitting(true);
-      const res = await adminService.restoreUser(targetUser._id || targetUser.id);
-      toast.success(res.message || `Account access restored for ${targetUser.name}`);
-      loadDashboardData();
-      loadUsersList();
-    } catch (err) {
-      toast.error(err.message || 'Failed to restore account');
-    } finally {
-      setIsActionSubmitting(false);
-    }
-  };
-
-  // Handler function to open active account access revocation modal
-  const handleOpenRevoke = (targetUser) => {
-    // Store user targeted for access revocation
+  // Handler function to open account status confirmation modal (activate or deactivate)
+  const handleOpenStatusModal = (targetUser, actionType) => {
     setSelectedUser(targetUser);
-    // Clear previous revocation reason
+    setStatusActionType(actionType);
     setActionReason('');
-    // Open revocation confirmation modal
-    setIsRevokeModalOpen(true);
+    setIsStatusConfirmModalOpen(true);
   };
 
-  // Asynchronous handler confirming immediate revocation of active user credentials
-  const handleConfirmRevoke = async () => {
-    // Guard clause ensuring a target user is defined
+  // Asynchronous handler confirming activation or deactivation of user account
+  const handleConfirmStatusChange = async () => {
     if (!selectedUser) return;
-    // Set submitting flag to true to render loading state
     setIsActionSubmitting(true);
     try {
-      // Invoke administrative revocation endpoint with user ID and reason
-      await adminService.revokeUser(selectedUser._id || selectedUser.id, {
-        reason: actionReason.trim() || 'Access revoked by administrator.',
-      });
-      // Notify administrator with error/revocation toast
-      toast.error(`Account revoked for ${selectedUser.name}`);
-      // Close revocation modal dialog
-      setIsRevokeModalOpen(false);
-      // Reload dashboard metrics and revoked count
+      const targetId = selectedUser._id || selectedUser.id;
+      if (statusActionType === 'deactivate') {
+        const res = await adminService.deactivateUser(targetId, {
+          reason: actionReason.trim() || 'Account access deactivated by administrator.',
+        });
+        toast.success(res.message || `Account deactivated for ${selectedUser.name}`);
+      } else {
+        const res = await adminService.activateUser(targetId);
+        toast.success(res.message || `Account activated for ${selectedUser.name}`);
+      }
+      setIsStatusConfirmModalOpen(false);
       loadDashboardData();
-      // If viewing all accounts, refresh users list
       if (userSection === 'all') loadUsersList();
     } catch (err) {
-      // Display error toast message if revocation API call fails
-      toast.error(err.message || 'Failed to revoke account access');
+      toast.error(err.message || `Failed to ${statusActionType} account`);
     } finally {
-      // Reset submitting loading state
       setIsActionSubmitting(false);
-    }
-  };
-
-  // Asynchronous handler toggling account active / inactive status for non-admin accounts
-  const handleToggleUserStatus = async (targetUser) => {
-    try {
-      // Invoke service endpoint to toggle user activation status
-      const res = await adminService.toggleUserStatus(targetUser._id || targetUser.id);
-      // Display success toast with response message
-      toast.success(res.message || 'Account status updated');
-      // Reload dashboard telemetry
-      loadDashboardData();
-      // If viewing all accounts, refresh users list
-      if (userSection === 'all') loadUsersList();
-    } catch (err) {
-      // Display error toast if toggle operation fails
-      toast.error(err.message || 'Failed to toggle account status');
     }
   };
 
@@ -1307,7 +1336,7 @@ const AdminDashboard = () => {
       <ErrorState
         title="Admin Telemetry Unavailable" // Error heading
         message={error} // Displayed error message description
-        onRetry={loadDashboardData} // Retry button callback function
+        onRetry={handleRefreshData} // Retry button callback function
       />
     );
   }
@@ -1369,21 +1398,19 @@ const AdminDashboard = () => {
                 </div>
                 {/* Button to manually refresh and synchronize all platform datasets */}
                 <Button
+                  id="adminRefreshDataBtn"
                   variant="outline" /* Outline styling variant */
                   size="sm" /* Small button size */
                   icon={RefreshCw} /* Refresh clockwise icon */
-                  onClick={() => {
-                    // Fetch fresh telemetry and counter stats
-                    loadDashboardData();
-                    // If currently on users tab, reload users table
-                    if (activeTab === 'users') loadUsersList();
-                    // If currently on assessments tab, reload assessments table
-                    if (activeTab === 'assessments') loadAssessmentsList();
-                    // If currently on audit logs tab, reload audit logs
-                    if (activeTab === 'logs') loadLogsList();
-                  }}
+                  iconClassName={isRefreshing ? 'animate-spin' : ''}
+                  disabled={isRefreshing}
+                  isLoading={isRefreshing}
+                  loadingText="Refreshing..."
+                  onClick={handleRefreshData}
+                  className="min-w-[135px] justify-center"
+                  aria-label={isRefreshing ? 'Refreshing dashboard data' : 'Refresh dashboard data'}
                 >
-                  Refresh Data
+                  {isRefreshing ? 'Refreshing...' : 'Refresh Data'}
                 </Button>
               {/* Close right action container */}
               </div>
@@ -1391,12 +1418,12 @@ const AdminDashboard = () => {
             </div>
 
             {/* Tab Navigation Bar container with top separator border and pill layout */}
-            <div className="mt-4 sm:mt-5 flex flex-wrap gap-2 border-t border-[#EBE3D8] dark:border-[#2D3748] pt-3 sm:pt-3.5">
+            <div className="mt-4 sm:mt-5 flex items-center overflow-x-auto no-scrollbar sm:flex-wrap gap-2 border-t border-[#EBE3D8] dark:border-[#2D3748] pt-3 sm:pt-3.5 pb-1 sm:pb-0">
               {/* Tab Button: System Overview */}
               <button
                 type="button" /* Explicit button type */
                 onClick={() => handleTabChange('overview', '/admin/dashboard')} /* Route to admin overview */
-                className={`px-4 py-2 text-xs font-semibold rounded-xl transition-all cursor-pointer ${
+                className={`flex-shrink-0 whitespace-nowrap px-4 py-2 text-xs font-semibold rounded-xl transition-all cursor-pointer ${
                   activeTab === 'overview'
                     ? 'bg-[#E05D38] text-white shadow-warm-xs' // Active terracotta accent styling
                     : 'bg-white dark:bg-[#1A202C] text-[#64748B] dark:text-[#94A3B8] hover:text-[#1F2937] hover:bg-[#FFF9F2] dark:hover:bg-[#2D3748] border border-[#EBE3D8] dark:border-[#2D3748]' // Inactive subtle styling
@@ -1414,7 +1441,7 @@ const AdminDashboard = () => {
                   // Switch tab and navigate to /admin/users route
                   handleTabChange('users', '/admin/users');
                 }}
-                className={`px-4 py-2 text-xs font-semibold rounded-xl transition-all flex items-center space-x-1.5 cursor-pointer ${
+                className={`flex-shrink-0 whitespace-nowrap px-4 py-2 text-xs font-semibold rounded-xl transition-all flex items-center space-x-1.5 cursor-pointer ${
                   activeTab === 'users'
                     ? 'bg-[#E05D38] text-white shadow-warm-xs' // Active terracotta accent styling
                     : 'bg-white dark:bg-[#1A202C] text-[#64748B] dark:text-[#94A3B8] hover:text-[#1F2937] hover:bg-[#FFF9F2] dark:hover:bg-[#2D3748] border border-[#EBE3D8] dark:border-[#2D3748]' // Inactive subtle styling
@@ -1436,7 +1463,7 @@ const AdminDashboard = () => {
               <button
                 type="button" /* Explicit button type */
                 onClick={() => handleTabChange('assessments', '/admin/assessments')} /* Route to assessment oversight */
-                className={`px-4 py-2 text-xs font-semibold rounded-xl transition-all cursor-pointer ${
+                className={`flex-shrink-0 whitespace-nowrap px-4 py-2 text-xs font-semibold rounded-xl transition-all cursor-pointer ${
                   activeTab === 'assessments'
                     ? 'bg-[#E05D38] text-white shadow-warm-xs' // Active terracotta accent styling
                     : 'bg-white dark:bg-[#1A202C] text-[#64748B] dark:text-[#94A3B8] hover:text-[#1F2937] hover:bg-[#FFF9F2] dark:hover:bg-[#2D3748] border border-[#EBE3D8] dark:border-[#2D3748]' // Inactive subtle styling
@@ -1449,7 +1476,7 @@ const AdminDashboard = () => {
               <button
                 type="button" /* Explicit button type */
                 onClick={() => handleTabChange('logs', '/admin/logs')} /* Route to audit logs */
-                className={`px-4 py-2 text-xs font-semibold rounded-xl transition-all cursor-pointer ${
+                className={`flex-shrink-0 whitespace-nowrap px-4 py-2 text-xs font-semibold rounded-xl transition-all cursor-pointer ${
                   activeTab === 'logs'
                     ? 'bg-[#E05D38] text-white shadow-warm-xs' // Active terracotta accent styling
                     : 'bg-white dark:bg-[#1A202C] text-[#64748B] dark:text-[#94A3B8] hover:text-[#1F2937] hover:bg-[#FFF9F2] dark:hover:bg-[#2D3748] border border-[#EBE3D8] dark:border-[#2D3748]' // Inactive subtle styling
@@ -1462,7 +1489,7 @@ const AdminDashboard = () => {
               <button
                 type="button" /* Explicit button type */
                 onClick={() => handleTabChange('settings', '/admin/settings')} /* Route to platform settings */
-                className={`px-4 py-2 text-xs font-semibold rounded-xl transition-all cursor-pointer ${
+                className={`flex-shrink-0 whitespace-nowrap px-4 py-2 text-xs font-semibold rounded-xl transition-all cursor-pointer ${
                   activeTab === 'settings'
                     ? 'bg-[#E05D38] text-white shadow-warm-xs' // Active terracotta accent styling
                     : 'bg-white dark:bg-[#1A202C] text-[#64748B] dark:text-[#94A3B8] hover:text-[#1F2937] hover:bg-[#FFF9F2] dark:hover:bg-[#2D3748] border border-[#EBE3D8] dark:border-[#2D3748]' // Inactive subtle styling
@@ -1476,12 +1503,12 @@ const AdminDashboard = () => {
           </div>
 
           {/* Overview Stat Cards responsive 4-column grid container */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          <div className="grid grid-cols-1 xs:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
             {/* StatCard 1: Active Enrolled Students */}
             <StatCard
               title="Active Students" /* Title of summary metric */
               value={platformAnalytics?.totalActiveStudents ?? stats?.activeUsersCount ?? '—'} /* Active student count or fallback */
-              subtitle={`${stats?.totalUsers ?? 0} total registered · ${stats?.revokedUsersCount ?? 0} revoked`} /* Subtitle with registered and revoked totals */
+              subtitle={`${stats?.totalUsers ?? 0} total registered · ${stats?.revokedUsersCount ?? 0} inactive`} /* Subtitle with registered and inactive totals */
               icon={Users} /* Users icon */
               color="primary" /* Terracotta primary color accent */
             />
@@ -1808,12 +1835,12 @@ const AdminDashboard = () => {
           {/* Sub-section switcher navigation bar */}
           <div className="flex items-center justify-between">
             {/* Pill button toggle group */}
-            <div className="flex items-center space-x-2 bg-slate-100 dark:bg-surface-dark-muted p-1 rounded-xl">
+            <div className="flex items-center overflow-x-auto no-scrollbar space-x-2 bg-slate-100 dark:bg-surface-dark-muted p-1 rounded-xl max-w-full">
               {/* Button switching to Pending Approvals queue */}
               <button
                 type="button"
                 onClick={() => setUserSection('pending')}
-                className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-all ${
+                className={`flex-shrink-0 whitespace-nowrap px-3 py-1.5 text-xs font-semibold rounded-lg transition-all ${
                   userSection === 'pending'
                     ? 'bg-white dark:bg-surface-dark text-slate-900 dark:text-slate-100 shadow-xs'
                     : 'text-slate-500 hover:text-slate-900 dark:hover:text-slate-200'
@@ -1828,7 +1855,7 @@ const AdminDashboard = () => {
                   setUserSection('all');
                   loadUsersList();
                 }}
-                className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-all ${
+                className={`flex-shrink-0 whitespace-nowrap px-3 py-1.5 text-xs font-semibold rounded-lg transition-all ${
                   userSection === 'all'
                     ? 'bg-white dark:bg-surface-dark text-slate-900 dark:text-slate-100 shadow-xs'
                     : 'text-slate-500 hover:text-slate-900 dark:hover:text-slate-200'
@@ -1843,7 +1870,7 @@ const AdminDashboard = () => {
                   setUserSection('registry');
                   loadRegistryList();
                 }}
-                className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-all flex items-center space-x-1.5 ${
+                className={`flex-shrink-0 whitespace-nowrap px-3 py-1.5 text-xs font-semibold rounded-lg transition-all flex items-center space-x-1.5 ${
                   userSection === 'registry'
                     ? 'bg-white dark:bg-surface-dark text-slate-900 dark:text-slate-100 shadow-xs'
                     : 'text-slate-500 hover:text-slate-900 dark:hover:text-slate-200'
@@ -1876,16 +1903,10 @@ const AdminDashboard = () => {
               title="Pending Registration Queue" /* Card heading */
               subtitle="Inspect applicant details, verify institutional credentials, and approve or reject accounts" /* Card subtitle */
             >
-              {/* Search and Role Filter Toolbar */}
+              {/* Role Filter Toolbar */}
               <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 mb-4">
-                <div className="flex-1 max-w-md">
-                  <Input
-                    id="pendingSearchInput"
-                    placeholder="Search name, email, ID..."
-                    value={pendingSearch}
-                    onChange={(e) => setPendingSearch(e.target.value)}
-                    icon={Search}
-                  />
+                <div className="text-xs font-semibold text-slate-500 dark:text-slate-400">
+                  {filteredPendingUsers.length} applicant{filteredPendingUsers.length === 1 ? '' : 's'} awaiting review
                 </div>
                 <div className="w-full sm:w-48">
                   <Select
@@ -1957,21 +1978,17 @@ const AdminDashboard = () => {
                   description="No Pending Approvals — All submitted registrations have been verified and processed."
                 />
               ) : filteredPendingUsers.length === 0 ? (
-                // Empty state when filters/search yield no matches
+                // Empty state when role filter yields no matches
                 <EmptyState
                   title={
-                    pendingSearch.trim()
-                      ? 'No pending registrations match your search.'
-                      : pendingRoleFilter === 'student'
+                    pendingRoleFilter === 'student'
                       ? 'No pending student registrations.'
                       : pendingRoleFilter === 'instructor'
                       ? 'No pending faculty registrations.'
                       : 'No pending registrations.'
                   }
                   description={
-                    pendingSearch.trim()
-                      ? 'No registrations matched your search query. Try clearing or modifying your search terms.'
-                      : pendingRoleFilter === 'student'
+                    pendingRoleFilter === 'student'
                       ? 'There are currently no student accounts awaiting registration approval.'
                       : pendingRoleFilter === 'instructor'
                       ? 'There are currently no faculty accounts awaiting registration approval.'
@@ -2118,67 +2135,40 @@ const AdminDashboard = () => {
               // Card wrapper for comprehensive all-accounts repository
               <Card
                 title="All Platform Accounts" /* Card heading */
-                subtitle="Comprehensive repository of active, pending, rejected, and revoked users" /* Card subtitle */
+                subtitle="Comprehensive repository of active, pending, rejected, and inactive users" /* Card subtitle */
               >
-                {/* 12-column responsive filter bar */}
-                <div className="mb-4 grid grid-cols-1 sm:grid-cols-12 gap-3">
-                  {/* Search input column taking 5 spans */}
-                  <div className="sm:col-span-5">
-                    {/* Search text input for name, email, or institutional code */}
-                    <Input
-                      placeholder="Search by name, email, or code..."
-                      icon={Search}
-                      value={userSearch}
-                      onChange={(e) => setUserSearch(e.target.value)}
-                      onKeyDown={(e) => {
-                        // Execute users search on Enter key press
-                        if (e.key === 'Enter') loadUsersList();
-                      }}
-                    />
-                  {/* Close search column */}
+                {/* Responsive role and status filter bar */}
+                <div className="mb-4 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
+                  <div className="text-xs font-semibold text-slate-500 dark:text-slate-400">
+                    Filter directory by account role and verification status
                   </div>
-                  {/* Role filter dropdown taking 3 spans */}
-                  <div className="sm:col-span-3">
-                    <Select
-                      options={[
-                        { value: '', label: 'All Roles' },
-                        { value: 'student', label: 'Student' },
-                        { value: 'instructor', label: 'Instructor' },
-                        { value: 'admin', label: 'Admin' },
-                      ]}
-                      value={userRoleFilter}
-                      onChange={(e) => setUserRoleFilter(e.target.value)}
-                    />
-                  {/* Close role filter column */}
+                  <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
+                    <div className="w-full sm:w-44">
+                      <Select
+                        options={[
+                          { value: '', label: 'All Roles' },
+                          { value: 'student', label: 'Student' },
+                          { value: 'instructor', label: 'Instructor' },
+                          { value: 'admin', label: 'Admin' },
+                        ]}
+                        value={userRoleFilter}
+                        onChange={(e) => setUserRoleFilter(e.target.value)}
+                      />
+                    </div>
+                    <div className="w-full sm:w-44">
+                      <Select
+                        options={[
+                          { value: '', label: 'All Status' },
+                          { value: 'active', label: 'Active' },
+                          { value: 'inactive', label: 'Inactive' },
+                          { value: 'pending', label: 'Pending' },
+                          { value: 'rejected', label: 'Rejected' },
+                        ]}
+                        value={userStatusFilter}
+                        onChange={(e) => setUserStatusFilter(e.target.value)}
+                      />
+                    </div>
                   </div>
-                  {/* Status filter dropdown taking 3 spans */}
-                  <div className="sm:col-span-3">
-                    <Select
-                      options={[
-                        { value: '', label: 'All Statuses' },
-                        { value: 'active', label: 'Active' },
-                        { value: 'pending', label: 'Pending' },
-                        { value: 'rejected', label: 'Rejected' },
-                        { value: 'revoked', label: 'Revoked' },
-                      ]}
-                      value={userStatusFilter}
-                      onChange={(e) => setUserStatusFilter(e.target.value)}
-                    />
-                  {/* Close status filter column */}
-                  </div>
-                  {/* Search action button taking 1 span */}
-                  <div className="sm:col-span-1">
-                    <Button
-                      variant="outline"
-                      size="md"
-                      fullWidth
-                      icon={Search}
-                      onClick={loadUsersList}
-                      aria-label="Search users"
-                    />
-                  {/* Close search button column */}
-                  </div>
-                {/* Close filter bar grid */}
                 </div>
 
                 {/* Bulk Selection and Action Header Bar for All Platform Accounts */}
@@ -2234,19 +2224,19 @@ const AdminDashboard = () => {
                         </>
                       )}
 
-                      {/* Status-aware bulk actions: Active users support Revoke */}
+                      {/* Status-aware bulk actions: Active users support Deactivate */}
                       {(userStatusFilter === 'active' || selectedActiveUsers.length > 0 || userStatusFilter === '') && (
                         <Button
                           variant="danger"
                           size="sm"
-                          icon={UserX}
+                          icon={PowerOff}
                           disabled={selectedActiveUsers.length === 0}
                           onClick={() => {
-                            setBulkRevokeReason('');
-                            setIsBulkRevokeModalOpen(true);
+                            setBulkDeactivateReason('');
+                            setIsBulkDeactivateModalOpen(true);
                           }}
                         >
-                          Revoke Selected {selectedActiveUsers.length > 0 ? `(${selectedActiveUsers.length})` : ''}
+                          Deactivate Selected {selectedActiveUsers.length > 0 ? `(${selectedActiveUsers.length})` : ''}
                         </Button>
                       )}
                     </div>
@@ -2328,19 +2318,23 @@ const AdminDashboard = () => {
                           </TableCell>
                           {/* Account status badge */}
                           <TableCell>
-                            <Badge
-                              variant={
-                                u.status === 'active'
-                                  ? 'success'
-                                  : u.status === 'pending'
-                                  ? 'warning'
-                                  : 'danger'
-                              }
-                              size="sm"
-                              dot
-                            >
-                              {u.status || (u.isActive ? 'active' : 'inactive')}
-                            </Badge>
+                            {u.status === 'pending' ? (
+                              <Badge variant="warning" size="sm" dot>
+                                Pending
+                              </Badge>
+                            ) : u.status === 'rejected' ? (
+                              <Badge variant="neutral" size="sm" dot>
+                                Rejected
+                              </Badge>
+                            ) : (u.status === 'active' && u.isActive) ? (
+                              <Badge variant="success" size="sm" dot>
+                                Active
+                              </Badge>
+                            ) : (
+                              <Badge variant="danger" size="sm" dot>
+                                Inactive
+                              </Badge>
+                            )}
                           </TableCell>
                           {/* Registration date cell */}
                           <TableCell className="text-xs text-slate-500 dark:text-slate-400">
@@ -2383,42 +2377,29 @@ const AdminDashboard = () => {
                                 </>
                               )}
 
-                              {/* If account is not admin, allow toggling active/inactive status */}
+                              {/* For non-admin accounts, provide Activate/Deactivate controls */}
                               {u.role !== 'admin' && (
-                                <Button
-                                  variant={u.isActive ? 'outline' : 'primary'}
-                                  size="sm"
-                                  icon={Power}
-                                  onClick={() => handleToggleUserStatus(u)}
-                                  title={u.isActive ? 'Deactivate User' : 'Activate User'}
-                                >
-                                  {u.isActive ? 'Deactivate' : 'Activate'}
-                                </Button>
-                              )}
-
-                              {/* If account is active and non-admin, render access Revocation button */}
-                              {u.status === 'active' && u.role !== 'admin' && (
-                                <Button
-                                  variant="danger"
-                                  size="sm"
-                                  icon={UserX}
-                                  onClick={() => handleOpenRevoke(u)}
-                                >
-                                  Revoke
-                                </Button>
-                              )}
-
-                              {/* If account is revoked and non-admin, render Restore button */}
-                              {u.status === 'revoked' && u.role !== 'admin' && (
-                                <Button
-                                  variant="primary"
-                                  size="sm"
-                                  icon={CheckCircle}
-                                  onClick={() => handleRestoreUser(u)}
-                                  title="Restore Account Access"
-                                >
-                                  Restore
-                                </Button>
+                                (u.status === 'active' && u.isActive) ? (
+                                  <Button
+                                    variant="danger"
+                                    size="sm"
+                                    icon={PowerOff}
+                                    onClick={() => handleOpenStatusModal(u, 'deactivate')}
+                                    title="Deactivate Account"
+                                  >
+                                    Deactivate
+                                  </Button>
+                                ) : (u.status !== 'pending' && u.status !== 'rejected') ? (
+                                  <Button
+                                    variant="primary"
+                                    size="sm"
+                                    icon={Power}
+                                    onClick={() => handleOpenStatusModal(u, 'activate')}
+                                    title="Activate Account"
+                                  >
+                                    Activate
+                                  </Button>
+                                ) : null
                               )}
                             {/* Close actions wrapper */}
                             </div>
@@ -2462,13 +2443,13 @@ const AdminDashboard = () => {
                           <Button
                             variant="danger"
                             size="sm"
-                            icon={UserX}
+                            icon={PowerOff}
                             onClick={() => {
-                              setBulkRevokeReason('');
-                              setIsBulkRevokeModalOpen(true);
+                              setBulkDeactivateReason('');
+                              setIsBulkDeactivateModalOpen(true);
                             }}
                           >
-                            Revoke Selected ({selectedActiveUsers.length})
+                            Deactivate Selected ({selectedActiveUsers.length})
                           </Button>
                         )}
                       </div>
@@ -2487,36 +2468,31 @@ const AdminDashboard = () => {
               title="Institution Student Master Registry" /* Card heading */
               subtitle="Authoritative student records for automated verification and identity validation" /* Card subtitle */
               headerAction={
-                // Primary action button to open Add Master Student modal
-                <Button
-                  variant="primary"
-                  size="sm"
-                  icon={Plus}
-                  onClick={handleOpenAddRegistry}
-                >
-                  Add Master Student
-                </Button>
+                <div className="flex items-center space-x-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => navigate('/admin/student-registry')}
+                  >
+                    Open Standalone Registry
+                  </Button>
+                  <Button
+                    variant="primary"
+                    size="sm"
+                    icon={Plus}
+                    onClick={handleOpenAddRegistry}
+                  >
+                    Add Master Student
+                  </Button>
+                </div>
               }
             >
-              {/* Registry Search & Status Filters Bar */}
-              <div className="mb-4 grid grid-cols-1 sm:grid-cols-12 gap-3">
-                {/* Search input column taking 8 grid columns */}
-                <div className="sm:col-span-8">
-                  {/* Search input for student ID, name, or institutional email */}
-                  <Input
-                    placeholder="Search by student ID, name, or institutional email..."
-                    icon={Search}
-                    value={registrySearch}
-                    onChange={(e) => setRegistrySearch(e.target.value)}
-                    onKeyDown={(e) => {
-                      // Execute registry search on Enter key press
-                      if (e.key === 'Enter') loadRegistryList();
-                    }}
-                  />
-                {/* Close search column */}
+              {/* Registry Status Filter Bar */}
+              <div className="mb-4 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
+                <div className="text-xs font-semibold text-slate-500 dark:text-slate-400">
+                  Total Records: {registryTotal} institutional student{registryTotal === 1 ? '' : 's'}
                 </div>
-                {/* Status filter dropdown taking 3 grid columns */}
-                <div className="sm:col-span-3">
+                <div className="w-full sm:w-56">
                   <Select
                     options={[
                       { value: '', label: 'All Registry Statuses' },
@@ -2528,21 +2504,7 @@ const AdminDashboard = () => {
                     value={registryStatusFilter}
                     onChange={(e) => setRegistryStatusFilter(e.target.value)}
                   />
-                {/* Close status dropdown column */}
                 </div>
-                {/* Search submit button taking 1 grid column */}
-                <div className="sm:col-span-1">
-                  <Button
-                    variant="outline"
-                    size="md"
-                    fullWidth
-                    icon={Search}
-                    onClick={loadRegistryList}
-                    aria-label="Search registry"
-                  />
-                {/* Close button column */}
-                </div>
-              {/* Close filters bar grid */}
               </div>
 
               {/* Conditional loading spinner while querying registry */}
@@ -2691,27 +2653,14 @@ const AdminDashboard = () => {
           subtitle="System-wide review of examinations, author assignments, access types, and status moderation" /* Card subtitle */
         >
           {/* Assessment Filter Bar */}
-          <div className="mb-4 grid grid-cols-1 sm:grid-cols-12 gap-3">
-            {/* Search input column taking 8 grid columns */}
-            <div className="sm:col-span-8">
-              {/* Text input to search examinations */}
-              <Input
-                placeholder="Search assessments by title, description, or category..."
-                icon={Search}
-                value={assessmentSearch}
-                onChange={(e) => setAssessmentSearch(e.target.value)}
-                onKeyDown={(e) => {
-                  // Execute assessments query on Enter key press
-                  if (e.key === 'Enter') loadAssessmentsList();
-                }}
-              />
-            {/* Close search column */}
+          <div className="mb-4 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
+            <div className="text-xs font-semibold text-slate-500 dark:text-slate-400">
+              Moderate examinations across all departments and faculty authors
             </div>
-            {/* Status filter dropdown taking 3 grid columns */}
-            <div className="sm:col-span-3">
+            <div className="w-full sm:w-52">
               <Select
                 options={[
-                  { value: '', label: 'All Statuses' },
+                  { value: '', label: 'All Status' },
                   { value: 'published', label: 'Published' },
                   { value: 'draft', label: 'Draft' },
                   { value: 'archived', label: 'Archived' },
@@ -2719,20 +2668,7 @@ const AdminDashboard = () => {
                 value={assessmentStatusFilter}
                 onChange={(e) => setAssessmentStatusFilter(e.target.value)}
               />
-            {/* Close status dropdown column */}
             </div>
-            {/* Search submit button taking 1 grid column */}
-            <div className="sm:col-span-1">
-              <Button
-                variant="outline"
-                size="md"
-                fullWidth
-                icon={Search}
-                onClick={loadAssessmentsList}
-              />
-            {/* Close button column */}
-            </div>
-          {/* Close assessment filter bar grid */}
           </div>
 
           {/* Conditional loading skeleton and empty state when no assessments match criteria */}
@@ -2855,12 +2791,12 @@ const AdminDashboard = () => {
           title="System Security & Operations Audit Trail" /* Card heading */
           subtitle="Immutable chronological ledger of all platform administrative, authentication, and security actions" /* Card subtitle */
         >
-          {/* Action Filter & Search Bar */}
+          {/* Action Filter Bar */}
           <div className="mb-4 flex flex-col md:flex-row md:items-center justify-between gap-3">
             {/* Filter controls wrapper */}
             <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 w-full md:w-auto flex-1 max-w-xl">
               {/* Action type dropdown wrapper */}
-              <div className="w-full sm:w-64">
+              <div className="w-full sm:w-72">
                 {/* Select dropdown offering all logged action types */}
                 <Select
                   value={logActionFilter}
@@ -2888,18 +2824,6 @@ const AdminDashboard = () => {
                   ]}
                 />
               {/* Close dropdown wrapper */}
-              </div>
-              {/* Text search input wrapper */}
-              <div className="relative flex-1">
-                <Input
-                  type="text"
-                  placeholder="Search by action, username, email, or role..."
-                  value={logSearchQuery}
-                  onChange={(e) => setLogSearchQuery(e.target.value)}
-                  icon={Search}
-                  className="w-full"
-                />
-              {/* Close search input wrapper */}
               </div>
             {/* Close filter controls wrapper */}
             </div>
@@ -3074,19 +2998,11 @@ const AdminDashboard = () => {
             {/* Close 2-column fields grid */}
             </div>
 
-            {/* Field 5: System-wide Announcement Banner */}
-            <div>
-              <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
-                System-wide Announcement Banner (Optional)
-              </label>
-              <textarea
-                className="w-full px-3 py-2 rounded-xl text-xs border border-surface-light-border dark:border-surface-dark-border bg-white dark:bg-surface-dark-muted text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-brand-primary"
-                rows="2"
-                placeholder="Broadcast a message across all user dashboards..."
-                value={settingsForm.announcementBanner}
-                onChange={(e) => setSettingsForm({ ...settingsForm, announcementBanner: e.target.value })}
-              />
-            </div>
+            {/* Field 5: System-wide Announcement Management */}
+            <AnnouncementEditorSection
+              initialMessage={settingsForm.announcementBanner}
+              onMessageSync={(msg) => setSettingsForm((prev) => ({ ...prev, announcementBanner: msg }))}
+            />
 
             {/* Operational Policies & Feature Toggles box */}
             <div className="p-4 rounded-2xl border border-surface-light-border dark:border-surface-dark-border bg-slate-50/60 dark:bg-surface-dark-muted/40 space-y-4">
@@ -3191,56 +3107,8 @@ const AdminDashboard = () => {
         </Card>
         )}
 
-        {/* Administrator Profile & Identity Card */}
-        <Card
-          title="Administrator Profile"
-          subtitle="Account identity credentials, administrative access, and profile picture"
-        >
-          <div className="flex flex-col sm:flex-row items-center sm:items-start gap-6">
-            <ProfilePhotoUploader
-              avatar={user?.avatar}
-              name={user?.name}
-              role="admin"
-              onPhotoUpdated={() => refreshProfile?.()}
-            />
-
-            <div className="flex-1 space-y-4 text-center sm:text-left w-full">
-              <div>
-                <div className="flex flex-wrap items-center justify-center sm:justify-start gap-2">
-                  <h3 className="text-lg font-bold text-slate-900 dark:text-slate-100">
-                    {user?.name}
-                  </h3>
-                  <Badge variant="primary" size="sm" className="uppercase tracking-wider text-[10px]">
-                    Administrator
-                  </Badge>
-                </div>
-                <p className="text-xs text-slate-400 dark:text-slate-500 mt-0.5">{user?.email}</p>
-              </div>
-
-              {/* Immutable Admin ID Box */}
-              <div className="p-3.5 rounded-2xl bg-[#FFF9F2] dark:bg-surface-dark-muted border border-surface-light-border dark:border-surface-dark-border text-left">
-                <div className="flex items-center justify-between">
-                  <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500">
-                    Admin ID
-                  </span>
-                  <span className="text-xs text-slate-400" title="Permanent institutional identifier">
-                    <Lock className="w-3.5 h-3.5 text-slate-400 inline" />
-                  </span>
-                </div>
-                <div className="mt-1 text-sm font-mono font-bold text-indigo-700 dark:text-indigo-400 flex items-center justify-between">
-                  <span>{user?.adminId || 'ADM-2026-001'}</span>
-                  <span className="text-[11px] font-sans font-normal text-slate-400">🔒 Immutable</span>
-                </div>
-                <p className="text-[10px] text-slate-400 mt-1">
-                  Permanent administrative identifier assigned by institutional registry.
-                </p>
-              </div>
-            </div>
-          </div>
-        </Card>
-
-        {/* Administrator Two-Factor Authentication Section */}
-        <TwoFactorAuthSection profile={user} onProfileUpdate={() => {}} />
+        {/* Multi-Factor Authentication Management */}
+        <TwoFactorAuthSection profile={user} onProfileUpdate={() => refreshProfile?.()} />
       {/* Close Settings tab container */}
       </div>
       )}
@@ -3274,7 +3142,7 @@ const AdminDashboard = () => {
             </div>
 
             {/* 2-column grid of user metadata cards */}
-            <div className="grid grid-cols-2 gap-3 text-xs">
+            <div className="grid grid-cols-1 xs:grid-cols-2 gap-2.5 sm:gap-3 text-xs">
               {/* Account Role */}
               <div className="p-2.5 rounded-lg bg-slate-50 dark:bg-surface-dark-muted">
                 <span className="text-slate-400 block mb-0.5">Account Role</span>
@@ -3284,10 +3152,18 @@ const AdminDashboard = () => {
               </div>
               {/* Account Status */}
               <div className="p-2.5 rounded-lg bg-slate-50 dark:bg-surface-dark-muted">
-                <span className="text-slate-400 block mb-0.5">Account Status</span>
-                <span className="font-semibold uppercase text-slate-800 dark:text-slate-200">
-                  {selectedUser.status}
-                </span>
+                <span className="text-slate-400 block mb-1">Account Status</span>
+                <div>
+                  {selectedUser.status === 'pending' ? (
+                    <Badge variant="warning" size="sm" dot>Pending</Badge>
+                  ) : selectedUser.status === 'rejected' ? (
+                    <Badge variant="neutral" size="sm" dot>Rejected</Badge>
+                  ) : (selectedUser.status === 'active' && selectedUser.isActive) ? (
+                    <Badge variant="success" size="sm" dot>Active</Badge>
+                  ) : (
+                    <Badge variant="danger" size="sm" dot>Inactive</Badge>
+                  )}
+                </div>
               </div>
               {/* Institute Code */}
               <div className="p-2.5 rounded-lg bg-slate-50 dark:bg-surface-dark-muted">
@@ -3344,24 +3220,24 @@ const AdminDashboard = () => {
               </div>
             )}
 
-            {/* Revocation Record if available */}
+            {/* Deactivation Record if available */}
             {selectedUser.revokedAt && (
               <div className="p-3 rounded-lg border border-red-200 dark:border-red-900/30 bg-red-50/50 dark:bg-red-950/20 text-xs">
                 <span className="font-semibold text-red-800 dark:text-red-300 block mb-0.5">
-                  Revocation Record
+                  Deactivation Record
                 </span>
                 <p className="text-red-700 dark:text-red-400">
-                  Revoked on {new Date(selectedUser.revokedAt).toLocaleString()}
+                  Deactivated on {new Date(selectedUser.revokedAt).toLocaleString()}
                   {selectedUser.revokedBy?.name ? ` by ${selectedUser.revokedBy.name}` : ''}
                 </p>
 
-                {/* Specific rejection reason description if recorded */}
+                {/* Specific deactivation reason description if recorded */}
                 {selectedUser.rejectionReason && (
                   <p className="text-red-600 dark:text-red-300 mt-1 italic">
                     Reason: {selectedUser.rejectionReason}
                   </p>
                 )}
-              {/* Close revocation record box */}
+              {/* Close deactivation record box */}
               </div>
             )}
           {/* Close user details space-y-4 container */}
@@ -3392,6 +3268,7 @@ const AdminDashboard = () => {
               size="sm"
               onClick={handleConfirmApprove}
               isLoading={isActionSubmitting}
+              loadingText="Activating Account..."
               icon={CheckCircle}
             >
               Confirm & Activate Account
@@ -3447,6 +3324,7 @@ const AdminDashboard = () => {
               size="sm"
               onClick={handleConfirmBulkApprove}
               isLoading={isActionSubmitting}
+              loadingText="Approving..."
               icon={CheckCircle}
             >
               Approve {selectedPendingUserIds.length} User{selectedPendingUserIds.length === 1 ? '' : 's'}
@@ -3508,6 +3386,7 @@ const AdminDashboard = () => {
               size="sm"
               onClick={handleConfirmBulkReject}
               isLoading={isActionSubmitting}
+              loadingText="Rejecting..."
               icon={XCircle}
             >
               Reject {selectedPendingUserIds.length} User{selectedPendingUserIds.length === 1 ? '' : 's'}
@@ -3562,17 +3441,17 @@ const AdminDashboard = () => {
         </div>
       </Modal>
 
-      {/* BULK REVOCATION CONFIRMATION MODAL */}
+      {/* BULK DEACTIVATE CONFIRMATION MODAL */}
       <Modal
-        isOpen={isBulkRevokeModalOpen}
-        onClose={() => !isActionSubmitting && setIsBulkRevokeModalOpen(false)}
-        title={`Revoke ${selectedActiveUsers.length} Active Account${selectedActiveUsers.length === 1 ? '' : 's'}?`}
+        isOpen={isBulkDeactivateModalOpen}
+        onClose={() => !isActionSubmitting && setIsBulkDeactivateModalOpen(false)}
+        title={`Deactivate ${selectedActiveUsers.length} Active Account${selectedActiveUsers.length === 1 ? '' : 's'}?`}
         footer={
           <>
             <Button
               variant="outline"
               size="sm"
-              onClick={() => setIsBulkRevokeModalOpen(false)}
+              onClick={() => setIsBulkDeactivateModalOpen(false)}
               disabled={isActionSubmitting}
             >
               Cancel
@@ -3580,18 +3459,19 @@ const AdminDashboard = () => {
             <Button
               variant="danger"
               size="sm"
-              onClick={handleConfirmBulkRevoke}
+              onClick={handleConfirmBulkDeactivate}
               isLoading={isActionSubmitting}
-              icon={UserX}
+              loadingText="Deactivating..."
+              icon={PowerOff}
             >
-              Revoke {selectedActiveUsers.length} Account{selectedActiveUsers.length === 1 ? '' : 's'}
+              Deactivate {selectedActiveUsers.length} Account{selectedActiveUsers.length === 1 ? '' : 's'}
             </Button>
           </>
         }
       >
         <div className="space-y-4">
           <p className="text-sm text-slate-600 dark:text-slate-300">
-            You are about to revoke workspace access for <strong>{selectedActiveUsers.length}</strong> active user account{selectedActiveUsers.length === 1 ? '' : 's'}. All active sessions will be terminated immediately.
+            You are about to deactivate workspace access for <strong>{selectedActiveUsers.length}</strong> active user account{selectedActiveUsers.length === 1 ? '' : 's'}. Inactive users cannot log in, and all active sessions will be terminated immediately.
           </p>
 
           <div className="max-h-48 overflow-y-auto space-y-2 border border-surface-light-border dark:border-surface-dark-border rounded-xl p-3 bg-slate-50 dark:bg-surface-dark-muted text-xs">
@@ -3617,19 +3497,19 @@ const AdminDashboard = () => {
 
           <div>
             <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
-              Revocation Reason (optional)
+              Deactivation Reason (optional)
             </label>
             <input
               type="text"
-              value={bulkRevokeReason}
-              onChange={(e) => setBulkRevokeReason(e.target.value)}
-              placeholder="e.g. Account access revoked by administrator"
+              value={bulkDeactivateReason}
+              onChange={(e) => setBulkDeactivateReason(e.target.value)}
+              placeholder="e.g. Account access deactivated by administrator"
               className="w-full px-3 py-2 text-xs bg-white dark:bg-surface-dark border border-surface-light-border dark:border-surface-dark-border rounded-xl focus:outline-none focus:border-red-500 text-slate-800 dark:text-slate-100"
             />
           </div>
 
           <div className="p-3 rounded-xl bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-900/40 text-xs text-red-700 dark:text-red-300">
-            <strong>Warning:</strong> The account status will transition to <strong>revoked</strong>. Session tokens will be invalidated immediately and a revocation advisory will be sent.
+            <strong>Warning:</strong> The account status will transition to <strong>Inactive</strong>. All active sessions will be terminated immediately.
           </div>
         </div>
       </Modal>
@@ -3817,55 +3697,66 @@ const AdminDashboard = () => {
       {/* Close Modal 3 */}
       </Modal>
 
-      {/* MODAL 4: REVOKE ACTIVE ACCOUNT CONFIRMATION */}
+      {/* MODAL 4: ACCOUNT STATUS CONFIRMATION (ACTIVATE / DEACTIVATE) */}
       <Modal
-        isOpen={isRevokeModalOpen}
-        onClose={() => setIsRevokeModalOpen(false)}
-        title="Revoke Active Account Access"
+        isOpen={isStatusConfirmModalOpen}
+        onClose={() => !isActionSubmitting && setIsStatusConfirmModalOpen(false)}
+        title={statusActionType === 'deactivate' ? 'Deactivate User Account' : 'Activate User Account'}
         footer={
           <>
-            {/* Cancel revocation button */}
             <Button
               variant="outline"
               size="sm"
-              onClick={() => setIsRevokeModalOpen(false)}
+              onClick={() => setIsStatusConfirmModalOpen(false)}
               disabled={isActionSubmitting}
             >
               Cancel
             </Button>
-            {/* Confirm revocation button */}
             <Button
-              variant="danger"
+              variant={statusActionType === 'deactivate' ? 'danger' : 'primary'}
               size="sm"
-              onClick={handleConfirmRevoke}
+              onClick={handleConfirmStatusChange}
               isLoading={isActionSubmitting}
-              icon={UserX}
+              icon={statusActionType === 'deactivate' ? PowerOff : Power}
             >
-              Revoke Account Access
+              {statusActionType === 'deactivate' ? 'Deactivate Account' : 'Activate Account'}
             </Button>
           </>
         }
       >
         <div className="space-y-4">
-          {/* Revocation confirmation warning displaying active user name and email */}
-          <p className="text-sm text-slate-600 dark:text-slate-300">
-            You are about to revoke workspace access for active user{' '}
-            <strong className="text-slate-900 dark:text-slate-100">{selectedUser?.name}</strong> (
-            {selectedUser?.email}).
-          </p>
+          {statusActionType === 'deactivate' ? (
+            <>
+              <p className="text-sm text-slate-600 dark:text-slate-300">
+                Are you sure you want to deactivate account access for active user{' '}
+                <strong className="text-slate-900 dark:text-slate-100">{selectedUser?.name}</strong> (
+                {selectedUser?.email})?
+              </p>
 
-          {/* Revocation justification input field */}
-          <Input
-            label="Revocation Reason"
-            placeholder="e.g. Academic integrity violation or graduation status"
-            value={actionReason}
-            onChange={(e) => setActionReason(e.target.value)}
-          />
+              <Input
+                label="Deactivation Reason (Optional)"
+                placeholder="e.g. Leave of absence, graduation, or administrative policy"
+                value={actionReason}
+                onChange={(e) => setActionReason(e.target.value)}
+              />
 
-          {/* High-priority danger notice detailing immediate session termination */}
-          <div className="p-3 rounded-xl bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-900/40 text-xs text-red-700 dark:text-red-300">
-            <strong>Warning:</strong> The account status will transition to <strong>revoked</strong> and all active sessions will be terminated immediately.
-          </div>
+              <div className="p-3 rounded-xl bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-900/40 text-xs text-red-700 dark:text-red-300">
+                <strong>Notice:</strong> The account status will transition to <strong>Inactive</strong>. Inactive users cannot authenticate or refresh sessions, and all active sessions will be terminated immediately.
+              </div>
+            </>
+          ) : (
+            <>
+              <p className="text-sm text-slate-600 dark:text-slate-300">
+                Are you sure you want to activate account access for{' '}
+                <strong className="text-slate-900 dark:text-slate-100">{selectedUser?.name}</strong> (
+                {selectedUser?.email})?
+              </p>
+
+              <div className="p-3 rounded-xl bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-900/40 text-xs text-emerald-700 dark:text-emerald-300">
+                <strong>Notice:</strong> The account status will transition to <strong>Active</strong>. The user will be permitted to authenticate and access platform resources.
+              </div>
+            </>
+          )}
         </div>
       {/* Close Modal 4 */}
       </Modal>

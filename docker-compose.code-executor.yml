@@ -1,0 +1,125 @@
+# UAP Code Execution Microservice Modular Docker Compose Configuration
+# Provides independent containers for Executor API and Execution Worker
+# Usage: docker compose -f docker-compose.code-executor.yml up -d
+# With legacy SQL engines: docker compose -f docker-compose.code-executor.yml --profile sql-legacy up -d
+
+services:
+  # 1. Independent Execution REST API Container (No Docker socket access)
+  uap-code-executor:
+    image: uap-code-executor:latest
+    build:
+      context: ./code-IDE-service
+      dockerfile: Dockerfile.api
+    container_name: uap-code-executor
+    restart: unless-stopped
+    ports:
+      # Localhost loopback diagnostic access only; not accessible to external networks
+      - "127.0.0.1:5050:5050"
+    environment:
+      PORT: 5050
+      NODE_ENV: development
+      INTERNAL_API_KEY: ${EXECUTION_SERVICE_API_KEY:-${INTERNAL_API_KEY:-dev_uap_exec_internal_secret_key_32bytes!!}}
+      REDIS_HOST: uap-redis
+      REDIS_PORT: 6379
+      USE_REDIS_QUEUE: "true"
+    volumes:
+      - ./code-IDE-service/src:/app/src
+    networks:
+      - uap-exec-net
+      - uap-queue-net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5050/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  # 2. Independent Execution Worker Container (Orchestrates disposable runners)
+  uap-execution-worker:
+    image: uap-execution-worker:latest
+    build:
+      context: ./code-IDE-service
+      dockerfile: Dockerfile.worker
+    container_name: uap-execution-worker
+    restart: unless-stopped
+    environment:
+      NODE_ENV: development
+      DOCKER_SOCKET_PATH: /var/run/docker.sock
+      REDIS_HOST: uap-redis
+      REDIS_PORT: 6379
+      USE_REDIS_QUEUE: "true"
+      RUNNER_IMAGE_PYTHON: uap-runner-python:3.11-alpine
+      RUNNER_IMAGE_JAVASCRIPT: uap-runner-node:20-alpine
+      RUNNER_IMAGE_SQLITE: uap-runner-sqlite:3.45-alpine
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./code-IDE-service/src:/app/src
+    networks:
+      - uap-queue-net
+      - uap-sql-net
+    depends_on:
+      - uap-code-executor
+
+  # --- Legacy SQL Infrastructure (Preserved under 'docker compose --profile sql-legacy up') ---
+  uap-postgres-engine:
+    image: postgres:16.2-alpine3.19
+    container_name: uap-postgres-engine
+    restart: unless-stopped
+    profiles:
+      - sql-legacy
+    environment:
+      POSTGRES_DB: uap_sql_sandbox
+      POSTGRES_USER: uap_sql_admin
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-dev_postgres_password_uap}
+    networks:
+      - uap-sql-net
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 512M
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U uap_sql_admin -d uap_sql_sandbox"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  uap-mysql-engine:
+    image: mysql:8.3.0-oracle
+    container_name: uap-mysql-engine
+    restart: unless-stopped
+    profiles:
+      - sql-legacy
+    environment:
+      MYSQL_DATABASE: uap_sql_sandbox
+      MYSQL_USER: uap_sql_admin
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-dev_mysql_password_uap}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-dev_mysql_root_password_uap}
+    volumes:
+      - ./code-IDE-service/init-scripts/mysql-init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    networks:
+      - uap-sql-net
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 512M
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - 'mysqladmin ping -h 127.0.0.1 -u "$$MYSQL_USER" -p"$$MYSQL_PASSWORD" --silent'
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+networks:
+  uap-exec-net:
+    name: uap-exec-net
+    driver: bridge
+  uap-queue-net:
+    name: uap-queue-net
+    driver: bridge
+    internal: true
+  uap-sql-net:
+    name: uap-sql-net
+    driver: bridge
+    internal: true

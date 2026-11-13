@@ -1,0 +1,60 @@
+# UAP Core Infrastructure Modular Docker Compose Configuration
+# Usage: docker compose -f docker-compose.infra.yml up -d
+
+services:
+  uap-mongodb:
+    image: mongo:7.0-jammy
+    container_name: uap-mongodb
+    restart: unless-stopped
+    environment:
+      MONGO_INITDB_DATABASE: unified_assessment
+    volumes:
+      - uap_mongodb_data:/data/db
+    networks:
+      - uap-db-net
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  uap-redis:
+    image: redis:7.2-alpine
+    container_name: uap-redis
+    restart: unless-stopped
+    command: redis-server --appendonly no --save "" --maxmemory 256mb --maxmemory-policy volatile-lru
+    networks:
+      - uap-queue-net
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+networks:
+  uap-public-net:
+    name: uap-public-net
+    driver: bridge
+  uap-db-net:
+    name: uap-db-net
+    driver: bridge
+    internal: true
+  uap-exec-net:
+    name: uap-exec-net
+    driver: bridge
+  uap-queue-net:
+    name: uap-queue-net
+    driver: bridge
+    internal: true
+  uap-sql-net:
+    name: uap-sql-net
+    driver: bridge
+    internal: true
+
+volumes:
+  uap_mongodb_data:
+    name: unifiedassessmentplatformoriginal_uap_mongodb_data
+    external: true
+  uap_uploads_data:
+    name: unifiedassessmentplatformoriginal_uap_uploads_data
+    external: true

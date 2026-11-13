@@ -1,11 +1,14 @@
 import { useState, useEffect, useCallback } from 'react';
+import { useLocation } from 'react-router-dom';
+import { toast } from 'react-toastify';
 import { instructorService } from '../../services/instructor.service';
-import InstructorSearchBar from '../../components/instructor/InstructorSearchBar';
 import Card from '../../components/ui/Card';
 import Badge from '../../components/ui/Badge';
+import Button from '../../components/ui/Button';
 import EmptyState from '../../components/ui/EmptyState';
 import ErrorState from '../../components/ui/ErrorState';
 import TableSkeleton from '../../components/ui/TableSkeleton';
+import { useRefresh } from '../../hooks/useRefresh';
 import {
   Table,
   TableHead,
@@ -15,32 +18,49 @@ import {
   TableCell,
 } from '../../components/ui/Table';
 import {
-Search,
-FileCheck2,
-  Mail} from 'lucide-react';
+  X,
+  FileCheck2,
+  Mail,
+  RefreshCw,
+} from 'lucide-react';
 
 const StudentsList = () => {
+  const location = useLocation();
   const [students, setStudents] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState(null);
   const [searchTerm, setSearchTerm] = useState('');
 
-  const loadStudents = useCallback(async () => {
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    const q = params.get('search');
+    if (q) setSearchTerm(q);
+  }, [location.search]);
+
+  const loadStudents = useCallback(async (isManual = false) => {
     try {
-      setIsLoading(true);
+      if (!isManual) {
+        setIsLoading(true);
+      }
       setError(null);
       const res = await instructorService.getStudents();
       const list = Array.isArray(res) ? res : res.data || [];
       setStudents(list);
     } catch (err) {
       setError(err.message || 'Failed to retrieve student directory.');
+      throw err;
     } finally {
       setIsLoading(false);
     }
   }, []);
 
+  const { isRefreshing, refresh: handleRefresh } = useRefresh(
+    () => loadStudents(true),
+    { successMessage: 'Student directory refreshed!' }
+  );
+
   useEffect(() => {
-    loadStudents();
+    loadStudents(false).catch(() => {});
   }, [loadStudents]);
 
   const filteredStudents = students.filter((s) => {
@@ -54,11 +74,6 @@ const StudentsList = () => {
 
   return (
     <div className="space-y-6">
-      {/* Prominent Workspace Search Bar */}
-      <div className="rounded-2xl border border-[#EBE3D8] dark:border-[#2D3748] bg-white dark:bg-[#1A202C] p-4 sm:p-5 shadow-warm-xs">
-        <InstructorSearchBar placeholder="Search student directory, course assessments, or submissions..." />
-      </div>
-
       {/* Header Banner */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
@@ -76,15 +91,35 @@ const StudentsList = () => {
           </p>
         </div>
 
-        <div className="relative w-full sm:w-64">
-          <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-[#64748B]" />
-          <input
-            type="text"
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            placeholder="Search students..."
-            className="w-full pl-9 pr-3 py-2 text-xs bg-[#FFF9F2] dark:bg-[#12161F] border border-[#EBE3D8] dark:border-[#2D3748] rounded-xl text-[#1F2937] dark:text-[#F9FAFB] placeholder-[#64748B]/60 focus:outline-none focus:border-[#E05D38] focus:ring-1 focus:ring-[#E05D38]/20 transition-all"
-          />
+        <div className="flex items-center gap-2">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            icon={RefreshCw}
+            iconClassName={isRefreshing ? 'animate-spin' : ''}
+            onClick={handleRefresh}
+            isLoading={isRefreshing}
+            loadingText="Refreshing..."
+            title="Refresh student directory"
+            aria-label={isRefreshing ? 'Refreshing student directory' : 'Refresh student directory'}
+          >
+            Refresh
+          </Button>
+
+          {searchTerm && (
+            <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold bg-[#FDECE2] text-[#E05D38] dark:bg-[#341C16] dark:text-[#F4A261] border border-[#E05D38]/30">
+              <span>Filter: &ldquo;{searchTerm}&rdquo;</span>
+              <button
+                type="button"
+                onClick={() => setSearchTerm('')}
+                className="hover:text-red-600 transition-colors cursor-pointer ml-1"
+                title="Clear search filter"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          )}
         </div>
       </div>
 

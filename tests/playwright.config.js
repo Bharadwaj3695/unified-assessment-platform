@@ -36,11 +36,11 @@ module.exports = defineConfig({
   ],
   webServer: [
     {
-      command: 'npm --prefix backend start',
+      command: 'ALLOW_IN_MEMORY_DB=true NODE_ENV=test npm --prefix backend start',
       cwd: '..',
       url: 'http://localhost:5000/api/health',
       reuseExistingServer: true,
-      timeout: 30000,
+      timeout: 45000,
     },
     {
       command: 'npm --prefix frontend run dev -- --host 0.0.0.0 --port 5173',

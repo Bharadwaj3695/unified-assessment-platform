@@ -43,13 +43,33 @@ export const adminService = {
     return res.data;
   // Conclude the bulkRejectUsers method definition
   },
-  // Method to bulk revoke active user accounts
+  // Method to bulk revoke active user accounts (backward compatibility)
   bulkRevokeUsers: async (userIds, data = {}) => {
     // Send an asynchronous HTTP POST request to the bulk revocation endpoint
     const res = await api.post('/admin/users/bulk-revoke', { userIds, ...data });
     // Return the bulk revocation response payload containing counts and outcome details
     return res.data;
   // Conclude the bulkRevokeUsers method definition
+  },
+  // Method to bulk deactivate active user accounts
+  bulkDeactivateUsers: async (userIds, data = {}) => {
+    const res = await api.post('/admin/users/bulk-deactivate', { userIds, ...data });
+    return res.data;
+  },
+  // Method to bulk activate inactive user accounts
+  bulkActivateUsers: async (userIds, data = {}) => {
+    const res = await api.post('/admin/users/bulk-activate', { userIds, ...data });
+    return res.data;
+  },
+  // Method to activate an inactive user account
+  activateUser: async (id) => {
+    const res = await api.put(`/admin/users/${id}/activate`);
+    return res.data;
+  },
+  // Method to deactivate an active user account
+  deactivateUser: async (id, data = {}) => {
+    const res = await api.put(`/admin/users/${id}/deactivate`, data);
+    return res.data;
   },
   // Method to restore a revoked or deactivated user account
   restoreUser: async (id) => {

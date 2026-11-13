@@ -130,6 +130,42 @@ export const authService = {
     return res.data;
   // Conclude the recoveryMfa method definition
   },
+  // Method to request a 6-digit email OTP during MFA verification
+  sendMfaEmailOtp: async ({ mfaToken }) => {
+    // Send an asynchronous HTTP POST request to dispatch email OTP
+    const res = await api.post('/auth/mfa/email-otp/send', { mfaToken });
+    // Return response containing masked email and expiration metadata
+    return res.data;
+  // Conclude the sendMfaEmailOtp method definition
+  },
+  // Method to verify a 6-digit email OTP during MFA verification
+  verifyMfaEmailOtp: async ({ mfaToken, code }) => {
+    // Send an asynchronous HTTP POST request with temporary challenge token and email OTP code
+    const res = await api.post('/auth/mfa/email-otp/verify', { mfaToken, code });
+    // Return authenticated session tokens upon valid email code verification
+    return res.data;
+  // Conclude the verifyMfaEmailOtp method definition
+  },
+  // Method to initiate Email OTP setup and dispatch code to registered email
+  setupEmailOtp: async ({ password, code } = {}) => {
+    const res = await api.post('/auth/mfa/email-otp/setup', { password, code });
+    return res.data?.data || res.data;
+  },
+  // Method to confirm Email OTP setup using valid 6-digit code
+  setupConfirmEmailOtp: async (code) => {
+    const res = await api.post('/auth/mfa/email-otp/setup-confirm', { code });
+    return res.data?.data || res.data;
+  },
+  // Method to disable Email OTP independently
+  disableEmailOtp: async ({ password, code } = {}) => {
+    const res = await api.post('/auth/mfa/email-otp/disable', { password, code });
+    return res.data?.data || res.data;
+  },
+  // Method to dispatch a test verification code to the registered email
+  sendEmailOtpTest: async () => {
+    const res = await api.post('/auth/mfa/email-otp/send-test');
+    return res.data?.data || res.data;
+  },
   // Method to disable two-factor authentication with password and TOTP confirmation
   disableMfa: async ({ password, code }) => {
     // Send an asynchronous HTTP POST request with current password and MFA code to disable TOTP

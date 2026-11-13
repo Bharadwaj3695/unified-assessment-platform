@@ -111,6 +111,7 @@ const GoogleCallback = () => {
               mfaToken: response.mfaToken,
               email: response.user?.email || '',
               role: response.user?.role || 'student',
+              allowedMethods: response.allowedMethods || ['totp', 'email_otp', 'recovery_code'],
             })
           );
           // Navigate user to MFA verification page
@@ -119,6 +120,7 @@ const GoogleCallback = () => {
             state: {
               mfaToken: response.mfaToken,
               email: response.user?.email || '',
+              allowedMethods: response.allowedMethods || ['totp', 'email_otp', 'recovery_code'],
             },
           });
           // Terminate callback processing

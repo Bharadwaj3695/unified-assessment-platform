@@ -79,6 +79,32 @@ const systemSettingSchema = new mongoose.Schema(
       // Default enabled
       default: true,
     },
+    // Institutional security policy: permits or forbids Email OTP as an authorized MFA method/fallback
+    mfaEmailOtpEnabled: {
+      type: Boolean,
+      default: true,
+    },
+    // Institutional security policy: expiration window in minutes for email OTP codes
+    mfaEmailOtpExpiryMinutes: {
+      type: Number,
+      default: 5,
+      min: 1,
+      max: 15,
+    },
+    // Institutional security policy: resend cooldown in seconds between email OTP requests
+    mfaEmailOtpResendCooldownSeconds: {
+      type: Number,
+      default: 60,
+      min: 10,
+      max: 300,
+    },
+    // Institutional security policy: maximum permitted email OTP resends per login challenge
+    mfaEmailOtpMaxResends: {
+      type: Number,
+      default: 3,
+      min: 1,
+      max: 10,
+    },
     // Reference to the administrator User who last modified platform settings
     updatedBy: {
       // MongoDB ObjectId type

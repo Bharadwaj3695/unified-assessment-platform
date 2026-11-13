@@ -141,12 +141,18 @@ api.interceptors.response.use(
       const isAuthEndpoint =
         // Login credential endpoint
         originalRequest?.url?.includes('/auth/login') ||
+        // Google authentication endpoints
+        originalRequest?.url?.includes('/auth/google') ||
         // Token refresh endpoint itself
         originalRequest?.url?.includes('/auth/refresh') ||
         // MFA TOTP verification endpoint
         originalRequest?.url?.includes('/auth/mfa/verify') ||
         // MFA backup recovery code verification endpoint
         originalRequest?.url?.includes('/auth/mfa/recovery') ||
+        // MFA email OTP endpoints
+        originalRequest?.url?.includes('/auth/mfa/email-otp') ||
+        originalRequest?.url?.includes('/auth/mfa/send-email-otp') ||
+        originalRequest?.url?.includes('/auth/mfa/verify-email-otp') ||
         // User registration endpoint
         originalRequest?.url?.includes('/auth/register');
 
@@ -329,7 +335,10 @@ api.interceptors.response.use(
       const isChallengeUrl =
         originalRequest?.url?.includes('/auth/login') ||
         originalRequest?.url?.includes('/auth/mfa/verify') ||
-        originalRequest?.url?.includes('/auth/mfa/recovery');
+        originalRequest?.url?.includes('/auth/mfa/recovery') ||
+        originalRequest?.url?.includes('/auth/mfa/email-otp') ||
+        originalRequest?.url?.includes('/auth/mfa/send-email-otp') ||
+        originalRequest?.url?.includes('/auth/mfa/verify-email-otp');
       // If not a pending challenge URL, purge stored token
       if (!isChallengeUrl) {
         // Remove token from storage

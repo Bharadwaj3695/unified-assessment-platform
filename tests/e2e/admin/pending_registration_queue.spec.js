@@ -45,20 +45,24 @@ test.describe('Admin Pending Registration Queue: Search, Filters & Bulk Approval
     await expect(page.locator('text=Pending Registration Queue')).toBeVisible({ timeout: 10000 });
   });
 
-  test('13. Search pending users by name and email', async ({ page }) => {
+  test('13. Redundant page-level pending search is removed and navbar search finds pending users', async ({ page }) => {
     await expect(page.locator(`text=${studentUserEmail}`)).toBeVisible({ timeout: 10000 });
     await expect(page.locator(`text=${facultyUserEmail}`)).toBeVisible({ timeout: 10000 });
 
-    const searchInput = page.locator('#pendingSearchInput');
-    await searchInput.fill(studentUserEmail);
+    // Verify redundant in-page search bar is removed
+    await expect(page.locator('#pendingSearchInput')).toHaveCount(0);
 
-    await expect(page.locator(`text=${studentUserEmail}`)).toBeVisible();
-    await expect(page.locator(`text=${facultyUserEmail}`)).not.toBeVisible();
+    // Verify top navbar search bar replaces it and finds pending user
+    const navSearch = page.locator('header input[placeholder="Search users, assessments..."]');
+    await expect(navSearch).toBeVisible();
+    await navSearch.fill(studentUserEmail);
+    await page.waitForTimeout(400);
 
-    // Clear search
-    await searchInput.fill('');
-    await expect(page.locator(`text=${studentUserEmail}`)).toBeVisible();
-    await expect(page.locator(`text=${facultyUserEmail}`)).toBeVisible();
+    const dropdown = page.locator('#admin-search-results');
+    await expect(dropdown).toBeVisible();
+    await expect(dropdown.locator(`text=${studentUserEmail}`).first()).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(dropdown).not.toBeVisible();
   });
 
   test('14, 15, 16. Role filter works (Students, Faculty, All)', async ({ page }) => {
@@ -134,9 +138,9 @@ test.describe('Admin Pending Registration Queue: Search, Filters & Bulk Approval
   });
 
   test('22. Successful bulk approval clears approved users and selection', async ({ page }) => {
-    // Search to isolate our test users
-    const searchInput = page.locator('#pendingSearchInput');
-    await searchInput.fill(studentUserEmail);
+    // Filter by student role to isolate student test users
+    const roleSelect = page.locator('#pendingRoleFilterSelect');
+    await roleSelect.selectOption('student');
 
     const studentRow = page.locator('tr', { hasText: studentUserEmail });
     await studentRow.locator('input[type="checkbox"]').check();
@@ -151,6 +155,9 @@ test.describe('Admin Pending Registration Queue: Search, Filters & Bulk Approval
     await expect(page.locator('text=These users will be approved and activated.')).not.toBeVisible({ timeout: 10000 });
     await expect(page.locator(`text=${studentUserEmail}`)).not.toBeVisible({ timeout: 10000 });
     await expect(page.locator('text=Selected: 0')).toBeVisible();
+
+    // Reset role filter
+    await roleSelect.selectOption('all');
   });
 
   test('24. Individual Approve action still works', async ({ page }) => {

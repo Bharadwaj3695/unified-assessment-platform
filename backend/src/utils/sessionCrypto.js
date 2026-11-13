@@ -5,63 +5,174 @@ const env = require('../config/env');
 // Default fallback key (32 bytes hex) for development/test environments
 const DEV_FALLBACK_KEY = '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef';
 
-// Active key registry supporting zero-downtime key rotation
-const KEY_REGISTRY = {};
+// Cached key configuration to avoid parsing on every operation while remaining dynamic
+let cachedRawKey = null;
+let cachedActiveVersionEnv = null;
+let cachedRegistry = null;
+let cachedActiveVersion = null;
 
 /**
- * Validates and retrieves the 256-bit encryption key for a given version.
- * @param {string} version - Key version string (e.g. 'v1')
+ * Validates that a key string is exactly 64 hexadecimal characters (32 bytes).
+ * @param {string} keyHex - Key string to validate
+ * @param {string} [identifier='Key'] - Label for error messages
  * @returns {Buffer} 32-byte key buffer
  */
-function getKey(version = 'v1') {
-  if (KEY_REGISTRY[version]) {
-    return KEY_REGISTRY[version];
+function validateHexKey(keyHex, identifier = 'Key') {
+  if (typeof keyHex !== 'string' || !/^[0-9a-fA-F]{64}$/.test(keyHex.trim())) {
+    throw new Error(`FATAL: ${identifier} must be a valid 64-character (32-byte) hexadecimal string`);
   }
+  return Buffer.from(keyHex.trim(), 'hex');
+}
 
-  // Retrieve raw key string from environment or dev fallback
-  let rawKey = process.env.SESSION_ENCRYPTION_KEY || env.SESSION_ENCRYPTION_KEY;
-  if (!rawKey) {
+/**
+ * Parses and validates encryption key configuration from raw input and active version.
+ * @param {string} rawKey - Raw hex key or JSON dictionary string
+ * @param {string} [activeVersionEnv] - Explicit active version override
+ * @returns {{ registry: Object.<string, Buffer>, activeVersion: string }}
+ */
+function parseKeyConfig(rawKey, activeVersionEnv) {
+  let effectiveRawKey = rawKey;
+  if (!effectiveRawKey) {
     if (process.env.NODE_ENV === 'production') {
       throw new Error('FATAL: SESSION_ENCRYPTION_KEY environment variable is required in production');
     }
-    rawKey = DEV_FALLBACK_KEY;
+    effectiveRawKey = DEV_FALLBACK_KEY;
   }
 
-  // Support JSON dictionary of keys for rotation: e.g. {"v1": "hex...", "v2": "hex..."}
-  if (rawKey.trim().startsWith('{')) {
+  const trimmed = effectiveRawKey.trim();
+  const registry = {};
+
+  if (trimmed.startsWith('{')) {
+    let parsed;
     try {
-      const parsed = JSON.parse(rawKey);
-      for (const [v, hexKey] of Object.entries(parsed)) {
-        const buf = Buffer.from(hexKey, 'hex');
-        if (buf.length === 32) {
-          KEY_REGISTRY[v] = buf;
-        }
-      }
-      if (KEY_REGISTRY[version]) {
-        return KEY_REGISTRY[version];
-      }
+      parsed = JSON.parse(trimmed);
     } catch {
-      // Fall through to single hex key parsing
+      throw new Error('FATAL: Malformed JSON in SESSION_ENCRYPTION_KEY');
     }
+
+    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+      throw new Error('FATAL: SESSION_ENCRYPTION_KEY JSON must be an object of key versions');
+    }
+
+    const versionKeys = Object.keys(parsed);
+    if (versionKeys.length === 0) {
+      throw new Error('FATAL: SESSION_ENCRYPTION_KEY JSON dictionary must contain at least one key');
+    }
+
+    for (const [ver, hexVal] of Object.entries(parsed)) {
+      const cleanVer = typeof ver === 'string' ? ver.trim() : '';
+      if (!cleanVer) {
+        throw new Error('FATAL: Key version identifier must be a non-empty string');
+      }
+      registry[cleanVer] = validateHexKey(hexVal, `Key for version "${cleanVer}"`);
+    }
+
+    let activeVersion;
+    if (activeVersionEnv && typeof activeVersionEnv === 'string' && activeVersionEnv.trim()) {
+      activeVersion = activeVersionEnv.trim();
+      if (!registry[activeVersion]) {
+        throw new Error(
+          `FATAL: Configured active key version "${activeVersion}" does not exist in SESSION_ENCRYPTION_KEY registry`
+        );
+      }
+    } else {
+      if (versionKeys.length === 1 && versionKeys[0] === 'v1') {
+        activeVersion = 'v1';
+      } else {
+        throw new Error(
+          'FATAL: SESSION_ENCRYPTION_ACTIVE_VERSION must be explicitly specified when multiple encryption keys are configured'
+        );
+      }
+    }
+
+    return { registry, activeVersion };
   }
 
-  const keyBuf = Buffer.from(rawKey, 'hex');
-  if (keyBuf.length !== 32) {
-    throw new Error('FATAL: SESSION_ENCRYPTION_KEY must be a valid 64-character (32-byte) hex string');
+  // Single raw 64-character hexadecimal key configuration
+  const singleBuf = validateHexKey(trimmed, 'SESSION_ENCRYPTION_KEY');
+  registry['v1'] = singleBuf;
+
+  let activeVersion = 'v1';
+  if (activeVersionEnv && typeof activeVersionEnv === 'string' && activeVersionEnv.trim()) {
+    const requested = activeVersionEnv.trim();
+    if (requested !== 'v1') {
+      throw new Error(
+        `FATAL: Configured active key version "${requested}" does not exist in single-key registry`
+      );
+    }
+    activeVersion = requested;
   }
 
-  KEY_REGISTRY['v1'] = keyBuf;
-  return keyBuf;
+  return { registry, activeVersion };
+}
+
+/**
+ * Retrieves the current registry and active key version, reloading on environment changes.
+ * @returns {{ registry: Object.<string, Buffer>, activeVersion: string }}
+ */
+function getKeyConfig() {
+  const rawKey = process.env.SESSION_ENCRYPTION_KEY || env.SESSION_ENCRYPTION_KEY;
+  const activeVersionEnv =
+    process.env.SESSION_ENCRYPTION_ACTIVE_VERSION || env.SESSION_ENCRYPTION_ACTIVE_VERSION;
+
+  if (
+    cachedRegistry &&
+    rawKey === cachedRawKey &&
+    activeVersionEnv === cachedActiveVersionEnv
+  ) {
+    return { registry: cachedRegistry, activeVersion: cachedActiveVersion };
+  }
+
+  const { registry, activeVersion } = parseKeyConfig(rawKey, activeVersionEnv);
+  cachedRawKey = rawKey;
+  cachedActiveVersionEnv = activeVersionEnv;
+  cachedRegistry = registry;
+  cachedActiveVersion = activeVersion;
+  return { registry: cachedRegistry, activeVersion: cachedActiveVersion };
+}
+
+/**
+ * Resets the in-memory key cache for isolation during automated tests.
+ */
+function resetKeyRegistry() {
+  cachedRawKey = null;
+  cachedActiveVersionEnv = null;
+  cachedRegistry = null;
+  cachedActiveVersion = null;
+}
+
+/**
+ * Retrieves the configured active key version.
+ * @returns {string}
+ */
+function getActiveKeyVersion() {
+  return getKeyConfig().activeVersion;
+}
+
+/**
+ * Validates and retrieves the 256-bit encryption key for a given version.
+ * Defaults to the active key version if unspecified.
+ * @param {string} [version] - Key version string (e.g. 'v1', 'v2')
+ * @returns {Buffer} 32-byte key buffer
+ */
+function getKey(version = null) {
+  const { registry, activeVersion } = getKeyConfig();
+  const targetVersion = version || activeVersion;
+  if (!registry[targetVersion]) {
+    throw new Error(`Cryptographic key for version "${targetVersion}" not found in registry`);
+  }
+  return registry[targetVersion];
 }
 
 /**
  * Encrypts a temporary replacement refresh token with AES-256-GCM and AAD binding.
+ * Uses the configured active key version unless explicitly overridden.
  * @param {string} token - Plaintext refresh token string
  * @param {Object} context - AAD context object { familyId, userId, parentTokenHash }
- * @param {string} [version='v1'] - Key version to encrypt with
+ * @param {string} [version] - Key version to encrypt with (defaults to active key version)
  * @returns {string} Serialized envelope: "<version>:<iv_hex>:<authTag_hex>:<ciphertext_hex>"
  */
-function encryptRecoveryToken(token, { familyId, userId, parentTokenHash }, version = 'v1') {
+function encryptRecoveryToken(token, { familyId, userId, parentTokenHash }, version = null) {
   if (!token || typeof token !== 'string') {
     throw new Error('Token string is required for encryption');
   }
@@ -69,7 +180,8 @@ function encryptRecoveryToken(token, { familyId, userId, parentTokenHash }, vers
     throw new Error('familyId, userId, and parentTokenHash are mandatory for cryptographic AAD binding');
   }
 
-  const key = getKey(version);
+  const activeVer = version || getActiveKeyVersion();
+  const key = getKey(activeVer);
   const iv = crypto.randomBytes(12); // Standard 96-bit GCM IV
   const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
 
@@ -80,11 +192,12 @@ function encryptRecoveryToken(token, { familyId, userId, parentTokenHash }, vers
   const ciphertext = Buffer.concat([cipher.update(token, 'utf8'), cipher.final()]);
   const authTag = cipher.getAuthTag();
 
-  return `${version}:${iv.toString('hex')}:${authTag.toString('hex')}:${ciphertext.toString('hex')}`;
+  return `${activeVer}:${iv.toString('hex')}:${authTag.toString('hex')}:${ciphertext.toString('hex')}`;
 }
 
 /**
  * Decrypts a serialized recovery envelope, verifying AAD and GCM authentication tag.
+ * Looks up the key corresponding to the envelope's version prefix for backward compatibility.
  * @param {string} envelope - Serialized envelope: "<version>:<iv_hex>:<authTag_hex>:<ciphertext_hex>"
  * @param {Object} context - AAD context object { familyId, userId, parentTokenHash }
  * @returns {string} Decrypted plaintext token
@@ -139,7 +252,8 @@ function hashToken(token) {
 }
 
 /**
- * Validates session encryption key on server boot.
+ * Validates session encryption key configuration on server boot.
+ * Enforces production environment requirements and validates all configured keys.
  */
 function validateSessionEncryptionKey() {
   if (process.env.NODE_ENV === 'production') {
@@ -147,17 +261,17 @@ function validateSessionEncryptionKey() {
     if (!rawKey) {
       throw new Error('FATAL: SESSION_ENCRYPTION_KEY environment variable is required in production');
     }
-    const keyBuf = Buffer.from(rawKey, 'hex');
-    if (keyBuf.length !== 32) {
-      throw new Error('FATAL: SESSION_ENCRYPTION_KEY must be exactly 32 bytes (64 hex characters)');
-    }
   }
+  // Validate configuration structure and active version
+  getKeyConfig();
 }
 
 module.exports = {
   getKey,
+  getActiveKeyVersion,
   encryptRecoveryToken,
   decryptRecoveryToken,
   hashToken,
   validateSessionEncryptionKey,
+  resetKeyRegistry,
 };

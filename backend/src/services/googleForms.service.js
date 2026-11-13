@@ -41,18 +41,20 @@ class GoogleFormsService {
     }
 
     const accessToken = options.accessToken || process.env.GOOGLE_FORMS_ACCESS_TOKEN;
-    const apiKey = options.apiKey || process.env.GOOGLE_FORMS_API_KEY;
 
-    // Call official Google Forms REST API
-    let apiUrl = `https://forms.googleapis.com/v1/forms/${formId}`;
-    if (!accessToken && apiKey) {
-      apiUrl += `?key=${apiKey}`;
+    if (!accessToken) {
+      const err = new Error(
+        'Google Forms import requires a valid Google OAuth 2 access token with the "https://www.googleapis.com/auth/forms.body.readonly" scope. Google Forms API does not support API keys or unauthenticated access. Please provide an authorized Google OAuth 2 access token.'
+      );
+      err.statusCode = 401;
+      throw err;
     }
 
-    const headers = {};
-    if (accessToken) {
-      headers.Authorization = `Bearer ${accessToken}`;
-    }
+    // Call official Google Forms REST API with OAuth 2 Bearer token
+    const apiUrl = `https://forms.googleapis.com/v1/forms/${formId}`;
+    const headers = {
+      Authorization: `Bearer ${accessToken}`,
+    };
 
     try {
       logger.info('google_forms_fetch_started', { formId });
@@ -60,8 +62,11 @@ class GoogleFormsService {
 
       if (!res.ok) {
         const errBody = await res.json().catch(() => ({}));
-        const errMessage = errBody?.error?.message || `Google Forms API returned HTTP ${res.status}`;
-        const err = new Error(`Google Forms import error: ${errMessage}`);
+        const rawMessage = errBody?.error?.message || `Google Forms API returned HTTP ${res.status}`;
+        const errMessage = res.status === 401
+          ? `Google Forms authentication failed: ${rawMessage}. Ensure your Google OAuth 2 access token is valid and contains the 'forms.body.readonly' scope.`
+          : `Google Forms import error: ${rawMessage}`;
+        const err = new Error(errMessage);
         err.statusCode = res.status === 401 || res.status === 403 ? 403 : 400;
         throw err;
       }

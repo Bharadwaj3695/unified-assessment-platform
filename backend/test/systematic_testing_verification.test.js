@@ -55,7 +55,7 @@ describe('Systematic Verification Suite: Security, Assessment Windows, File Uplo
       });
     }
 
-    // 1. Create future scheduled assessment (scheduled 2 days in future)
+    // 1. Create future scheduled assessment (scheduled 2 Day in future)
     futureAssessment = await Assessment.create({
       title: 'Future Scheduled Midterm Exam',
       description: 'Midterm scheduled for 48 hours in the future.',

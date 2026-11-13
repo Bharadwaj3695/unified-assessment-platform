@@ -103,12 +103,12 @@ STU-BULK-${uniqueStamp}-B,Bulk Student Beta,2001-11-22,bulk_b_${uniqueStamp}@col
   test('4. Admin navigates to Student Registry and Faculty Registry master data pages', async ({ page }) => {
     // Student Registry
     await page.goto('/admin/student-registry');
-    await expect(page.getByRole('heading', { name: /Student Registry \(Master Data\)/i })).toBeVisible({ timeout: 10000 });
+    await expect(page.getByRole('heading', { name: /^Student Registry$/i })).toBeVisible({ timeout: 10000 });
     await expect(page.locator('table')).toBeVisible();
 
     // Faculty Registry via SPA sidebar navigation
     await page.locator('nav a', { hasText: 'Faculty Registry' }).first().click();
-    await expect(page.getByRole('heading', { name: /Faculty Registry \(Master Data\)/i })).toBeVisible({ timeout: 10000 });
+    await expect(page.getByRole('heading', { name: /^Faculty Registry$/i })).toBeVisible({ timeout: 10000 });
     await expect(page.locator('table')).toBeVisible();
   });
 });

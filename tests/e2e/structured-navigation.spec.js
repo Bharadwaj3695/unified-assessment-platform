@@ -20,12 +20,13 @@ test.describe('Phase 8D - Structured Dashboard Navigation E2E', () => {
 
       // Verify structured section headers exist
       await expect(aside.getByText('Workspace', { exact: true })).toBeVisible();
-      await expect(aside.getByText('Academic Suite', { exact: true })).toBeVisible();
+      await expect(aside.getByText(/Assessment & Certification|ASSESSMENT & CERTIFICATION/i)).toBeVisible();
       await expect(aside.getByText('Account', { exact: true })).toBeVisible();
 
       // Verify all student links are present
       await expect(aside.locator('nav a', { hasText: 'Dashboard' })).toBeVisible();
       await expect(aside.locator('nav a', { hasText: 'Assessments' })).toBeVisible();
+      await expect(aside.locator('nav a', { hasText: 'Certifications' })).toBeVisible();
       await expect(aside.locator('nav a', { hasText: 'Submissions' })).toBeVisible();
       await expect(aside.locator('nav a', { hasText: 'Profile' })).toBeVisible();
     });

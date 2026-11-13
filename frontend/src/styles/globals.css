@@ -71,3 +71,39 @@
 ::-webkit-scrollbar-thumb:hover {
   background: #94A3B8;
 }
+
+/* Application-wide Announcement Banner Marquee Animation */
+@keyframes marquee-scroll {
+  0% {
+    transform: translateX(100%);
+  }
+  100% {
+    transform: translateX(-100%);
+  }
+}
+
+.animate-marquee {
+  display: inline-block;
+  white-space: nowrap;
+  animation: marquee-scroll 24s linear infinite;
+  will-change: transform;
+}
+
+.pause-on-hover:hover,
+.pause-on-hover:focus-within,
+.pause-on-hover:hover .animate-marquee,
+.pause-on-hover:focus-within .animate-marquee {
+  animation-play-state: paused;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-marquee {
+    animation: none !important;
+    transform: none !important;
+    white-space: normal !important;
+  }
+  .ticker-loop-copy {
+    display: none !important;
+  }
+}
+

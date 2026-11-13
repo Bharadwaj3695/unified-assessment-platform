@@ -148,22 +148,23 @@ test.describe('Student Assessment Engine & Autosave E2E', () => {
     const timerPill = page.locator('div[class*="font-mono"]', { hasText: /:\d{2}/ });
     await expect(timerPill).toBeVisible();
 
-    // 3B. Answer Question 1 (MCQ) and observe autosave indicator
+    // 3B. Answer Question 1 (MCQ) and click Save & Next
     await page.locator('button', { hasText: 'PUT' }).click();
+    await page.getByRole('button', { name: 'Save & Next' }).click();
 
-    // Wait for autosave feedback in role="status"
+    // Wait for save feedback in role="status"
     const autosaveStatus = page.locator('[role="status"]');
     await expect(autosaveStatus).toBeVisible();
     await expect(autosaveStatus).toContainText(/Saved|Autosaving/, { timeout: 5000 });
 
-    // 3C. Navigate to Question 2 (Short Answer)
-    await page.getByRole('button', { name: 'Next Question' }).click();
+    // 3C. On Question 2 (Short Answer)
     await expect(page.locator('text=Describe the primary difference between processes and threads')).toBeVisible();
 
-    // Type answer into textarea
+    // Type answer into textarea and Save & Next
     await page.fill('textarea[placeholder*="Type your short answer"]', 'Threads share memory space within the same process while processes have isolated memory.');
+    await page.getByRole('button', { name: 'Save & Next' }).click();
 
-    // Wait for autosave indicator
+    // Wait for save indicator
     await expect(autosaveStatus).toContainText(/Saved|Autosaving/, { timeout: 5000 });
 
     // 3D. Open Submit Modal
@@ -245,5 +246,41 @@ test.describe('Student Assessment Engine & Autosave E2E', () => {
     await expect(page.getByText('Recent Submissions')).toBeVisible();
 
     expect(pageErrors).toHaveLength(0);
+  });
+
+  test('6. Academic Performance card renders donut chart and attempts recorded without performance classification legend', async ({ page }) => {
+    await page.goto('/student/dashboard');
+    await expect(page.getByText('Student Workspace', { exact: true })).toBeVisible({ timeout: 10000 });
+
+    // Verify Academic Performance card heading and subtitle
+    const perfCard = page.locator('.rounded-2xl', { hasText: 'Academic Performance' }).filter({ hasText: 'Evaluated score average' }).first();
+    await expect(perfCard).toBeVisible();
+    await expect(perfCard.getByText('Academic Performance')).toBeVisible();
+    await expect(perfCard.getByText('Evaluated score average')).toBeVisible();
+
+    // Verify Donut Chart and center metric are present
+    await expect(perfCard.locator('.recharts-responsive-container')).toBeVisible();
+    await expect(perfCard.getByText('Avg Score')).toBeVisible();
+
+    // Verify Attempts Recorded section is present
+    await expect(perfCard.getByText('Attempts Recorded:')).toBeVisible();
+
+    // Verify classification legend elements are NOT present in the Academic Performance card
+    await expect(perfCard.locator('text=/Mastered/i')).not.toBeVisible();
+    await expect(perfCard.locator('text=/Proficient/i')).not.toBeVisible();
+    await expect(perfCard.locator('text=/Needs Review/i')).not.toBeVisible();
+  });
+
+  test('7. Academic Streaks milestone badges display Day - {m.Day} format for locked milestones', async ({ page }) => {
+    await page.goto('/student/dashboard');
+    await expect(page.getByText('Student Workspace', { exact: true })).toBeVisible({ timeout: 10000 });
+
+    const streakCard = page.locator('.rounded-2xl', { hasText: 'Academic Streaks' }).filter({ hasText: 'Milestone Badges' }).first();
+    await expect(streakCard).toBeVisible();
+
+    // Ensure locked milestone labels match "Day - {m.Day}" format
+    await expect(streakCard.locator('text=/Day - \\d+/').first()).toBeVisible();
+    // Ensure old format "... Day req." or "... days req." is not displayed
+    await expect(streakCard.locator('text=/days? req\\./i')).not.toBeVisible();
   });
 });

@@ -56,7 +56,7 @@ test.describe('Two-Factor Authentication (MFA/2FA) Frontend Experience', () => {
     await expect(toastError.first()).toContainText('No pending MFA challenge');
   });
 
-  test('2. MFA Verification view supports UI mode switching between TOTP and Recovery Code', async ({ page }) => {
+  test('2. MFA Verification view supports UI mode switching between TOTP, Email OTP, and Recovery Code', async ({ page }) => {
     // Inject mock pending challenge into sessionStorage
     await page.goto('/auth/login');
     await page.evaluate(() => {
@@ -66,6 +66,7 @@ test.describe('Two-Factor Authentication (MFA/2FA) Frontend Experience', () => {
           mfaToken: 'mock_challenge_token_for_ui_test',
           email: 'student@uap.edu',
           role: 'student',
+          allowedMethods: ['totp', 'email_otp', 'recovery_code'],
         })
       );
     });
@@ -78,6 +79,21 @@ test.describe('Two-Factor Authentication (MFA/2FA) Frontend Experience', () => {
     await expect(page.locator('input[inputmode="numeric"]')).toBeVisible();
     const verifyButton = page.getByRole('button', { name: /Verify & Continue/i });
     await expect(verifyButton).toBeDisabled();
+
+    // Switch to Email OTP mode
+    const emailToggle = page.getByRole('button', { name: /Email me a verification code instead|Send Verification to Email/i });
+    await expect(emailToggle).toBeVisible();
+    await emailToggle.click();
+
+    // Email OTP view displays masked email and email verification button
+    await expect(page.getByText('Verify with Email Code', { exact: true })).toBeVisible();
+    await expect(page.getByText('s****t@uap.edu')).toBeVisible();
+    await expect(page.getByRole('button', { name: /Verify Email Code/i })).toBeVisible();
+
+    // Switch back to Authenticator mode from Email mode
+    const backToTotpFromEmail = page.getByRole('button', { name: /Back to authenticator app code/i });
+    await backToTotpFromEmail.click();
+    await expect(page.getByText('Verify Your Identity', { exact: true })).toBeVisible();
 
     // Switch to Recovery Code mode
     const recoveryToggle = page.getByRole('button', { name: /Use a recovery code/i });
@@ -106,7 +122,7 @@ test.describe('Two-Factor Authentication (MFA/2FA) Frontend Experience', () => {
     // --- Step B: Navigate to Student Profile ---
     await page.goto('/student/profile');
     await expect(page.getByText('Two-Factor Authentication (2FA)')).toBeVisible();
-    await expect(page.getByText(/Required — Setup Pending|Disabled/)).toBeVisible();
+    await expect(page.getByText(/Required — (Setup Pending|Disabled)/)).toBeVisible();
 
     // --- Step C: Initiate 2FA Enrollment ---
     const enableBtn = page.getByRole('button', { name: /Set Up 2FA|Enable 2FA/i });
@@ -116,10 +132,15 @@ test.describe('Two-Factor Authentication (MFA/2FA) Frontend Experience', () => {
     await expect(page.getByText('Set Up Two-Factor Authentication')).toBeVisible();
     await expect(page.locator('img[alt="MFA QR Code"]')).toBeVisible();
 
+    // Click Reveal Key (accessible via aria-label "Reveal setup key") to unmask the secret
+    const revealBtn = page.getByLabel(/Reveal setup key/i);
+    await expect(revealBtn).toBeVisible();
+    await revealBtn.click();
+
     // Extract manual secret code from UI
-    const secretCodeElem = page.locator('code');
+    const secretCodeElem = page.getByTestId('manual-setup-key');
     await expect(secretCodeElem).toBeVisible();
-    const totpSecret = (await secretCodeElem.textContent()).trim();
+    const totpSecret = (await secretCodeElem.textContent()).replace(/\s+/g, '').trim();
     expect(totpSecret.length).toBeGreaterThan(10);
 
     // Generate real TOTP verification code using otplib
@@ -133,7 +154,7 @@ test.describe('Two-Factor Authentication (MFA/2FA) Frontend Experience', () => {
     await activateBtn.click();
 
     // --- Step D: Recovery Codes Screen ---
-    await expect(page.getByText('Important: Save Your Recovery Codes')).toBeVisible({ timeout: 10000 });
+    await expect(page.getByRole('heading', { name: 'Important: Save Your Recovery Codes' })).toBeVisible({ timeout: 10000 });
     const recoveryCodeItems = page.locator('[data-testid="recovery-code-item"]');
     await expect(recoveryCodeItems).toHaveCount(8);
 
@@ -142,7 +163,7 @@ test.describe('Two-Factor Authentication (MFA/2FA) Frontend Experience', () => {
     await doneBtn.click();
 
     // Modal closes, profile updates
-    await expect(page.getByText(/Required & Active|Enabled & Active/)).toBeVisible({ timeout: 5000 });
+    await expect(page.getByRole('button', { name: /Manage MFA/i })).toBeVisible({ timeout: 10000 });
     await expect(page.getByText('MFA is required for student accounts.').first()).toBeVisible();
     await expect(page.getByRole('button', { name: /Disable 2FA/i })).not.toBeVisible();
 

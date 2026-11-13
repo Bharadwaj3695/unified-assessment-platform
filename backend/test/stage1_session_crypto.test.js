@@ -13,6 +13,7 @@ const {
 describe('Stage 1: Session Model & Cryptography Verification', () => {
   before(async () => {
     await connectDB();
+    await Session.init();
   });
 
   after(async () => {
@@ -96,7 +97,7 @@ describe('Stage 1: Session Model & Cryptography Verification', () => {
         familyId: `fam_${Date.now()}`,
         userId: testUserId,
         currentTokenHash: hashToken(token),
-        expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000), // 30 days
+        expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000), // 30 Day
       });
 
       assert.ok(session._id, 'Session must have MongoDB _id');
