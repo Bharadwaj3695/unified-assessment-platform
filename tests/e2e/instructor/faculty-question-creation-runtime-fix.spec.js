@@ -49,10 +49,10 @@ test.describe('Faculty Question Creation — Runtime Error Fix & End-to-End Work
     const titleInput = page.locator('input[placeholder*="Distributed Systems"]').first();
     await titleInput.fill(uniqueExamTitle);
 
-    // 4. Add a Coding Question by clicking "Add Coding & SQL"
-    const addCodeBtn = page.getByRole('button', { name: /Add Coding & SQL/i });
-    await expect(addCodeBtn).toBeVisible();
-    await addCodeBtn.click();
+    // 4. Configure Question 1 as a Coding Question
+    const questionTypeSelect = page.locator('div:has(> label:has-text("Question Type")) select').first();
+    await expect(questionTypeSelect).toBeVisible();
+    await questionTypeSelect.selectOption('code');
 
     // 5. Verify Faculty Code IDE component renders without runtime errors
     await expect(page.getByText('Faculty Coding IDE & Test Validator')).toBeVisible({ timeout: 10000 });
@@ -60,7 +60,7 @@ test.describe('Faculty Question Creation — Runtime Error Fix & End-to-End Work
     await expect(page.getByText('Something went wrong')).not.toBeVisible();
 
     // Fill in question prompt
-    const questionPromptTextarea = page.locator('textarea[placeholder*="Enter question text here..."]').last();
+    const questionPromptTextarea = page.locator('textarea[placeholder*="Enter question text here..."]').first();
     await questionPromptTextarea.fill('Write a program to output Welcome.');
 
     // 6. Navigate to Problem Specs tab (renders the FileCode icon!)
@@ -122,16 +122,6 @@ test.describe('Faculty Question Creation — Runtime Error Fix & End-to-End Work
 
     // Verify Execution Report tab displays results
     await expect(page.getByText(/Report \(/i)).toBeVisible({ timeout: 15000 });
-
-    // Delete question 1 (the default MCQ) to keep only the coding question
-    const deleteQ1Btn = page.locator('button[title*="Delete question"]').first();
-    if (await deleteQ1Btn.isVisible()) {
-      await deleteQ1Btn.click();
-      const confirmDeleteModalBtn = page.locator('div[role="dialog"]').getByRole('button', { name: 'Delete Question' });
-      if (await confirmDeleteModalBtn.isVisible()) {
-        await confirmDeleteModalBtn.click();
-      }
-    }
 
     // 11. Save Assessment Draft
     const saveDraftBtn = page.getByRole('button', { name: 'Save Draft' });
