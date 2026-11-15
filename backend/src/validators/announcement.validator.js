@@ -4,14 +4,14 @@ const { body } = require('express-validator');
 /**
  * Helper to compute combined duration in minutes
  */
-const computeDurationMinutes = (days, hours, minutes) => {
-  const d = parseInt(days, 10) || 0;
+const computeDurationMinutes = (Day, hours, minutes) => {
+  const d = parseInt(Day, 10) || 0;
   const h = parseInt(hours, 10) || 0;
   const m = parseInt(minutes, 10) || 0;
   return (d * 24 * 60) + (h * 60) + m;
 };
 
-// Maximum permitted duration: 365 days in minutes (525,600)
+// Maximum permitted duration: 365 Day in minutes (525,600)
 const MAX_DURATION_MINUTES = 365 * 24 * 60;
 
 /**
@@ -30,10 +30,10 @@ const saveDraftValidator = [
     .isIn(['all', 'students', 'instructors', 'admins'])
     .withMessage('Target audience must be one of: all, students, instructors, admins'),
 
-  body('durationDays')
+  body('durationDay')
     .optional()
     .isInt({ min: 0 })
-    .withMessage('Duration days must be an integer greater than or equal to 0'),
+    .withMessage('Duration Day must be an integer greater than or equal to 0'),
 
   body('durationHours')
     .optional()
@@ -62,10 +62,10 @@ const publishAnnouncementValidator = [
     .isIn(['all', 'students', 'instructors', 'admins'])
     .withMessage('Target audience must be one of: all, students, instructors, admins'),
 
-  body('durationDays')
+  body('durationDay')
     .optional()
     .isInt({ min: 0 })
-    .withMessage('Duration days must be an integer greater than or equal to 0'),
+    .withMessage('Duration Day must be an integer greater than or equal to 0'),
 
   body('durationHours')
     .optional()
@@ -79,7 +79,7 @@ const publishAnnouncementValidator = [
 
   body().custom((value, { req }) => {
     const totalMinutes = computeDurationMinutes(
-      req.body.durationDays,
+      req.body.durationDay,
       req.body.durationHours,
       req.body.durationMinutes
     );
@@ -87,7 +87,7 @@ const publishAnnouncementValidator = [
       throw new Error('Announcement duration must be greater than 0 minutes');
     }
     if (totalMinutes > MAX_DURATION_MINUTES) {
-      throw new Error('Announcement duration cannot exceed 365 days');
+      throw new Error('Announcement duration cannot exceed 365 Day');
     }
     return true;
   }),
@@ -127,10 +127,10 @@ const scheduleAnnouncementValidator = [
       return true;
     }),
 
-  body('durationDays')
+  body('durationDay')
     .optional()
     .isInt({ min: 0 })
-    .withMessage('Duration days must be an integer greater than or equal to 0'),
+    .withMessage('Duration Day must be an integer greater than or equal to 0'),
 
   body('durationHours')
     .optional()
@@ -144,7 +144,7 @@ const scheduleAnnouncementValidator = [
 
   body().custom((value, { req }) => {
     const totalMinutes = computeDurationMinutes(
-      req.body.durationDays,
+      req.body.durationDay,
       req.body.durationHours,
       req.body.durationMinutes
     );
@@ -152,7 +152,7 @@ const scheduleAnnouncementValidator = [
       throw new Error('Announcement duration must be greater than 0 minutes');
     }
     if (totalMinutes > MAX_DURATION_MINUTES) {
-      throw new Error('Announcement duration cannot exceed 365 days');
+      throw new Error('Announcement duration cannot exceed 365 Day');
     }
     return true;
   }),

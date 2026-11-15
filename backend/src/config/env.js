@@ -1,7 +1,7 @@
 const dotenv = require('dotenv');
 const path = require('path');
 
-dotenv.config({ path: path.resolve(__dirname, '../../.env') });
+dotenv.config({ path: path.resolve(__dirname, '../../backend/.env') });
 
 module.exports = {
   PORT: process.env.PORT || 5000,
@@ -35,5 +35,7 @@ module.exports = {
   SMTP_PASSWORD: process.env.SMTP_PASSWORD || process.env.SMTP_PASS || '',
   SMTP_FROM: process.env.SMTP_FROM || process.env.EMAIL_FROM || '"Unified Assessment Platform" <no-reply@uap.edu>',
   EMAIL_FROM: process.env.EMAIL_FROM || process.env.SMTP_FROM || '"Unified Assessment Platform" <no-reply@uap.edu>',
+  EXECUTION_SERVICE_URL: process.env.EXECUTION_SERVICE_URL || 'http://localhost:5050',
+  EXECUTION_SERVICE_API_KEY: process.env.EXECUTION_SERVICE_API_KEY || 'dev_uap_exec_internal_secret_key_32bytes!!',
 };
 

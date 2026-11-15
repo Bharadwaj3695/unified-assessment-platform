@@ -35,7 +35,7 @@ const announcementSchema = new mongoose.Schema(
       index: true,
     },
     // Duration components stored for administrator inspection and editing
-    durationDays: {
+    durationDay: {
       type: Number,
       default: 0,
       min: 0,

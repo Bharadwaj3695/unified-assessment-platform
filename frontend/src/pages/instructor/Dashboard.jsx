@@ -299,7 +299,7 @@ const InstructorDashboard = () => {
         <div className="lg:col-span-5 space-y-4">
           <Card
             title="Weekly Submissions"
-            subtitle="Student test attempt volume (Last 7 days)"
+            subtitle="Student test attempt volume (Last 7 Day)"
           >
             <ActivityBarChart
               barKey="submissions"

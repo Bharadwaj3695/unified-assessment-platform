@@ -636,6 +636,9 @@ class AuthController {
       return successResponse(res, 'Token refreshed successfully', result);
     // Catch block for invalid or expired refresh token
     } catch (err) {
+      if (err.statusCode === 401) {
+        clearAuthCookies(res);
+      }
       // Forward error to Express error-handling middleware
       next(err);
     // Terminate try-catch block

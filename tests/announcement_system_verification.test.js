@@ -18,7 +18,7 @@ describe('1. Persistent Announcement Model & Backend Contracts', () => {
     assert.match(modelSrc, /enum:\s*\['draft',\s*'scheduled',\s*'published',\s*'expired',\s*'cancelled'\]/, 'Must enforce all 5 lifecycle states');
     assert.match(modelSrc, /startDate:\s*\{[\s\S]*?type:\s*Date/, 'Must have UTC startDate');
     assert.match(modelSrc, /expiryDate:\s*\{[\s\S]*?type:\s*Date/, 'Must have UTC expiryDate');
-    assert.match(modelSrc, /durationDays:\s*\{[\s\S]*?type:\s*Number/, 'Must track durationDays');
+    assert.match(modelSrc, /durationDay:\s*\{[\s\S]*?type:\s*Number/, 'Must track durationDay');
     assert.match(modelSrc, /durationHours:\s*\{[\s\S]*?type:\s*Number/, 'Must track durationHours');
     assert.match(modelSrc, /durationMinutes:\s*\{[\s\S]*?type:\s*Number/, 'Must track durationMinutes');
     assert.match(modelSrc, /targetAudience:\s*\{[\s\S]*?enum:\s*\['all',\s*'students',\s*'instructors',\s*'admins'\]/, 'Must support audience scoping');
@@ -92,7 +92,7 @@ describe('3. Admin Announcement Management Panel Contract', () => {
     assert.match(editorSrc, /500/, 'Must enforce 500 max length');
     assert.match(editorSrc, /Publication Mode/, 'Must support immediate and scheduled publication modes');
     assert.match(editorSrc, /datetime-local/, 'Must have datetime-local input for scheduling');
-    assert.match(editorSrc, /durationDays/, 'Must provide durationDays control');
+    assert.match(editorSrc, /durationDay/, 'Must provide durationDay control');
     assert.match(editorSrc, /durationHours/, 'Must provide durationHours control');
     assert.match(editorSrc, /durationMinutes/, 'Must provide durationMinutes control');
     assert.match(editorSrc, /Calculated Expiration Time:/, 'Must display live calculated expiration confirmation');

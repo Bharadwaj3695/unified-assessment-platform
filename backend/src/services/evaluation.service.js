@@ -117,11 +117,16 @@ class EvaluationService {
       throw error;
     }
 
-    // Retrieve all questions for this assessment to validate score bounds
-    const questions = await Question.find({ assessmentId: assessment._id });
+    // Retrieve questions for this attempt to validate score bounds
+    let questions;
+    if (submission.assignedQuestionIds && submission.assignedQuestionIds.length > 0) {
+      questions = await Question.find({ _id: { $in: submission.assignedQuestionIds } });
+    } else {
+      questions = await Question.find({ assessmentId: assessment._id });
+    }
     const questionMap = new Map(questions.map((q) => [q._id.toString(), q]));
     const subjectiveQuestions = questions.filter(
-      (q) => q.type === 'short_answer' || q.type === 'long_answer' || q.type === 'file_upload'
+      (q) => q.type === 'short_answer' || q.type === 'long_answer' || q.type === 'file_upload' || q.type === 'code' || q.type === 'sql'
     );
 
     let calculatedManualScore = 0;
@@ -156,12 +161,21 @@ class EvaluationService {
         throw error;
       }
 
+      // Enforce precision (maximum 2 decimal places)
+      if (Math.round(pts * 100) / 100 !== pts) {
+        const error = new Error(
+          `Awarded points (${pts}) for question "${q.questionText}" cannot exceed 2 decimal places`
+        );
+        error.statusCode = 400;
+        throw error;
+      }
+
       sanitizedFeedback[qId] = {
         pointsAwarded: pts,
         comment: fb.comment ? String(fb.comment).trim() : '',
       };
 
-      if (q.type === 'short_answer' || q.type === 'long_answer' || q.type === 'file_upload') {
+      if (['short_answer', 'long_answer', 'file_upload', 'code', 'sql'].includes(q.type)) {
         calculatedManualScore += pts;
       }
     }

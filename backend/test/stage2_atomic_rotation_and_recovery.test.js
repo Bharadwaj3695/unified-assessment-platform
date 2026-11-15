@@ -5,7 +5,15 @@ const { connectDB, disconnectDB } = require('../src/config/db');
 const seedDatabase = require('../src/config/seed');
 const { User, Session, AuditLog } = require('../src/models');
 const authService = require('../src/services/auth.service');
-const { hashToken } = require('../src/utils/sessionCrypto');
+const {
+  hashToken,
+  getKey,
+  getActiveKeyVersion,
+  encryptRecoveryToken,
+  decryptRecoveryToken,
+  validateSessionEncryptionKey,
+  resetKeyRegistry,
+} = require('../src/utils/sessionCrypto');
 const { verifyAccessToken } = require('../src/utils/jwt');
 
 describe('Stage 2: Atomic CAS Rotation, Multi-Rotation Recovery & Production Safety', () => {
@@ -300,6 +308,268 @@ describe('Stage 2: Atomic CAS Rotation, Multi-Rotation Recovery & Production Saf
         },
         /Session has expired or been invalidated|Session has been revoked/i
       );
+    });
+  });
+
+  describe('5. Encryption Key Registry & Versioning Matrix', () => {
+    const originalEnvKey = process.env.SESSION_ENCRYPTION_KEY;
+    const originalEnvVer = process.env.SESSION_ENCRYPTION_ACTIVE_VERSION;
+    const originalNodeEnv = process.env.NODE_ENV;
+
+    const KEY_V1 = '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef';
+    const KEY_V2 = 'fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210';
+
+    after(() => {
+      if (originalEnvKey !== undefined) process.env.SESSION_ENCRYPTION_KEY = originalEnvKey;
+      else delete process.env.SESSION_ENCRYPTION_KEY;
+
+      if (originalEnvVer !== undefined) process.env.SESSION_ENCRYPTION_ACTIVE_VERSION = originalEnvVer;
+      else delete process.env.SESSION_ENCRYPTION_ACTIVE_VERSION;
+
+      if (originalNodeEnv !== undefined) process.env.NODE_ENV = originalNodeEnv;
+      else delete process.env.NODE_ENV;
+
+      resetKeyRegistry();
+    });
+
+    it('5.1 should support single 64-character hex key configuration with default v1', () => {
+      process.env.SESSION_ENCRYPTION_KEY = KEY_V1;
+      delete process.env.SESSION_ENCRYPTION_ACTIVE_VERSION;
+      resetKeyRegistry();
+
+      assert.strictEqual(getActiveKeyVersion(), 'v1');
+      const keyBuf = getKey();
+      assert.strictEqual(keyBuf.length, 32);
+
+      const context = {
+        familyId: 'fam_single',
+        userId: new mongoose.Types.ObjectId().toString(),
+        parentTokenHash: hashToken('parent'),
+      };
+      const envelope = encryptRecoveryToken('sample_token', context);
+      assert.ok(envelope.startsWith('v1:'));
+      const decrypted = decryptRecoveryToken(envelope, context);
+      assert.strictEqual(decrypted, 'sample_token');
+    });
+
+    it('5.2 should support valid multi-key JSON configuration with explicit active version', () => {
+      process.env.SESSION_ENCRYPTION_KEY = JSON.stringify({ v1: KEY_V1, v2: KEY_V2 });
+      process.env.SESSION_ENCRYPTION_ACTIVE_VERSION = 'v2';
+      resetKeyRegistry();
+
+      assert.strictEqual(getActiveKeyVersion(), 'v2');
+      const v2Key = getKey('v2');
+      assert.strictEqual(v2Key.length, 32);
+
+      const context = {
+        familyId: 'fam_multi',
+        userId: new mongoose.Types.ObjectId().toString(),
+        parentTokenHash: hashToken('parent_multi'),
+      };
+      const envelope = encryptRecoveryToken('sample_token_v2', context);
+      assert.ok(envelope.startsWith('v2:'));
+      const decrypted = decryptRecoveryToken(envelope, context);
+      assert.strictEqual(decrypted, 'sample_token_v2');
+    });
+
+    it('5.3 should reject invalid key length and malformed key values', () => {
+      // Invalid hex length (too short)
+      process.env.SESSION_ENCRYPTION_KEY = '0123456789abcdef';
+      delete process.env.SESSION_ENCRYPTION_ACTIVE_VERSION;
+      resetKeyRegistry();
+      assert.throws(() => getKey(), /must be a valid 64-character/);
+
+      // Non-hex character
+      process.env.SESSION_ENCRYPTION_KEY = '0123456789abcdef0123456789abcdef0123456789abcdef0123456789zzzzzz';
+      resetKeyRegistry();
+      assert.throws(() => getKey(), /must be a valid 64-character/);
+
+      // Malformed JSON syntax
+      process.env.SESSION_ENCRYPTION_KEY = '{ v1: "missing_quotes" }';
+      resetKeyRegistry();
+      assert.throws(() => getKey(), /Malformed JSON/);
+
+      // Invalid key inside JSON
+      process.env.SESSION_ENCRYPTION_KEY = JSON.stringify({ v1: 'short_key' });
+      process.env.SESSION_ENCRYPTION_ACTIVE_VERSION = 'v1';
+      resetKeyRegistry();
+      assert.throws(() => getKey(), /must be a valid 64-character/);
+    });
+
+    it('5.4 should support active v2 encryption with v1 backward decryption', () => {
+      const context = {
+        familyId: 'fam_compat',
+        userId: new mongoose.Types.ObjectId().toString(),
+        parentTokenHash: hashToken('parent_compat'),
+      };
+
+      // 1. Initially on v1: encrypt recovery token
+      process.env.SESSION_ENCRYPTION_KEY = KEY_V1;
+      delete process.env.SESSION_ENCRYPTION_ACTIVE_VERSION;
+      resetKeyRegistry();
+      const v1Envelope = encryptRecoveryToken('token_from_v1_era', context);
+      assert.ok(v1Envelope.startsWith('v1:'));
+
+      // 2. Rotate to multi-key JSON with active v2
+      process.env.SESSION_ENCRYPTION_KEY = JSON.stringify({ v1: KEY_V1, v2: KEY_V2 });
+      process.env.SESSION_ENCRYPTION_ACTIVE_VERSION = 'v2';
+      resetKeyRegistry();
+
+      // New token must encrypt with v2
+      const v2Envelope = encryptRecoveryToken('token_from_v2_era', context);
+      assert.ok(v2Envelope.startsWith('v2:'));
+
+      // Both envelopes must decrypt successfully
+      const decryptedV2 = decryptRecoveryToken(v2Envelope, context);
+      assert.strictEqual(decryptedV2, 'token_from_v2_era');
+
+      const decryptedV1 = decryptRecoveryToken(v1Envelope, context);
+      assert.strictEqual(decryptedV1, 'token_from_v1_era', 'v1 envelope must remain decodable under multi-key v2 configuration');
+    });
+
+    it('5.5 should fail clearly when active key version is missing or nonexistent', () => {
+      // Multi-key without active version specified
+      process.env.SESSION_ENCRYPTION_KEY = JSON.stringify({ v1: KEY_V1, v2: KEY_V2 });
+      delete process.env.SESSION_ENCRYPTION_ACTIVE_VERSION;
+      resetKeyRegistry();
+      assert.throws(
+        () => getKey(),
+        /SESSION_ENCRYPTION_ACTIVE_VERSION must be explicitly specified when multiple encryption keys are configured/
+      );
+
+      // Nonexistent active version
+      process.env.SESSION_ENCRYPTION_ACTIVE_VERSION = 'v99';
+      resetKeyRegistry();
+      assert.throws(
+        () => getKey(),
+        /Configured active key version "v99" does not exist in SESSION_ENCRYPTION_KEY registry/
+      );
+    });
+
+    it('5.6 should perform strict production startup validation', () => {
+      process.env.NODE_ENV = 'production';
+
+      // Missing in production
+      delete process.env.SESSION_ENCRYPTION_KEY;
+      delete process.env.SESSION_ENCRYPTION_ACTIVE_VERSION;
+      resetKeyRegistry();
+      assert.throws(() => validateSessionEncryptionKey(), /SESSION_ENCRYPTION_KEY environment variable is required in production/);
+
+      // Valid single key in production
+      process.env.SESSION_ENCRYPTION_KEY = KEY_V1;
+      resetKeyRegistry();
+      assert.doesNotThrow(() => validateSessionEncryptionKey());
+
+      // Valid multi-key in production
+      process.env.SESSION_ENCRYPTION_KEY = JSON.stringify({ v1: KEY_V1, v2: KEY_V2 });
+      process.env.SESSION_ENCRYPTION_ACTIVE_VERSION = 'v2';
+      resetKeyRegistry();
+      assert.doesNotThrow(() => validateSessionEncryptionKey());
+
+      // Multi-key in production with missing active version
+      delete process.env.SESSION_ENCRYPTION_ACTIVE_VERSION;
+      resetKeyRegistry();
+      assert.throws(() => validateSessionEncryptionKey(), /SESSION_ENCRYPTION_ACTIVE_VERSION must be explicitly specified/);
+    });
+  });
+
+  describe('6. Session Expiration & Concurrent Expiry Invariance', () => {
+    it('6.1 Expired session refresh must be rejected and marked revoked', async () => {
+      const loginRes = await authService.login({
+        email: 'student@uap.edu',
+        password: 'Student@123',
+        ipAddress: '127.0.0.1',
+      });
+      const t1 = loginRes.refreshToken;
+
+      // Artificially expire the session in MongoDB
+      const session = await Session.findOne({ currentTokenHash: hashToken(t1) });
+      session.expiresAt = new Date(Date.now() - 5000); // 5 seconds in past
+      await session.save();
+
+      await assert.rejects(
+        async () => {
+          await authService.refreshAccessToken({ refreshToken: t1, ipAddress: '127.0.0.1' });
+        },
+        (err) => {
+          assert.strictEqual(err.statusCode, 401);
+          assert.match(err.message, /Session has expired/i);
+          return true;
+        },
+        'Expired session must be rejected with HTTP 401'
+      );
+
+      // Verify status transitioned to revoked
+      const updated = await Session.findById(session._id);
+      assert.strictEqual(updated.status, 'revoked');
+      assert.strictEqual(updated.revocationReason, 'session_expired');
+    });
+
+    it('6.2 Concurrent refresh after session expiry must reject all requests with 401', async () => {
+      const loginRes = await authService.login({
+        email: 'student@uap.edu',
+        password: 'Student@123',
+        ipAddress: '127.0.0.1',
+      });
+      const t1 = loginRes.refreshToken;
+
+      // Artificially expire the session in MongoDB
+      const session = await Session.findOne({ currentTokenHash: hashToken(t1) });
+      session.expiresAt = new Date(Date.now() - 5000);
+      await session.save();
+
+      // Dispatch two simultaneous refresh requests against expired session
+      const [p1, p2] = await Promise.allSettled([
+        authService.refreshAccessToken({ refreshToken: t1, ipAddress: '127.0.0.1' }),
+        authService.refreshAccessToken({ refreshToken: t1, ipAddress: '127.0.0.1' }),
+      ]);
+
+      assert.strictEqual(p1.status, 'rejected');
+      assert.strictEqual(p2.status, 'rejected');
+      assert.strictEqual(p1.reason.statusCode, 401);
+      assert.strictEqual(p2.reason.statusCode, 401);
+      assert.match(p1.reason.message, /Session has expired|Session has been revoked/i);
+      assert.match(p2.reason.message, /Session has expired|Session has been revoked/i);
+    });
+  });
+
+  describe('7. Replay Behaviour After History-Buffer Eviction', () => {
+    it('7.1 Eviction investigation: demonstrates lifecycle when token is evicted from recentRotations and historicalRevokedHashes', async () => {
+      const loginRes = await authService.login({
+        email: 'student@uap.edu',
+        password: 'Student@123',
+        ipAddress: '127.0.0.1',
+      });
+      const t1 = loginRes.refreshToken;
+      const t1Hash = hashToken(t1);
+
+      const initialSession = await Session.findOne({ currentTokenHash: t1Hash });
+      const originalFamilyId = initialSession.familyId;
+
+      // Perform 26 sequential rotations to exceed recentRotations (5) + historicalRevokedHashes (20)
+      let currentToken = t1;
+      for (let i = 1; i <= 26; i++) {
+        const res = await authService.refreshAccessToken({ refreshToken: currentToken, ipAddress: '127.0.0.1' });
+        currentToken = res.refreshToken;
+      }
+
+      // Verify T1 has been evicted from the original session document
+      const sessionAfterRotations = await Session.findById(initialSession._id);
+      assert.strictEqual(sessionAfterRotations.familyId, originalFamilyId);
+      assert.strictEqual(sessionAfterRotations.recentRotations.some((r) => r.tokenHash === t1Hash), false, 'T1 must be evicted from recentRotations');
+      assert.strictEqual(sessionAfterRotations.historicalRevokedHashes.includes(t1Hash), false, 'T1 must be evicted from historicalRevokedHashes');
+
+      // Investigation observation:
+      // When T1 is presented now, Session.findOne matching t1Hash returns null.
+      // Because of legacy migration fallback (if (!session)), presenting T1 establishes a new session family.
+      const replayRes = await authService.refreshAccessToken({ refreshToken: t1, ipAddress: '127.0.0.1' });
+      assert.ok(replayRes.accessToken, 'Demonstrates legacy fallback creates session when hash is completely evicted');
+      assert.notStrictEqual(replayRes.refreshToken, currentToken);
+
+      // Verify that the newly established session has a different familyId from originalFamilyId
+      const newSession = await Session.findOne({ currentTokenHash: hashToken(replayRes.refreshToken) });
+      assert.ok(newSession, 'New session exists for evicted token');
+      assert.notStrictEqual(newSession.familyId, originalFamilyId, 'Evicted token replay creates new isolated family, leaving original family untouched');
     });
   });
 });

@@ -88,6 +88,22 @@ router.get(
   assessmentController.getCertificateTemplates
 );
 
+// Faculty IDE code and test suite execution (POST /api/assessments/test-code)
+router.post(
+  '/test-code',
+  authenticate,
+  authorize('instructor', 'admin'),
+  assessmentController.testFacultyCode
+);
+
+// Faculty coding question pre-publish validator (POST /api/assessments/validate-question)
+router.post(
+  '/validate-question',
+  authenticate,
+  authorize('instructor', 'admin'),
+  assessmentController.validateQuestion
+);
+
 // Get single assessment details endpoint (GET /api/assessments/:id) with role-aware question filtering
 router.get('/:id', authenticate, assessmentController.getAssessmentById);
 

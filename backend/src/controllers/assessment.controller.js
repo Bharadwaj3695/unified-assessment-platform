@@ -126,6 +126,26 @@ class AssessmentController {
       next(err);
     }
   }
+
+  // Executes code or test suite for faculty IDE question authoring
+  async testFacultyCode(req, res, next) {
+    try {
+      const result = await assessmentService.testFacultyCode(req.user, req.body);
+      return successResponse(res, 'Code executed successfully', result);
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  // Validates a coding question against authoring criteria before publish
+  async validateQuestion(req, res, next) {
+    try {
+      const result = await assessmentService.validateQuestion(req.user, req.body);
+      return successResponse(res, 'Question validation completed', result);
+    } catch (err) {
+      next(err);
+    }
+  }
 }
 
 // Export singleton instance of AssessmentController

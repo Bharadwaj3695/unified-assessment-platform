@@ -1871,7 +1871,7 @@ class AdminController {
                 status: 'published',
                 startDate: now,
                 expiryDate: new Date(now.getTime() + 24 * 60 * 60 * 1000),
-                durationDays: 1,
+                durationDay: 1,
                 durationHours: 0,
                 durationMinutes: 0,
                 targetAudience: 'all',

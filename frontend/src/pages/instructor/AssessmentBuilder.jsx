@@ -36,8 +36,25 @@ import {
   HelpCircle,
   Layers,
   Sparkles,
+  Code2,
+  Terminal,
+  FileCheck2,
 } from 'lucide-react';
 import QuestionBankPickerModal from '../../components/modals/QuestionBankPickerModal';
+import CodeEditor from '../../components/common/CodeEditor';
+import FacultyCodeIDE from '../../components/instructor/FacultyCodeIDE';
+
+const SUPPORTED_LANGUAGES = [
+  { id: 'python', label: 'Python 3.11', category: 'code' },
+  { id: 'javascript', label: 'JavaScript (Node.js 20)', category: 'code' },
+  { id: 'sqlite', label: 'SQLite 3 (In-Memory)', category: 'sql' },
+];
+
+const DEFAULT_STARTER_CODE = {
+  python: '# Write your solution here\nimport sys\n\ndef main():\n    pass\n\nif __name__ == "__main__":\n    main()\n',
+  javascript: '// Write your solution here\nconst fs = require("fs");\n\nfunction main() {\n  // Process input\n}\n\nmain();\n',
+  sqlite: '-- Write your SQL query here\nSELECT * FROM students;\n',
+};
 
 const CATEGORIES = [
   'Computer Science',
@@ -103,6 +120,7 @@ const AssessmentBuilder = () => {
 
   // Expand / Collapse State for Questions
   const [expandedQuestions, setExpandedQuestions] = useState({ 'temp-1': true });
+  const [activeCodeTab, setActiveCodeTab] = useState({});
 
   // Delete Question Confirmation Modal State
   const [questionToDelete, setQuestionToDelete] = useState(null);
@@ -188,6 +206,17 @@ const AssessmentBuilder = () => {
                 allowGoogleDocs: true,
                 isRequired: true,
               },
+              codingConfig: q.codingConfig || ((q.type === 'code' || q.type === 'sql') ? {
+                allowedLanguages: q.type === 'sql' ? ['sqlite'] : ['python', 'javascript'],
+                defaultLanguage: q.type === 'sql' ? 'sqlite' : 'python',
+                starterCode: { ...DEFAULT_STARTER_CODE },
+                schemaDdl: '',
+                cpuTimeLimitMs: 2000,
+                memoryLimitMb: 256,
+                testCases: [
+                  { id: 'tc-1', input: '', expectedOutput: '', isHidden: false, weight: 1, explanation: 'Sample test case 1' }
+                ]
+              } : undefined),
             }));
             setQuestions(loadedQuestions);
             // Expand first question by default
@@ -260,6 +289,8 @@ const AssessmentBuilder = () => {
         difficulty: iq.difficulty,
         bloomLevel: iq.bloomLevel,
         tags: iq.tags,
+        codingConfig: iq.codingConfig,
+        fileUploadConfig: iq.fileUploadConfig,
       }));
 
       // Automatically expand new items
@@ -281,7 +312,9 @@ const AssessmentBuilder = () => {
       questionText: '',
       type,
       points:
-        type === 'long_answer'
+        (type === 'code' || type === 'sql')
+          ? 25
+          : type === 'long_answer'
           ? 20
           : type === 'short_answer'
           ? 10
@@ -305,6 +338,40 @@ const AssessmentBuilder = () => {
         allowGoogleDocs: true,
         isRequired: true,
       },
+      codingConfig:
+        (type === 'code' || type === 'sql')
+          ? {
+              executionCategory: type === 'sql' ? 'sql' : 'code',
+              sqlDialect: type === 'sql' ? 'sqlite' : undefined,
+              allowedLanguages: type === 'sql' ? ['sqlite'] : ['python', 'javascript'],
+              defaultLanguage: type === 'sql' ? 'sqlite' : 'python',
+              starterCode: { ...DEFAULT_STARTER_CODE },
+              schemaDdl: '',
+              problemTitle: '',
+              problemDescription: '',
+              inputFormat: '',
+              outputFormat: '',
+              constraints: '',
+              sampleInput: '',
+              sampleOutput: '',
+              cpuTimeLimitMs: 2000,
+              memoryLimitMb: 256,
+              testCases: [
+                {
+                  id: `tc-${Date.now()}-1`,
+                  input: '',
+                  expectedOutput: '',
+                  expectedColumns: [],
+                  expectedRows: [],
+                  isHidden: false,
+                  isEnabled: true,
+                  weight: 1,
+                  explanation: 'Sample test case 1',
+                  description: 'Sample test case 1',
+                },
+              ],
+            }
+          : undefined,
     };
     setQuestions([...questions, newQ]);
     setExpandedQuestions((prev) => ({ ...prev, [newId]: true }));
@@ -399,7 +466,130 @@ const AssessmentBuilder = () => {
 
   const updateQuestionField = (index, field, val) => {
     const updated = [...questions];
-    updated[index] = { ...updated[index], [field]: val };
+    const prevQ = updated[index];
+    let codingConfig = prevQ.codingConfig;
+    if ((field === 'type' && (val === 'code' || val === 'sql')) && !codingConfig) {
+      codingConfig = {
+        executionCategory: val === 'sql' ? 'sql' : 'code',
+        sqlDialect: val === 'sql' ? 'sqlite' : undefined,
+        allowedLanguages: val === 'sql' ? ['sqlite'] : ['python', 'javascript'],
+        defaultLanguage: val === 'sql' ? 'sqlite' : 'python',
+        starterCode: { ...DEFAULT_STARTER_CODE },
+        schemaDdl: val === 'sql' ? '-- CREATE TABLE students (id INT, name TEXT);' : '',
+        cpuTimeLimitMs: 2000,
+        memoryLimitMb: 256,
+        testCases: [
+          {
+            id: `tc-${Date.now()}-1`,
+            input: '',
+            expectedOutput: val === 'sql' ? JSON.stringify([{ id: 1, name: 'Alice' }]) : '',
+            expectedColumns: val === 'sql' ? ['id', 'name'] : [],
+            expectedRows: val === 'sql' ? [[1, 'Alice']] : [],
+            isHidden: false,
+            weight: 1,
+            explanation: 'Sample test case 1',
+          },
+        ],
+      };
+    }
+    updated[index] = { ...prevQ, [field]: val, ...(codingConfig ? { codingConfig } : {}) };
+    setQuestions(updated);
+  };
+
+  const updateCodingConfig = (qIndex, field, val) => {
+    const updated = [...questions];
+    const currentConfig = updated[qIndex].codingConfig || {};
+    updated[qIndex].codingConfig = {
+      ...currentConfig,
+      [field]: val,
+    };
+    setQuestions(updated);
+  };
+
+  const updateStarterCode = (qIndex, lang, code) => {
+    const updated = [...questions];
+    const currentConfig = updated[qIndex].codingConfig || {};
+    const starterCode = { ...(currentConfig.starterCode || {}) };
+    starterCode[lang] = code;
+    updated[qIndex].codingConfig = {
+      ...currentConfig,
+      starterCode,
+    };
+    setQuestions(updated);
+  };
+
+  const toggleAllowedLanguage = (qIndex, langId) => {
+    const updated = [...questions];
+    const currentConfig = updated[qIndex].codingConfig || {};
+    const langs = [...(currentConfig.allowedLanguages || ['python', 'javascript'])];
+    const idx = langs.indexOf(langId);
+    if (idx >= 0) {
+      if (langs.length === 1) {
+        toast.warning('At least one language must remain enabled.');
+        return;
+      }
+      langs.splice(idx, 1);
+    } else {
+      langs.push(langId);
+    }
+    const defaultLang = langs.includes(currentConfig.defaultLanguage)
+      ? currentConfig.defaultLanguage
+      : langs[0];
+    updated[qIndex].codingConfig = {
+      ...currentConfig,
+      allowedLanguages: langs,
+      defaultLanguage: defaultLang,
+    };
+    setQuestions(updated);
+  };
+
+  const addTestCase = (qIndex) => {
+    const updated = [...questions];
+    const currentConfig = updated[qIndex].codingConfig || {};
+    const testCases = [...(currentConfig.testCases || [])];
+    testCases.push({
+      id: `tc-${Date.now()}-${testCases.length + 1}`,
+      input: '',
+      expectedOutput: '',
+      isHidden: testCases.length >= 1,
+      weight: 1,
+      explanation: `Test case ${testCases.length + 1}`,
+    });
+    updated[qIndex].codingConfig = {
+      ...currentConfig,
+      testCases,
+    };
+    setQuestions(updated);
+  };
+
+  const removeTestCase = (qIndex, tcIndex) => {
+    const updated = [...questions];
+    const currentConfig = updated[qIndex].codingConfig || {};
+    const testCases = [...(currentConfig.testCases || [])];
+    if (testCases.length <= 1) {
+      toast.warning('Coding questions must have at least one test case.');
+      return;
+    }
+    testCases.splice(tcIndex, 1);
+    updated[qIndex].codingConfig = {
+      ...currentConfig,
+      testCases,
+    };
+    setQuestions(updated);
+  };
+
+  const updateTestCase = (qIndex, tcIndex, field, val) => {
+    const updated = [...questions];
+    const currentConfig = updated[qIndex].codingConfig || {};
+    const testCases = [...(currentConfig.testCases || [])];
+    testCases[tcIndex] = {
+      ...testCases[tcIndex],
+      [field]: val,
+    };
+    updated[qIndex].codingConfig = {
+      ...currentConfig,
+      testCases,
+    };
     setQuestions(updated);
   };
 
@@ -499,6 +689,27 @@ const AssessmentBuilder = () => {
           qHasError = true;
         }
       }
+      if (q.type === 'code' || q.type === 'sql') {
+        const allowed = q.codingConfig?.allowedLanguages || [];
+        if (allowed.length === 0) {
+          errors[`q_${idx}_languages`] = `Question #${idx + 1} must have at least one allowed language or SQL dialect.`;
+          qHasError = true;
+        }
+        const testCases = q.codingConfig?.testCases || [];
+        if (testCases.length === 0) {
+          errors[`q_${idx}_testcases`] = `Question #${idx + 1} must have at least one test case.`;
+          qHasError = true;
+        } else {
+          const hasEmptyExpected = testCases.some((tc) => {
+            const hasStructured = (tc.expectedColumns && tc.expectedColumns.length > 0) || (tc.expectedRows && tc.expectedRows.length > 0);
+            return !hasStructured && (!tc.expectedOutput || !tc.expectedOutput.trim());
+          });
+          if (hasEmptyExpected) {
+            errors[`q_${idx}_testcases`] = `Question #${idx + 1} has test cases with missing expected output.`;
+            qHasError = true;
+          }
+        }
+      }
       if (qHasError) {
         questionsToExpand[q.id] = true;
       }
@@ -510,6 +721,10 @@ const AssessmentBuilder = () => {
 
     setValidationErrors(errors);
     return Object.keys(errors).length === 0;
+  };
+
+  const handleNavigateToSubmissions = () => {
+    navigate('/instructor/submissions');
   };
 
   const handleSave = async (targetStatus) => {
@@ -570,6 +785,39 @@ const AssessmentBuilder = () => {
                   maxFileSizeMb: q.fileUploadConfig?.maxFileSizeMb || 10,
                   allowGoogleDocs: q.fileUploadConfig?.allowGoogleDocs ?? true,
                   isRequired: q.fileUploadConfig?.isRequired ?? true,
+                }
+              : undefined,
+          codingConfig:
+            (q.type === 'code' || q.type === 'sql')
+              ? {
+                  ...q.codingConfig,
+                  executionCategory: q.codingConfig?.executionCategory || (q.type === 'sql' ? 'sql' : 'code'),
+                  sqlDialect: q.codingConfig?.sqlDialect || (q.type === 'sql' ? 'sqlite' : undefined),
+                  allowedLanguages:
+                    q.codingConfig?.allowedLanguages || (q.type === 'sql' ? ['sqlite'] : ['python', 'javascript']),
+                  defaultLanguage: q.codingConfig?.defaultLanguage || (q.type === 'sql' ? 'sqlite' : 'python'),
+                  starterCode: q.codingConfig?.starterCode || {},
+                  schemaDdl: q.codingConfig?.schemaDdl || '',
+                  problemTitle: q.codingConfig?.problemTitle || '',
+                  problemDescription: q.codingConfig?.problemDescription || '',
+                  inputFormat: q.codingConfig?.inputFormat || '',
+                  outputFormat: q.codingConfig?.outputFormat || '',
+                  constraints: q.codingConfig?.constraints || '',
+                  sampleInput: q.codingConfig?.sampleInput || '',
+                  sampleOutput: q.codingConfig?.sampleOutput || '',
+                  cpuTimeLimitMs: Number(q.codingConfig?.cpuTimeLimitMs) || 2000,
+                  memoryLimitMb: Number(q.codingConfig?.memoryLimitMb) || 256,
+                  testCases: (q.codingConfig?.testCases || []).map((tc) => ({
+                    input: tc.input || '',
+                    expectedOutput: tc.expectedOutput || '',
+                    expectedColumns: tc.expectedColumns || [],
+                    expectedRows: tc.expectedRows || [],
+                    isHidden: Boolean(tc.isHidden),
+                    isEnabled: tc.isEnabled !== false,
+                    weight: Number(tc.weight) >= 1 ? Number(tc.weight) : 1,
+                    explanation: tc.explanation || '',
+                    description: tc.description || '',
+                  })),
                 }
               : undefined,
         })),
@@ -647,7 +895,16 @@ const AssessmentBuilder = () => {
           </div>
 
           {/* Action Controls */}
-          <div className="flex items-center gap-2.5 self-start sm:self-auto flex-shrink-0">
+          <div className="flex items-center gap-2.5 flex-wrap self-start sm:self-auto flex-shrink-0">
+            <Button
+              type="button"
+              variant="outline"
+              size="md"
+              icon={FileCheck2}
+              onClick={handleNavigateToSubmissions}
+            >
+              Submissions
+            </Button>
             <Button
               type="button"
               variant="outline"
@@ -1037,6 +1294,16 @@ const AssessmentBuilder = () => {
               type="button"
               variant="outline"
               size="sm"
+              icon={Code2}
+              onClick={() => addQuestion('code')}
+              className="text-[#E05D38] border-[#E05D38]/30 hover:bg-[#FDF1EC] dark:hover:bg-[#341C16]/40 font-semibold"
+            >
+              Add Coding & SQL
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
               icon={Database}
               onClick={() => setIsQuestionBankModalOpen(true)}
               className="text-indigo-700 dark:text-indigo-300 border-indigo-200 dark:border-indigo-800 hover:bg-indigo-50 dark:hover:bg-indigo-950/40 font-semibold"
@@ -1089,6 +1356,8 @@ const AssessmentBuilder = () => {
                       variant={
                         q.type === 'mcq'
                           ? 'terracotta'
+                          : (q.type === 'code' || q.type === 'sql')
+                          ? 'terracotta'
                           : q.type === 'short_answer'
                           ? 'peach'
                           : q.type === 'long_answer'
@@ -1099,6 +1368,10 @@ const AssessmentBuilder = () => {
                     >
                       {q.type === 'mcq'
                         ? 'Multiple Choice'
+                        : q.type === 'code'
+                        ? 'Programming (Code)'
+                        : q.type === 'sql'
+                        ? 'SQL Query'
                         : q.type === 'short_answer'
                         ? 'Short Answer'
                         : q.type === 'long_answer'
@@ -1200,6 +1473,8 @@ const AssessmentBuilder = () => {
                           className="w-full px-3 py-1.5 text-xs bg-white dark:bg-[#12161F] border border-[#EBE3D8] dark:border-[#2D3748] rounded-xl text-[#1F2937] dark:text-[#F9FAFB] focus:outline-none focus:border-[#E05D38] focus:ring-1 focus:ring-[#E05D38]/20"
                         >
                           <option value="mcq">Multiple Choice (MCQ)</option>
+                          <option value="code">Programming Problem (Python / JS)</option>
+                          <option value="sql">SQL Query Problem (Database)</option>
                           <option value="short_answer">Short Answer (Subjective)</option>
                           <option value="long_answer">Long Essay (Subjective)</option>
                           <option value="file_upload">File Upload / Document (Subjective)</option>
@@ -1371,6 +1646,16 @@ const AssessmentBuilder = () => {
                           </label>
                         </div>
                       </div>
+                    )}
+
+                    {/* Coding & SQL Configuration with Integrated Faculty IDE */}
+                    {(q.type === 'code' || q.type === 'sql') && (
+                      <FacultyCodeIDE
+                        question={q}
+                        qIndex={qIndex}
+                        onUpdateQuestion={updateQuestionField}
+                        onUpdateCodingConfig={updateCodingConfig}
+                      />
                     )}
 
                     {/* Multiple Choice Options List */}

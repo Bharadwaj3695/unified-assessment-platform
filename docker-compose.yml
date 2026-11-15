@@ -1,0 +1,224 @@
+#version: '3.8'
+
+services:
+  uap-mongodb:
+    image: mongo:7.0-jammy
+    container_name: uap-mongodb
+    restart: unless-stopped
+    environment:
+      MONGO_INITDB_DATABASE: unified_assessment
+    volumes:
+      - uap_mongodb_data:/data/db
+    networks:
+      - uap-db-net
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  uap-redis:
+    image: redis:7.2-alpine
+    container_name: uap-redis
+    restart: unless-stopped
+    command: redis-server --appendonly no --save "" --maxmemory 256mb --maxmemory-policy volatile-lru
+    networks:
+      - uap-queue-net
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Independent Execution REST API Container (No Docker socket access)
+  uap-code-executor:
+    image: uap-code-executor:latest
+    build:
+      context: ./code-IDE-service
+      dockerfile: Dockerfile.api
+    container_name: uap-code-executor
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:5050:5050"
+    environment:
+      PORT: 5050
+      NODE_ENV: development
+      INTERNAL_API_KEY: ${EXECUTION_SERVICE_API_KEY:-dev_uap_exec_internal_secret_key_32bytes!!}
+      REDIS_HOST: uap-redis
+      REDIS_PORT: 6379
+      USE_REDIS_QUEUE: "true"
+    volumes:
+      - ./code-IDE-service/src:/app/src
+    networks:
+      - uap-exec-net
+      - uap-queue-net
+    depends_on:
+      uap-redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5050/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  # Independent Execution Worker Container (Orchestrates disposable runners)
+  uap-execution-worker:
+    image: uap-execution-worker:latest
+    build:
+      context: ./code-IDE-service
+      dockerfile: Dockerfile.worker
+    container_name: uap-execution-worker
+    restart: unless-stopped
+    environment:
+      NODE_ENV: development
+      DOCKER_SOCKET_PATH: /var/run/docker.sock
+      REDIS_HOST: uap-redis
+      REDIS_PORT: 6379
+      USE_REDIS_QUEUE: "true"
+      RUNNER_IMAGE_PYTHON: uap-runner-python:3.11-alpine
+      RUNNER_IMAGE_JAVASCRIPT: uap-runner-node:20-alpine
+      RUNNER_IMAGE_SQLITE: uap-runner-sqlite:3.45-alpine
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./code-IDE-service/src:/app/src
+    networks:
+      - uap-queue-net
+      - uap-sql-net
+    depends_on:
+      uap-redis:
+        condition: service_healthy
+      uap-code-executor:
+        condition: service_started
+
+  # --- Legacy SQL Infrastructure (Preserved under 'docker compose --profile sql-legacy up') ---
+  uap-postgres-engine:
+    image: postgres:16.2-alpine3.19
+    container_name: uap-postgres-engine
+    restart: unless-stopped
+    profiles:
+      - sql-legacy
+    environment:
+      POSTGRES_DB: uap_sql_sandbox
+      POSTGRES_USER: uap_sql_admin
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-dev_postgres_password_uap}
+    networks:
+      - uap-sql-net
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 512M
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U uap_sql_admin -d uap_sql_sandbox"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  uap-mysql-engine:
+    image: mysql:8.3.0-oracle
+    container_name: uap-mysql-engine
+    restart: unless-stopped
+    profiles:
+      - sql-legacy
+    environment:
+      MYSQL_DATABASE: uap_sql_sandbox
+      MYSQL_USER: uap_sql_admin
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-dev_mysql_password_uap}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-dev_mysql_root_password_uap}
+    volumes:
+      - ./code-IDE-service/init-scripts/mysql-init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    networks:
+      - uap-sql-net
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 512M
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - 'mysqladmin ping -h 127.0.0.1 -u "$$MYSQL_USER" -p"$$MYSQL_PASSWORD" --silent'
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  uap-backend:
+    image: uap-backend:latest
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.dev
+    container_name: uap-backend
+    restart: unless-stopped
+    ports:
+      - "5000:5000"
+    environment:
+      PORT: 5000
+      NODE_ENV: development
+      CLIENT_URL: http://localhost:5173
+      MONGODB_URI: mongodb://uap-mongodb:27017/unified_assessment
+      EXECUTION_SERVICE_URL: http://uap-code-executor:5050
+      EXECUTION_SERVICE_API_KEY: ${EXECUTION_SERVICE_API_KEY:-dev_uap_exec_internal_secret_key_32bytes!!}
+    depends_on:
+      uap-mongodb:
+        condition: service_healthy
+      uap-code-executor:
+        condition: service_healthy
+    volumes:
+      - ./backend:/app
+      - /app/node_modules
+      - uap_uploads_data:/app/uploads
+    networks:
+      - uap-public-net
+      - uap-db-net
+      - uap-exec-net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/api/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  uap-frontend:
+    image: uap-frontend:latest
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.dev
+    container_name: uap-frontend
+    restart: unless-stopped
+    ports:
+      - "5173:5173"
+    environment:
+      VITE_API_URL: http://localhost:5000/api
+    depends_on:
+      uap-backend:
+        condition: service_healthy
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    networks:
+      - uap-public-net
+
+networks:
+  uap-public-net:
+    name: uap-public-net
+    driver: bridge
+  uap-db-net:
+    name: uap-db-net
+    driver: bridge
+    internal: true
+  uap-exec-net:
+    name: uap-exec-net
+    driver: bridge
+  uap-queue-net:
+    name: uap-queue-net
+    driver: bridge
+    internal: true
+  uap-sql-net:
+    name: uap-sql-net
+    driver: bridge
+    internal: true
+
+volumes:
+  uap_mongodb_data:
+    name: unifiedassessmentplatformoriginal_uap_mongodb_data
+  uap_uploads_data:
+    name: unifiedassessmentplatformoriginal_uap_uploads_data

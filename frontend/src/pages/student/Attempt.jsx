@@ -13,7 +13,10 @@ import Modal from '../../components/ui/Modal';
 import Spinner from '../../components/ui/Spinner';
 import PageLoader from '../../components/ui/PageLoader';
 import ErrorState from '../../components/ui/ErrorState';
+import EmptyState from '../../components/ui/EmptyState';
 import ProgressBar from '../../components/ui/ProgressBar';
+import CodeEditor from '../../components/common/CodeEditor';
+import StudentCodeIDE from '../../components/student/StudentCodeIDE';
 import {
   Clock,
   CheckCircle,
@@ -21,7 +24,7 @@ import {
   ChevronLeft,
   ChevronRight,
   Send,
-FileText,
+  FileText,
   AlertTriangle,
   RefreshCw,
   Shield,
@@ -34,7 +37,15 @@ FileText,
   FileCheck,
   Trash2,
   Paperclip,
-  X} from 'lucide-react';
+  X,
+  Play,
+  RotateCcw,
+  Code2,
+  Database,
+  Cpu,
+  Layers,
+  Terminal,
+} from 'lucide-react';
 
 const Attempt = () => {
   const { id: assessmentId } = useParams();
@@ -46,6 +57,7 @@ const Attempt = () => {
   const [currentIdx, setCurrentIdx] = useState(0);
   const [answers, setAnswers] = useState({});
   const answersRef = useRef({});
+  const [selectedAnswers, setSelectedAnswers] = useState({});
 
   // Loading & error states
   const [isLoading, setIsLoading] = useState(true);
@@ -79,6 +91,15 @@ const Attempt = () => {
   const [isAttachingUrl, setIsAttachingUrl] = useState(false);
   const [replacingQuestionId, setReplacingQuestionId] = useState({});
   const [activeTabByQuestion, setActiveTabByQuestion] = useState({});
+
+  // Coding & SQL Assessment states (Phase 3)
+  const [editorDrafts, setEditorDrafts] = useState({}); // { [qId]: { [lang]: code } }
+  const [activeLanguageByQuestion, setActiveLanguageByQuestion] = useState({}); // { [qId]: 'python' | 'javascript' | 'sqlite' ... }
+  const [executionResultsByQuestion, setExecutionResultsByQuestion] = useState({}); // { [qId]: execResult }
+  const [isExecutingByQuestion, setIsExecutingByQuestion] = useState({}); // { [qId]: boolean }
+  const [customStdinByQuestion, setCustomStdinByQuestion] = useState({});
+  const [showCustomStdinByQuestion, setShowCustomStdinByQuestion] = useState({});
+  const [resetModalState, setResetModalState] = useState({ isOpen: false, questionId: null, language: null });
 
   const stopCamera = useCallback(() => {
     if (streamRef.current) {
@@ -142,14 +163,40 @@ const Attempt = () => {
       }
       setSubmission(submissionData);
 
-      // 3. Initialize answers
-      const existingAnswers = submissionData.answers
-        ? (submissionData.answers instanceof Map
-            ? Object.fromEntries(submissionData.answers)
-            : submissionData.answers)
-        : {};
-      setAnswers(existingAnswers);
-      answersRef.current = existingAnswers;
+      // 3. Initialize answers - restore any saved coding/SQL answers while preserving clean refresh for MCQs
+      const initialAnswers = {};
+      const initialDrafts = {};
+      const initialActiveLangs = {};
+
+      if (submissionData?.answers && typeof submissionData.answers === 'object') {
+        const rawAnswers = submissionData.answers instanceof Map
+          ? Object.fromEntries(submissionData.answers)
+          : submissionData.answers;
+
+        for (const [qId, ans] of Object.entries(rawAnswers)) {
+          if (ans && typeof ans === 'object' && ans.code !== undefined) {
+            initialAnswers[qId] = ans;
+            const lang = ans.language || 'python';
+            initialDrafts[qId] = { [lang]: ans.code };
+            initialActiveLangs[qId] = lang;
+          }
+        }
+      }
+
+      setAnswers(initialAnswers);
+      answersRef.current = initialAnswers;
+      setSelectedAnswers(initialAnswers);
+      setEditorDrafts(initialDrafts);
+      setActiveLanguageByQuestion((prev) => ({ ...prev, ...initialActiveLangs }));
+
+      // Reset any earlier backend draft answers for non-coding questions to ensure clean refresh behavior
+      if (submissionData?._id) {
+        try {
+          await submissionService.saveProgress(submissionData._id, initialAnswers);
+        } catch (resetErr) {
+          console.warn('[Attempt] Backend draft reset notice:', resetErr?.message);
+        }
+      }
 
       // 4. Initialize server-authoritative timer countdown
       if (submissionData.deadlineAt) {
@@ -287,44 +334,296 @@ const Attempt = () => {
     return `${mins}:${secs < 10 ? '0' : ''}${secs}`;
   };
 
-  // Perform granular autosave
-  const triggerAutosave = useCallback(
-    async (qId, answerValue) => {
-      if (!submission?._id || !qId) return;
+  const currentQuestion = questions[currentIdx];
+  const totalQuestions = questions.length;
+  const isLastQuestion = totalQuestions > 0 && currentIdx === totalQuestions - 1;
+  const isCodingQuestion = Boolean(currentQuestion && (currentQuestion.type === 'code' || currentQuestion.type === 'sql'));
 
-      setSaveStatus('saving');
-      try {
-        await submissionService.autosaveAnswer(submission._id, qId, answerValue);
-        setSaveStatus('saved');
-        setLastSavedAt(new Date());
-      } catch (err) {
-        console.error('Autosave error:', err);
-        setSaveStatus('error');
+  const isQuestionAnswered = (ans) => {
+    if (ans === undefined || ans === null) return false;
+    if (typeof ans === 'object') {
+      if (ans.fileKey || ans.googleDocsUrl) return true;
+      if (typeof ans.code === 'string') return ans.code.trim().length > 0;
+      return false;
+    }
+    return String(ans).trim() !== '';
+  };
+
+  const answeredCount = Object.values(answers).filter(isQuestionAnswered).length;
+  const progressPercent = totalQuestions > 0 ? Math.round((answeredCount / totalQuestions) * 100) : 0;
+
+  // Coding helper handlers
+  const getStarterCode = useCallback((q, lang) => {
+    if (!q) return '';
+    const starters = q.codingConfig?.starterCode;
+    if (starters) {
+      if (typeof starters === 'object' && starters[lang]) {
+        return starters[lang];
       }
-    },
-    [submission?._id]
-  );
+      if (starters instanceof Map && starters.get(lang)) {
+        return starters.get(lang);
+      }
+    }
+    return '';
+  }, []);
 
-  // Handle answer changes
-  const handleAnswerChange = (qId, value) => {
-    setAnswers((prev) => {
-      const updated = {
+  const getActiveLanguage = useCallback((q) => {
+    if (!q) return 'python';
+    const qId = q._id;
+    if (activeLanguageByQuestion[qId]) {
+      return activeLanguageByQuestion[qId];
+    }
+    if (q.type === 'sql') {
+      return 'sqlite';
+    }
+    const allowed = (q.codingConfig?.allowedLanguages || []).filter((l) =>
+      ['python', 'javascript'].includes(l)
+    );
+    return q.codingConfig?.defaultLanguage || allowed[0] || 'python';
+  }, [activeLanguageByQuestion]);
+
+  const getCurrentCode = useCallback((q, lang) => {
+    if (!q) return '';
+    const qId = q._id;
+    if (editorDrafts[qId]?.[lang] !== undefined) {
+      return editorDrafts[qId][lang];
+    }
+    const saved = selectedAnswers[qId] !== undefined ? selectedAnswers[qId] : answers[qId];
+    if (saved && typeof saved === 'object' && saved.language === lang && saved.code !== undefined) {
+      return saved.code;
+    }
+    return getStarterCode(q, lang);
+  }, [editorDrafts, selectedAnswers, answers, getStarterCode]);
+
+  const handleLanguageSelect = (qId, lang) => {
+    setActiveLanguageByQuestion((prev) => ({
+      ...prev,
+      [qId]: lang,
+    }));
+    const q = questions.find((item) => item._id === qId);
+    if (q) {
+      const code = getCurrentCode(q, lang);
+      setSelectedAnswers((prev) => ({
         ...prev,
-        [qId]: value,
+        [qId]: { code, language: lang },
+      }));
+    }
+  };
+
+  const handleCodeChange = (qId, lang, newCode) => {
+    setEditorDrafts((prev) => ({
+      ...prev,
+      [qId]: {
+        ...(prev[qId] || {}),
+        [lang]: newCode,
+      },
+    }));
+    setSelectedAnswers((prev) => ({
+      ...prev,
+      [qId]: {
+        code: newCode,
+        language: lang,
+      },
+    }));
+  };
+
+  const openResetModal = (qId, lang) => {
+    setResetModalState({ isOpen: true, questionId: qId, language: lang });
+  };
+
+  const confirmResetToStarterCode = () => {
+    const { questionId: qId, language: lang } = resetModalState;
+    if (!qId) return;
+    const q = questions.find((item) => item._id === qId);
+    const starter = getStarterCode(q, lang);
+
+    setEditorDrafts((prev) => ({
+      ...prev,
+      [qId]: {
+        ...(prev[qId] || {}),
+        [lang]: starter,
+      },
+    }));
+    setSelectedAnswers((prev) => ({
+      ...prev,
+      [qId]: { code: starter, language: lang },
+    }));
+    setResetModalState({ isOpen: false, questionId: null, language: null });
+    toast.info('Code reset to instructor starter template.');
+  };
+
+  const handleRunCode = async (qId) => {
+    if (isExecutingByQuestion[qId] || !submission?._id) return;
+    const q = questions.find((item) => item._id === qId);
+    if (!q) return;
+
+    const lang = getActiveLanguage(q);
+    const code = getCurrentCode(q, lang);
+
+    if (!code || !code.trim()) {
+      toast.warning('Please enter some code before running.');
+      return;
+    }
+
+    const customStdin = showCustomStdinByQuestion[qId] ? (customStdinByQuestion[qId] || '') : '';
+
+    try {
+      setIsExecutingByQuestion((prev) => ({ ...prev, [qId]: true }));
+      const res = await submissionService.runCode(submission._id, {
+        questionId: qId,
+        code,
+        language: lang,
+        customStdin,
+      });
+
+      const execData = res.data?.data || res.data || res;
+      setExecutionResultsByQuestion((prev) => ({
+        ...prev,
+        [qId]: execData,
+      }));
+
+      if (execData.verdict === 'ACCEPTED') {
+        toast.success('Execution succeeded! Sample test case(s) passed.');
+      } else if (execData.verdict === 'WRONG_ANSWER') {
+        toast.warning('Output differed from expected sample results.');
+      } else if (execData.verdict === 'TIME_LIMIT_EXCEEDED') {
+        toast.error('Execution exceeded maximum CPU time limit.');
+      } else if (execData.verdict === 'COMPILATION_ERROR' || execData.verdict === 'RUNTIME_ERROR') {
+        toast.error(`Execution failed with ${execData.verdict.replace('_', ' ')}.`);
+      }
+    } catch (err) {
+      const errorMsg = err.response?.data?.message || err.message || 'Execution failed. Please check server connectivity.';
+      setExecutionResultsByQuestion((prev) => ({
+        ...prev,
+        [qId]: {
+          verdict: 'EXECUTION_FAILED',
+          stderr: errorMsg,
+          stdout: '',
+        },
+      }));
+      toast.error(errorMsg);
+    } finally {
+      setIsExecutingByQuestion((prev) => ({ ...prev, [qId]: false }));
+    }
+  };
+
+  // Handle immediate option selection or answer text input for current question
+  const handleOptionSelect = (qId, value) => {
+    setSelectedAnswers((prev) => ({
+      ...prev,
+      [qId]: value,
+    }));
+  };
+
+  // Save & Next: saves the currently selected answer to in-memory state and moves to the next question
+  const handleSaveAndNext = () => {
+    if (!currentQuestion) return;
+    const qId = currentQuestion._id;
+    let currentSelection =
+      selectedAnswers[qId] !== undefined ? selectedAnswers[qId] : answers[qId];
+
+    if (currentQuestion.type === 'code' || currentQuestion.type === 'sql') {
+      const activeLang = getActiveLanguage(currentQuestion);
+      const code = getCurrentCode(currentQuestion, activeLang);
+      currentSelection = {
+        code,
+        language: activeLang,
       };
+    }
+
+    setAnswers((prev) => {
+      const updated = { ...prev };
+      if (isQuestionAnswered(currentSelection)) {
+        updated[qId] = currentSelection;
+      } else {
+        delete updated[qId];
+      }
       answersRef.current = updated;
       return updated;
     });
 
-    // Debounce autosave
-    if (debounceTimerRef.current) {
-      clearTimeout(debounceTimerRef.current);
-    }
+    setSelectedAnswers((prev) => ({
+      ...prev,
+      [qId]: currentSelection,
+    }));
 
-    setSaveStatus('saving');
-    debounceTimerRef.current = setTimeout(() => {
-      triggerAutosave(qId, value);
-    }, 800);
+    setSaveStatus('saved');
+    setLastSavedAt(new Date());
+
+    if (!isLastQuestion) {
+      setCurrentIdx((prev) => Math.min(totalQuestions - 1, prev + 1));
+    } else {
+      toast.success('Answer saved.');
+    }
+  };
+
+  // Next Question: navigation alone must NOT save or overwrite existing saved answers
+  const handleNextQuestion = () => {
+    if (!currentQuestion) return;
+    const qId = currentQuestion._id;
+    const isCoding = currentQuestion.type === 'code' || currentQuestion.type === 'sql';
+    setSelectedAnswers((prev) => {
+      const updated = { ...prev };
+      if (isCoding) {
+        const activeLang = getActiveLanguage(currentQuestion);
+        const code = getCurrentCode(currentQuestion, activeLang);
+        updated[qId] = { code, language: activeLang };
+      } else if (answers[qId] !== undefined) {
+        updated[qId] = answers[qId];
+      } else {
+        delete updated[qId];
+      }
+      return updated;
+    });
+
+    setCurrentIdx((prev) => Math.min(totalQuestions - 1, prev + 1));
+  };
+
+  // Previous Question: navigation alone must NOT save or overwrite existing saved answers
+  const handlePrevQuestion = () => {
+    if (!currentQuestion) return;
+    const qId = currentQuestion._id;
+    const isCoding = currentQuestion.type === 'code' || currentQuestion.type === 'sql';
+    setSelectedAnswers((prev) => {
+      const updated = { ...prev };
+      if (isCoding) {
+        const activeLang = getActiveLanguage(currentQuestion);
+        const code = getCurrentCode(currentQuestion, activeLang);
+        updated[qId] = { code, language: activeLang };
+      } else if (answers[qId] !== undefined) {
+        updated[qId] = answers[qId];
+      } else {
+        delete updated[qId];
+      }
+      return updated;
+    });
+
+    setCurrentIdx((prev) => Math.max(0, prev - 1));
+  };
+
+  // Question Palette Jump: navigation alone must NOT save or overwrite existing saved answers
+  const handleJumpToQuestion = (targetIdx) => {
+    if (targetIdx === currentIdx || !currentQuestion) {
+      setCurrentIdx(targetIdx);
+      return;
+    }
+    const qId = currentQuestion._id;
+    const isCoding = currentQuestion.type === 'code' || currentQuestion.type === 'sql';
+    setSelectedAnswers((prev) => {
+      const updated = { ...prev };
+      if (isCoding) {
+        const activeLang = getActiveLanguage(currentQuestion);
+        const code = getCurrentCode(currentQuestion, activeLang);
+        updated[qId] = { code, language: activeLang };
+      } else if (answers[qId] !== undefined) {
+        updated[qId] = answers[qId];
+      } else {
+        delete updated[qId];
+      }
+      return updated;
+    });
+
+    setCurrentIdx(targetIdx);
   };
 
   // Document Submission Handlers (Phase 5)
@@ -360,6 +659,7 @@ const Attempt = () => {
       };
       answersRef.current = updated;
       setAnswers(updated);
+      setSelectedAnswers((prev) => ({ ...prev, [questionId]: savedAnswer }));
       setSaveStatus('saved');
       setLastSavedAt(new Date());
       setSelectedFiles((prev) => ({ ...prev, [questionId]: null }));
@@ -396,6 +696,7 @@ const Attempt = () => {
       };
       answersRef.current = updated;
       setAnswers(updated);
+      setSelectedAnswers((prev) => ({ ...prev, [questionId]: savedAnswer }));
       setSaveStatus('saved');
       setLastSavedAt(new Date());
       setGdocsUrls((prev) => ({ ...prev, [questionId]: '' }));
@@ -417,6 +718,11 @@ const Attempt = () => {
       delete updated[questionId];
       answersRef.current = updated;
       setAnswers(updated);
+      setSelectedAnswers((prev) => {
+        const next = { ...prev };
+        delete next[questionId];
+        return next;
+      });
       setSaveStatus('saved');
       setLastSavedAt(new Date());
       setSelectedFiles((prev) => ({ ...prev, [questionId]: null }));
@@ -451,15 +757,6 @@ const Attempt = () => {
     }
   };
 
-  const currentQuestion = questions[currentIdx];
-  const totalQuestions = questions.length;
-  const answeredCount = Object.values(answers).filter((a) => {
-    if (a === undefined || a === null) return false;
-    if (typeof a === 'object') return Boolean(a.fileKey || a.googleDocsUrl);
-    return String(a).trim() !== '';
-  }).length;
-  const progressPercent = totalQuestions > 0 ? Math.round((answeredCount / totalQuestions) * 100) : 0;
-  const isLastQuestion = currentIdx === totalQuestions - 1;
 
   // Phase 2A: Clipboard policy enforcement for written responses during active attempts
   const isClipboardRestricted = Boolean(
@@ -574,7 +871,7 @@ const Attempt = () => {
   }
 
   return (
-    <div className="max-w-6xl mx-auto space-y-6 pb-12">
+    <div className={`${isCodingQuestion ? 'max-w-7xl' : 'max-w-6xl'} mx-auto space-y-6 pb-12`}>
       {/* Sticky Top Bar: Exam Title, Progress & Server Timer */}
       <div className="sticky top-0 z-30 bg-white/95 dark:bg-[#1A202C]/95 backdrop-blur-md border border-[#EBE3D8] dark:border-[#2D3748] py-2.5 sm:py-3 px-3 sm:px-6 rounded-2xl shadow-warm-xs transition-all">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 sm:gap-4">
@@ -645,7 +942,7 @@ const Attempt = () => {
                   {currentQuestion?._id && (
                     <button
                       type="button"
-                      onClick={() => triggerAutosave(currentQuestion._id, answers[currentQuestion._id])}
+                      onClick={() => handleSaveAndNext()}
                       className="ml-1 text-[11px] font-semibold text-[#E05D38] underline hover:text-[#C84E2D] focus:outline-none focus:ring-1 focus:ring-[#E05D38] rounded"
                       aria-label="Retry saving answer"
                     >
@@ -694,9 +991,9 @@ const Attempt = () => {
       </div>
 
       {/* Main Attempt Grid: Question Engine + Navigation Palette */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-        {/* Left 8 Cols: Active Question Workspace */}
-        <div className="lg:col-span-8 space-y-6">
+      <div className={`grid grid-cols-1 ${isCodingQuestion ? 'xl:grid-cols-12' : 'lg:grid-cols-12'} gap-6`}>
+        {/* Active Question Workspace */}
+        <div className={`${isCodingQuestion ? 'xl:col-span-9 lg:col-span-8' : 'lg:col-span-8'} space-y-6`}>
           {currentQuestion ? (
             <Card>
               {/* Question Header */}
@@ -709,17 +1006,33 @@ const Attempt = () => {
                     {currentQuestion.type?.replace('_', ' ')}
                   </Badge>
                 </div>
-                <Badge variant="sage" size="sm">
-                  {currentQuestion.points} Points
-                </Badge>
+                <div className="flex items-center space-x-2">
+                  {currentQuestion.type === 'mcq' &&
+                    (selectedAnswers[currentQuestion._id] !== undefined
+                      ? selectedAnswers[currentQuestion._id]
+                      : answers[currentQuestion._id]) && (
+                      <button
+                        type="button"
+                        onClick={() => handleOptionSelect(currentQuestion._id, null)}
+                        className="text-xs text-[#64748B] hover:text-[#E05D38] dark:text-[#94A3B8] dark:hover:text-[#F4A261] underline cursor-pointer"
+                      >
+                        Clear selection
+                      </button>
+                    )}
+                  <Badge variant="sage" size="sm">
+                    {currentQuestion.points} Points
+                  </Badge>
+                </div>
               </div>
 
-              {/* Question Prompt */}
-              <div className="py-5">
-                <h3 className="text-base sm:text-lg font-semibold text-[#1F2937] dark:text-[#F9FAFB] leading-relaxed">
-                  {currentQuestion.questionText}
-                </h3>
-              </div>
+              {/* Question Prompt (shown for standard questions; coding questions render detailed specifications inside IDE) */}
+              {!isCodingQuestion && (
+                <div className="py-5">
+                  <h3 className="text-base sm:text-lg font-semibold text-[#1F2937] dark:text-[#F9FAFB] leading-relaxed">
+                    {currentQuestion.questionText}
+                  </h3>
+                </div>
+              )}
 
               {/* Question Inputs by Type */}
               <div className="pt-2 pb-6">
@@ -727,12 +1040,16 @@ const Attempt = () => {
                 {currentQuestion.type === 'mcq' && (
                   <div className="space-y-3">
                     {currentQuestion.options?.map((opt) => {
-                      const isSelected = answers[currentQuestion._id] === opt.id;
+                      const activeSelection =
+                        selectedAnswers[currentQuestion._id] !== undefined
+                          ? selectedAnswers[currentQuestion._id]
+                          : answers[currentQuestion._id];
+                      const isSelected = activeSelection === opt.id;
                       return (
                         <button
                           key={opt.id}
                           type="button"
-                          onClick={() => handleAnswerChange(currentQuestion._id, opt.id)}
+                          onClick={() => handleOptionSelect(currentQuestion._id, opt.id)}
                           className={`w-full text-left p-4 rounded-xl border transition-all flex items-start space-x-3 cursor-pointer ${
                             isSelected
                               ? 'border-[#E05D38] bg-[#FDECE2] dark:bg-[#341C16] text-[#1F2937] dark:text-[#F9FAFB] ring-1 ring-[#E05D38]'
@@ -771,8 +1088,12 @@ const Attempt = () => {
                     </div>
                     <textarea
                       rows={4}
-                      value={answers[currentQuestion._id] || ''}
-                      onChange={(e) => handleAnswerChange(currentQuestion._id, e.target.value)}
+                      value={
+                        selectedAnswers[currentQuestion._id] !== undefined
+                          ? selectedAnswers[currentQuestion._id]
+                          : (answers[currentQuestion._id] || '')
+                      }
+                      onChange={(e) => handleOptionSelect(currentQuestion._id, e.target.value)}
                       onCopyCapture={isClipboardRestricted ? (e) => handleClipboardBlocked('copy', e) : undefined}
                       onCutCapture={isClipboardRestricted ? (e) => handleClipboardBlocked('cut', e) : undefined}
                       onPasteCapture={isClipboardRestricted ? (e) => handleClipboardBlocked('paste', e) : undefined}
@@ -782,7 +1103,10 @@ const Attempt = () => {
                       className="w-full rounded-xl border border-[#EBE3D8] dark:border-[#2D3748] bg-white dark:bg-[#12161F] p-3.5 text-sm text-[#1F2937] dark:text-[#F9FAFB] focus:outline-none focus:border-[#E05D38] focus:ring-2 focus:ring-[#E05D38]/20 transition-all placeholder:text-[#64748B]/50"
                     />
                     <p className="text-[11px] text-[#64748B] dark:text-[#94A3B8] text-right">
-                      {(answers[currentQuestion._id] || '').length} characters entered
+                      {(selectedAnswers[currentQuestion._id] !== undefined
+                        ? selectedAnswers[currentQuestion._id]
+                        : (answers[currentQuestion._id] || '')
+                      ).length} characters entered
                     </p>
                   </div>
                 )}
@@ -812,8 +1136,12 @@ const Attempt = () => {
                     >
                       <ReactQuill
                         theme="snow"
-                        value={answers[currentQuestion._id] || ''}
-                        onChange={(content) => handleAnswerChange(currentQuestion._id, content)}
+                        value={
+                          selectedAnswers[currentQuestion._id] !== undefined
+                            ? selectedAnswers[currentQuestion._id]
+                            : (answers[currentQuestion._id] || '')
+                        }
+                        onChange={(content) => handleOptionSelect(currentQuestion._id, content)}
                         placeholder="Compose your comprehensive technical response with structured paragraphs and code snippets..."
                         modules={{
                           toolbar: [
@@ -832,12 +1160,16 @@ const Attempt = () => {
                 {currentQuestion.type === 'true_false' && (
                   <div className="grid grid-cols-2 gap-4">
                     {['true', 'false'].map((val) => {
-                      const isSelected = answers[currentQuestion._id] === val;
+                      const activeSelection =
+                        selectedAnswers[currentQuestion._id] !== undefined
+                          ? selectedAnswers[currentQuestion._id]
+                          : answers[currentQuestion._id];
+                      const isSelected = activeSelection === val;
                       return (
                         <button
                           key={val}
                           type="button"
-                          onClick={() => handleAnswerChange(currentQuestion._id, val)}
+                          onClick={() => handleOptionSelect(currentQuestion._id, val)}
                           className={`p-4 rounded-xl border text-center font-bold capitalize transition-all cursor-pointer ${
                             isSelected
                               ? 'border-[#E05D38] bg-[#E05D38] text-white shadow-warm-xs'
@@ -1129,6 +1461,49 @@ const Attempt = () => {
                     </div>
                   );
                 })()}
+
+                {/* 6. Coding & SQL Programming Questions (Phase 2 Clean Student IDE) */}
+                {(currentQuestion.type === 'code' || currentQuestion.type === 'sql') && (() => {
+                  const qId = currentQuestion._id;
+                  const activeLang = getActiveLanguage(currentQuestion);
+                  const currentCode = getCurrentCode(currentQuestion, activeLang);
+                  const isExecuting = Boolean(isExecutingByQuestion[qId]);
+                  const execResult = executionResultsByQuestion[qId];
+
+                  return (
+                    <StudentCodeIDE
+                      question={currentQuestion}
+                      activeLanguage={activeLang}
+                      onLanguageChange={(lang) => handleLanguageSelect(qId, lang)}
+                      code={currentCode}
+                      onCodeChange={(newVal) => handleCodeChange(qId, activeLang, newVal)}
+                      onResetCode={() => openResetModal(qId, activeLang)}
+                      onRunCode={() => handleRunCode(qId)}
+                      isExecuting={isExecuting}
+                      executionResult={execResult}
+                      customStdin={customStdinByQuestion[qId] || ''}
+                      onCustomStdinChange={(val) =>
+                        setCustomStdinByQuestion((prev) => ({
+                          ...prev,
+                          [qId]: val,
+                        }))
+                      }
+                      showCustomStdin={Boolean(showCustomStdinByQuestion[qId])}
+                      onToggleCustomStdin={(show) =>
+                        setShowCustomStdinByQuestion((prev) => ({
+                          ...prev,
+                          [qId]: show,
+                        }))
+                      }
+                      onClearOutput={() =>
+                        setExecutionResultsByQuestion((prev) => ({
+                          ...prev,
+                          [qId]: null,
+                        }))
+                      }
+                    />
+                  );
+                })()}
               </div>
 
               {/* Navigation Controls */}
@@ -1137,33 +1512,43 @@ const Attempt = () => {
                   variant="outline"
                   size="sm"
                   icon={ChevronLeft}
-                  onClick={() => setCurrentIdx((prev) => Math.max(0, prev - 1))}
+                  onClick={handlePrevQuestion}
                   disabled={currentIdx === 0}
                 >
                   Previous<span className="hidden sm:inline"> Question</span>
                 </Button>
 
-                {isLastQuestion ? (
+                <div className="flex items-center gap-2">
                   <Button
                     variant="primary"
                     size="sm"
-                    icon={Send}
-                    iconPosition="right"
-                    onClick={() => setIsSubmitModalOpen(true)}
+                    onClick={handleSaveAndNext}
                   >
-                    Review & Submit
+                    Save & Next
                   </Button>
-                ) : (
-                  <Button
-                    variant="primary"
-                    size="sm"
-                    icon={ChevronRight}
-                    iconPosition="right"
-                    onClick={() => setCurrentIdx((prev) => Math.min(totalQuestions - 1, prev + 1))}
-                  >
-                    Next<span className="hidden sm:inline"> Question</span>
-                  </Button>
-                )}
+
+                  {isLastQuestion ? (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      icon={Send}
+                      iconPosition="right"
+                      onClick={() => setIsSubmitModalOpen(true)}
+                    >
+                      Review & Submit
+                    </Button>
+                  ) : (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      icon={ChevronRight}
+                      iconPosition="right"
+                      onClick={handleNextQuestion}
+                    >
+                      Next<span className="hidden sm:inline"> Question</span>
+                    </Button>
+                  )}
+                </div>
               </div>
             </Card>
           ) : (
@@ -1174,8 +1559,8 @@ const Attempt = () => {
           )}
         </div>
 
-        {/* Right 4 Cols: Question Navigation Palette */}
-        <div className="lg:col-span-4 space-y-4">
+        {/* Question Navigation Palette */}
+        <div className={`${isCodingQuestion ? 'xl:col-span-3 lg:col-span-4' : 'lg:col-span-4'} space-y-4`}>
           <Card
             title="Question Palette"
             subtitle={`${answeredCount} of ${totalQuestions} answered`}
@@ -1195,7 +1580,7 @@ const Attempt = () => {
                   <button
                     key={q._id}
                     type="button"
-                    onClick={() => setCurrentIdx(idx)}
+                    onClick={() => handleJumpToQuestion(idx)}
                     className={`h-10 rounded-xl text-xs font-bold transition-all flex items-center justify-center cursor-pointer ${
                       isCurrent
                         ? 'ring-2 ring-[#E05D38] border-[#E05D38] bg-[#E05D38] text-white shadow-warm-xs'
