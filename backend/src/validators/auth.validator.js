@@ -127,6 +127,29 @@ const mfaRecoveryValidator = [
 // End of mfaRecoveryValidator middleware array
 ];
 
+// Define validation middleware chain for requesting an MFA Email OTP
+const mfaSendEmailOtpValidator = [
+  // Validate that mfaToken is provided and not empty
+  body('mfaToken').trim().notEmpty().withMessage('MFA challenge token is required'),
+// End of mfaSendEmailOtpValidator middleware array
+];
+
+// Define validation middleware chain for verifying an MFA Email OTP
+const mfaVerifyEmailOtpValidator = [
+  // Validate that mfaToken is provided and not empty
+  body('mfaToken').trim().notEmpty().withMessage('MFA challenge token is required'),
+  // Target code field in request body
+  body('code')
+    .trim()
+    .notEmpty()
+    .withMessage('Verification code is required')
+    .isLength({ min: 6, max: 6 })
+    .withMessage('Verification code must be exactly 6 digits')
+    .isNumeric()
+    .withMessage('Verification code must contain only numbers'),
+// End of mfaVerifyEmailOtpValidator middleware array
+];
+
 // Define validation middleware chain for disabling MFA on an account
 const mfaDisableValidator = [
   // Validate that optional password field is a string if provided
@@ -134,6 +157,30 @@ const mfaDisableValidator = [
   // Validate that optional code field is a string if provided
   body('code').optional().isString(),
 // End of mfaDisableValidator middleware array
+];
+
+// Define validation middleware chain for initiating Email OTP enrollment
+const mfaEmailOtpSetupValidator = [
+  body('password').optional().isString(),
+  body('code').optional().isString(),
+];
+
+// Define validation middleware chain for confirming Email OTP enrollment
+const mfaEmailOtpSetupConfirmValidator = [
+  body('code')
+    .trim()
+    .notEmpty()
+    .withMessage('Verification code is required')
+    .isLength({ min: 6, max: 6 })
+    .withMessage('Verification code must be exactly 6 digits')
+    .isNumeric()
+    .withMessage('Verification code must contain only numbers'),
+];
+
+// Define validation middleware chain for disabling Email OTP on an account
+const mfaEmailOtpDisableValidator = [
+  body('password').optional().isString(),
+  body('code').optional().isString(),
 ];
 
 // Define validation middleware chain for access token refresh endpoint
@@ -227,8 +274,18 @@ module.exports = {
   mfaVerifyValidator,
   // Export MFA backup recovery code validator
   mfaRecoveryValidator,
+  // Export MFA email OTP dispatch validator
+  mfaSendEmailOtpValidator,
+  // Export MFA email OTP verification validator
+  mfaVerifyEmailOtpValidator,
   // Export MFA disable validator
   mfaDisableValidator,
+  // Export Email OTP setup validator
+  mfaEmailOtpSetupValidator,
+  // Export Email OTP setup confirmation validator
+  mfaEmailOtpSetupConfirmValidator,
+  // Export Email OTP disable validator
+  mfaEmailOtpDisableValidator,
   // Export refresh token validator
   refreshValidator,
   // Export forgot password validator

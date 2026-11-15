@@ -1,8 +1,8 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { toast } from 'react-toastify';
 import assessmentService from '../../services/assessment.service';
-import InstructorSearchBar from '../../components/instructor/InstructorSearchBar';
+import { useRefresh } from '../../hooks/useRefresh';
 import Card from '../../components/ui/Card';
 import Badge from '../../components/ui/Badge';
 import Button from '../../components/ui/Button';
@@ -30,11 +30,13 @@ Globe,
   Send,
 AlertTriangle,
   Users,
-  Search,
+  X,
+  RefreshCw,
   BarChart2} from 'lucide-react';
 
 const AssessmentsList = () => {
   const navigate = useNavigate();
+  const location = useLocation();
   const [assessments, setAssessments] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -45,27 +47,41 @@ const AssessmentsList = () => {
   const [accessFilter, setAccessFilter] = useState('all');
   const [dateFilter, setDateFilter] = useState('all');
 
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    const q = params.get('search');
+    if (q) setSearchTerm(q);
+  }, [location.search]);
+
   // Modals
   const [previewModal, setPreviewModal] = useState({ isOpen: false, assessment: null });
   const [deleteModal, setDeleteModal] = useState({ isOpen: false, assessment: null, isDeleting: false });
   const [publishModal, setPublishModal] = useState({ isOpen: false, assessment: null, isPublishing: false });
 
-  const loadAssessments = useCallback(async () => {
+  const loadAssessments = useCallback(async (isManual = false) => {
     try {
-      setIsLoading(true);
+      if (!isManual) {
+        setIsLoading(true);
+      }
       setError(null);
       const res = await assessmentService.getAssessments({ limit: 100 });
       const list = res.data || res.assessments || [];
       setAssessments(list);
     } catch (err) {
       setError(err.message || 'Failed to retrieve assessments.');
+      throw err;
     } finally {
       setIsLoading(false);
     }
   }, []);
 
+  const { isRefreshing, refresh: handleRefresh } = useRefresh(
+    () => loadAssessments(true),
+    { successMessage: 'Assessments list refreshed!' }
+  );
+
   useEffect(() => {
-    loadAssessments();
+    loadAssessments(false).catch(() => {});
   }, [loadAssessments]);
 
   // Filter assessments
@@ -129,14 +145,6 @@ const AssessmentsList = () => {
 
   return (
     <div className="space-y-6">
-      {/* Prominent Workspace Search Bar (Requirement 6) */}
-      <div className="rounded-2xl border border-surface-light-border dark:border-surface-dark-border bg-white dark:bg-surface-dark p-4 sm:p-5 shadow-sm">
-        <InstructorSearchBar
-          placeholder="Search course assessments, questions, students, or submissions..."
-          onSelectAssessment={(asmt) => navigate(`/instructor/edit/${asmt._id || asmt.id}`)}
-        />
-      </div>
-
       {/* Header Banner */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
@@ -166,7 +174,7 @@ const AssessmentsList = () => {
         {/* Status Tabs */}
         <div className="flex items-center space-x-1.5 overflow-x-auto pb-1 md:pb-0">
           {[
-            { id: 'all', label: 'All Statuses' },
+            { id: 'all', label: 'All Status' },
             { id: 'published', label: 'Published' },
             { id: 'draft', label: 'Drafts' },
             { id: 'archived', label: 'Archived' },
@@ -209,16 +217,34 @@ const AssessmentsList = () => {
             <option value="last_month">Last Month</option>
           </select>
 
-          <div className="relative">
-            <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-[#64748B]" />
-            <input
-              type="text"
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              placeholder="Filter list..."
-              className="pl-8 pr-3 py-1.5 text-xs bg-[#FFF9F2] dark:bg-[#12161F] border border-[#EBE3D8] dark:border-[#2D3748] rounded-xl text-[#1F2937] dark:text-[#F9FAFB] placeholder-[#64748B]/60 focus:outline-none focus:border-[#E05D38] focus:ring-2 focus:ring-[#E05D38]/20 transition-all"
-            />
-          </div>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            icon={RefreshCw}
+            iconClassName={isRefreshing ? 'animate-spin' : ''}
+            onClick={handleRefresh}
+            isLoading={isRefreshing}
+            loadingText="Refreshing..."
+            title="Refresh Assessments"
+            aria-label={isRefreshing ? 'Refreshing assessments' : 'Refresh assessments'}
+          >
+            Refresh
+          </Button>
+
+          {searchTerm && (
+            <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold bg-[#FDECE2] text-[#E05D38] dark:bg-[#341C16] dark:text-[#F4A261] border border-[#E05D38]/30">
+              <span>Filter: &ldquo;{searchTerm}&rdquo;</span>
+              <button
+                type="button"
+                onClick={() => setSearchTerm('')}
+                className="hover:text-red-600 transition-colors cursor-pointer ml-1"
+                title="Clear search filter"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          )}
         </div>
       </div>
 
@@ -437,6 +463,7 @@ const AssessmentsList = () => {
               variant="danger"
               size="sm"
               loading={deleteModal.isDeleting}
+              loadingText="Deleting..."
               onClick={handleDelete}
             >
               Permanently Delete
@@ -470,6 +497,7 @@ const AssessmentsList = () => {
               variant="primary"
               size="sm"
               loading={publishModal.isPublishing}
+              loadingText="Publishing..."
               onClick={handlePublish}
             >
               Confirm & Publish

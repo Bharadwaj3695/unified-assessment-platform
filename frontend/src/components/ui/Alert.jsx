@@ -23,8 +23,9 @@ const alertTypeMap = {
   },
 };
 
-const Alert = ({ type = 'info', title, children, className = '' }) => {
-  const config = alertTypeMap[type] || alertTypeMap.info;
+const Alert = ({ type = 'info', variant, title, children, className = '' }) => {
+  const effectiveType = variant === 'danger' ? 'error' : (variant || type);
+  const config = alertTypeMap[effectiveType] || alertTypeMap.info;
   const Icon = config.icon;
 
   return (

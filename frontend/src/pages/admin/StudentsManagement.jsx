@@ -1,6 +1,7 @@
 // Import the core React library along with hooks for state management, lifecycle side effects, and memoized callbacks
 import { useState, useEffect, useCallback, useRef } from 'react';
 import useDebounce from '../../hooks/useDebounce';
+import { useRefresh } from '../../hooks/useRefresh';
 // Import UI icons from lucide-react used across the students management page
 import {
   // GraduationCap icon representing students and academic enrollment
@@ -9,8 +10,6 @@ import {
   Plus,
   // UploadCloud icon for triggering the bulk spreadsheet import modal
   UploadCloud,
-  // Search icon for filtering students by keyword
-  Search,
   // Filter icon for status filter dropdown
   Filter,
   // Green checkmark circle for active student status
@@ -63,6 +62,10 @@ const StudentsManagement = () => {
   const [selectedStudent, setSelectedStudent] = useState(null);
   // State controlling the visibility of the Student Details modal dialog
   const [isDetailsModalOpen, setIsDetailsModalOpen] = useState(false);
+  // State controlling confirmation modal for status activation / deactivation
+  const [isStatusModalOpen, setIsStatusModalOpen] = useState(false);
+  const [statusTargetStudent, setStatusTargetStudent] = useState(null);
+  const [isStatusSubmitting, setIsStatusSubmitting] = useState(false);
 
   // Add Student Form State
   // State storing the form inputs for creating an individual student account
@@ -82,12 +85,14 @@ const StudentsManagement = () => {
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   // Memoized callback function to fetch student accounts with pagination, search, and status filters
-  const fetchStudents = useCallback(async () => {
+  const fetchStudents = useCallback(async (isManual = false) => {
     const requestId = ++activeRequestIdRef.current;
     // Wrap API call in try-catch-finally block
     try {
-      // Set loading state to true while fetching records
-      setLoading(true);
+      // Set loading state to true only on initial/filter load
+      if (!isManual) {
+        setLoading(true);
+      }
       // Dispatch GET request to admin service with pagination, search, and status query parameters
       const res = await adminService.getStudents({
         // Current active page number
@@ -117,6 +122,7 @@ const StudentsManagement = () => {
         // Display error notification toast with backend message or fallback text
         toast.error(err.response?.data?.message || 'Failed to load students');
       }
+      throw err;
     } finally {
       if (requestId === activeRequestIdRef.current) {
         // Reset loading flag to false once network request completes
@@ -126,10 +132,15 @@ const StudentsManagement = () => {
   // Memoize dependency array ensuring callback refreshes only when query parameters change
   }, [pagination.page, pagination.limit, debouncedSearch, statusFilter]);
 
+  const { isRefreshing, refresh: handleRefresh } = useRefresh(
+    () => fetchStudents(true),
+    { successMessage: 'Students list refreshed!' }
+  );
+
   // Effect hook that triggers student list fetching when fetchStudents callback updates
   useEffect(() => {
     // Execute student fetch on initial component mount and upon query filter changes
-    fetchStudents();
+    fetchStudents(false).catch(() => {});
   }, [fetchStudents]);
 
   // Form submit handler for executing a search query
@@ -142,26 +153,31 @@ const StudentsManagement = () => {
     fetchStudents();
   };
 
-  // Handler for toggling student account active / deactivated status
-  const handleToggleStatus = async (student) => {
-    // Invert the boolean active state
+  // Handler opening status change confirmation modal
+  const handleOpenStatusModal = (student) => {
+    setStatusTargetStudent(student);
+    setIsStatusModalOpen(true);
+  };
+
+  // Handler confirming student account active / deactivated status transition
+  const handleConfirmToggleStatus = async () => {
+    if (!statusTargetStudent) return;
+    const student = statusTargetStudent;
     const newActiveState = !student.isActive;
-    // Wrap API call in try-catch block
     try {
-      // Update student account status on backend via admin service
+      setIsStatusSubmitting(true);
       await adminService.updateStudent(student.id || student._id, {
-        // Set new boolean active flag
         isActive: newActiveState,
-        // Set corresponding status string: active or revoked
-        status: newActiveState ? 'active' : 'revoked',
+        status: newActiveState ? 'active' : 'inactive',
       });
-      // Display success toast notification
       toast.success(`Student ${newActiveState ? 'activated' : 'deactivated'} successfully`);
-      // Refresh students list to update table row display
+      setIsStatusModalOpen(false);
+      setStatusTargetStudent(null);
       fetchStudents();
     } catch (err) {
-      // Display error toast notification on failure
       toast.error(err.response?.data?.message || 'Failed to update student status');
+    } finally {
+      setIsStatusSubmitting(false);
     }
   };
 
@@ -217,11 +233,11 @@ const StudentsManagement = () => {
 
   // Helper function to render styled status badge based on status string and isActive flag
   const getStatusBadge = (status, isActive) => {
-    // If account is inactive and revoked, render red revoked badge
-    if (!isActive && status === 'revoked') {
+    // If account is inactive or revoked/inactive status, render red Inactive badge
+    if (!isActive || status === 'revoked' || status === 'inactive') {
       return (
         <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-red-100 text-red-800 dark:bg-red-950/40 dark:text-red-300">
-          <XCircle className="w-3 h-3" /> Revoked
+          <XCircle className="w-3 h-3" /> Inactive
         </span>
       );
     }
@@ -304,21 +320,11 @@ const StudentsManagement = () => {
         </div>
       </div>
 
-      {/* Filter & Search Bar Section */}
+      {/* Filter Section */}
       <div className="p-4 rounded-2xl border border-surface-light-border dark:border-surface-dark-border bg-white dark:bg-surface-dark shadow-xs flex flex-col md:flex-row items-center justify-between gap-3">
-        {/* Search query form */}
-        <form onSubmit={handleSearchSubmit} className="relative w-full md:w-80">
-          {/* Search icon inside input */}
-          <Search className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
-          {/* Search input field */}
-          <input
-            type="text"
-            placeholder="Search by name, email, or Student ID..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="w-full pl-9 pr-4 py-1.5 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-900/40 text-slate-900 dark:text-slate-100 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-brand-primary"
-          />
-        </form>
+        <div className="text-xs font-semibold text-slate-500 dark:text-slate-400">
+          Showing {pagination.total} registered student account{pagination.total !== 1 ? 's' : ''}
+        </div>
 
         {/* Status filter dropdown and refresh button container */}
         <div className="flex items-center gap-3 w-full md:w-auto">
@@ -341,22 +347,25 @@ const StudentsManagement = () => {
             className="px-3 py-1.5 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-900/40 text-slate-700 dark:text-slate-300 focus:outline-none focus:ring-2 focus:ring-brand-primary"
           >
             {/* Dropdown options */}
-            <option value="">All Statuses</option>
+            <option value="">All Status</option>
             <option value="active">Active</option>
             <option value="pending">Pending</option>
-            <option value="revoked">Revoked</option>
+            <option value="inactive">Inactive</option>
             <option value="rejected">Rejected</option>
           </select>
 
           {/* Refresh list button */}
           <button
             type="button"
-            onClick={fetchStudents}
-            title="Refresh List"
-            className="p-2 rounded-xl text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+            onClick={handleRefresh}
+            disabled={isRefreshing}
+            aria-busy={isRefreshing}
+            aria-label={isRefreshing ? 'Refreshing student list' : 'Refresh list'}
+            title={isRefreshing ? 'Refreshing...' : 'Refresh List'}
+            className="p-2 rounded-xl text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
           >
             {/* Refresh icon with conditional spin animation */}
-            <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
+            <RefreshCw className={`w-3.5 h-3.5 ${isRefreshing ? 'animate-spin' : ''}`} />
           </button>
         </div>
       </div>
@@ -464,7 +473,7 @@ const StudentsManagement = () => {
                         {/* Toggle active / inactive status button */}
                         <button
                           type="button"
-                          onClick={() => handleToggleStatus(student)}
+                          onClick={() => handleOpenStatusModal(student)}
                           title={student.isActive ? 'Deactivate Account' : 'Activate Account'}
                           className={`p-1.5 rounded-lg transition-colors ${
                             student.isActive
@@ -697,6 +706,57 @@ const StudentsManagement = () => {
         onClose={() => setIsBulkModalOpen(false)}
         onSuccess={fetchStudents}
       />
+
+      {/* Account Status Confirmation Modal */}
+      {statusTargetStudent && (
+        <Modal
+          isOpen={isStatusModalOpen}
+          onClose={() => !isStatusSubmitting && setIsStatusModalOpen(false)}
+          title={statusTargetStudent.isActive ? 'Deactivate Student Account' : 'Activate Student Account'}
+        >
+          <div className="space-y-4">
+            <p className="text-sm text-slate-600 dark:text-slate-300">
+              Are you sure you want to {statusTargetStudent.isActive ? 'deactivate' : 'activate'} account access for{' '}
+              <strong className="text-slate-900 dark:text-slate-100">{statusTargetStudent.name}</strong> ({statusTargetStudent.email})?
+            </p>
+
+            <div
+              className={`p-3 rounded-xl border text-xs ${
+                statusTargetStudent.isActive
+                  ? 'bg-red-50 dark:bg-red-950/30 border-red-200 dark:border-red-900/40 text-red-700 dark:text-red-300'
+                  : 'bg-emerald-50 dark:bg-emerald-950/30 border-emerald-200 dark:border-emerald-900/40 text-emerald-700 dark:text-emerald-300'
+              }`}
+            >
+              <strong>Notice:</strong> The account status will transition to{' '}
+              <strong>{statusTargetStudent.isActive ? 'Inactive' : 'Active'}</strong>.
+              {statusTargetStudent.isActive
+                ? ' The student will not be permitted to authenticate until reactivated.'
+                : ' The student will be permitted to authenticate and access platform resources.'}
+            </div>
+
+            <div className="pt-2 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setIsStatusModalOpen(false)}
+                disabled={isStatusSubmitting}
+                className="px-4 py-2 rounded-xl text-xs font-semibold border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmToggleStatus}
+                disabled={isStatusSubmitting}
+                className={`px-4 py-2 rounded-xl text-xs font-semibold text-white ${
+                  statusTargetStudent.isActive ? 'bg-red-600 hover:bg-red-700' : 'bg-emerald-600 hover:bg-emerald-700'
+                }`}
+              >
+                {statusTargetStudent.isActive ? 'Deactivate Account' : 'Activate Account'}
+              </button>
+            </div>
+          </div>
+        </Modal>
+      )}
     </div>
   );
 };

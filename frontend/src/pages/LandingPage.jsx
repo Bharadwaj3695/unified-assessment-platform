@@ -121,10 +121,10 @@ const LandingPage = () => {
             <div className="pt-4 border-t border-surface-light-border/60 dark:border-surface-dark-border/60 grid grid-cols-2 sm:grid-cols-4 gap-4">
               <div>
                 <span className="block text-xl sm:text-2xl font-bold font-display text-slate-900 dark:text-slate-100">
-                  4 Formats
+                  Multi Formats
                 </span>
                 <span className="text-xs text-slate-500 dark:text-slate-400">
-                  MCQ, Short, Long, File
+                  MCQ, Short, Long, File, Coding questions
                 </span>
               </div>
               <div>

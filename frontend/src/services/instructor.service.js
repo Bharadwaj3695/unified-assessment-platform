@@ -52,6 +52,16 @@ export const instructorService = {
     const res = await api.post(`/evaluations/submission/${submissionId}/email`, emailData);
     return res.data || res;
   },
+
+  testCode: async (payload) => {
+    const res = await api.post('/assessments/test-code', payload);
+    return res.data || res;
+  },
+
+  validateQuestion: async (payload) => {
+    const res = await api.post('/assessments/validate-question', payload);
+    return res.data || res;
+  },
 };
 
 export default instructorService;

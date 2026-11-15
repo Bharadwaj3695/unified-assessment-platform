@@ -46,13 +46,14 @@ test.describe('Global RBAC Collapsible Sidebar E2E — Student, Instructor & Adm
       // Labels hidden in collapsed mode
       await expect(aside.getByText('student Workspace', { exact: true })).not.toBeVisible();
 
-      // All 4 student icon links visible and have title/aria-label for tooltips
+      // All 5 student icon links visible and have title/aria-label for tooltips
       const navLinks = aside.locator('nav a');
-      await expect(navLinks).toHaveCount(4);
+      await expect(navLinks).toHaveCount(5);
 
       const items = [
         { path: '/student/dashboard', name: 'Dashboard' },
-        { path: '/student/catalog', name: 'Assessments' },
+        { path: '/student/catalog', name: 'My Assessments' },
+        { path: '/student/certifications', name: 'My Certifications' },
         { path: '/student/submissions', name: 'Submissions' },
         { path: '/student/profile', name: 'Profile' },
       ];

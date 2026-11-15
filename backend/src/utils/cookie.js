@@ -5,7 +5,7 @@ const crypto = require('crypto');
 
 const COOKIE_NAME = 'uap_refresh';
 const CSRF_COOKIE_NAME = 'uap_csrf';
-const THIRTY_DAYS_SEC = 30 * 24 * 60 * 60;
+const THIRTY_Day_SEC = 30 * 24 * 60 * 60;
 
 /**
  * Sets the HttpOnly refresh token cookie on the outgoing HTTP response.
@@ -20,7 +20,7 @@ function setRefreshCookie(res, token) {
     'Path=/api/auth',
     'HttpOnly',
     `SameSite=${sameSite}`,
-    `Max-Age=${THIRTY_DAYS_SEC}`,
+    `Max-Age=${THIRTY_Day_SEC}`,
   ];
   if (isProduction || sameSite.toLowerCase() === 'none') {
     cookieParts.push('Secure');
@@ -40,7 +40,7 @@ function setCsrfCookie(res, csrfToken) {
     `${CSRF_COOKIE_NAME}=${encodeURIComponent(csrfToken)}`,
     'Path=/',
     `SameSite=${sameSite}`,
-    `Max-Age=${THIRTY_DAYS_SEC}`,
+    `Max-Age=${THIRTY_Day_SEC}`,
   ];
   if (isProduction || sameSite.toLowerCase() === 'none') {
     cookieParts.push('Secure');

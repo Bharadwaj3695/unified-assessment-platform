@@ -1,6 +1,100 @@
 // Import Mongoose ODM library for schema definition and collection operations
 const mongoose = require('mongoose');
 
+// Sub-schema representing an automated test case for coding questions
+const testCaseSchema = new mongoose.Schema(
+  {
+    // Stdin or input arguments passed to student code
+    input: { type: String, default: '' },
+    // Expected stdout or return value for evaluation
+    expectedOutput: { type: String, required: true },
+    // Structured SQL expected column headers
+    expectedColumns: { type: [String], default: [] },
+    // Structured SQL expected row data (array of arrays or array of objects)
+    expectedRows: { type: mongoose.Schema.Types.Mixed, default: [] },
+    // If true, hidden from students and evaluated on final submit only
+    isHidden: { type: Boolean, default: false },
+    // Marks/weight awarded for passing this specific test case
+    weight: { type: Number, default: 1, min: 1 },
+    // Explanatory note or problem rationale
+    explanation: { type: String, default: '' },
+    // Short title / test case description (e.g. TC01 - Basic positive integers)
+    description: { type: String, default: '' },
+    // Enable or disable test case from evaluation
+    isEnabled: { type: Boolean, default: true },
+  },
+  { _id: true }
+);
+
+// Sub-schema defining runtime environment and execution limits for coding questions
+const codingConfigSchema = new mongoose.Schema(
+  {
+    // Problem configuration metadata
+    problemTitle: { type: String, default: '' },
+    problemDescription: { type: String, default: '' },
+    constraints: { type: String, default: '' },
+    inputFormat: { type: String, default: '' },
+    outputFormat: { type: String, default: '' },
+    sampleInput: { type: String, default: '' },
+    sampleOutput: { type: String, default: '' },
+    // High-level category: programming language runtime ('code') vs isolated relational DB ('sql')
+    executionCategory: {
+      type: String,
+      enum: ['code', 'sql'],
+      default: 'code',
+    },
+    // Array of permitted language/SQL dialect keys (Python, JavaScript, SQL only)
+    allowedLanguages: {
+      type: [String],
+      enum: ['python', 'javascript', 'sqlite', 'postgresql', 'mysql'],
+      default: ['python', 'javascript'],
+    },
+    // Default language pre-selected in student code editor
+    defaultLanguage: {
+      type: String,
+      enum: ['python', 'javascript', 'sqlite', 'postgresql', 'mysql'],
+      default: 'python',
+    },
+    // Selectable SQL dialect if execution category is SQL
+    sqlDialect: {
+      type: String,
+      enum: ['sqlite', 'postgresql', 'mysql'],
+      default: 'sqlite',
+    },
+    // Starter code templates keyed by language id
+    starterCode: {
+      type: Map,
+      of: String,
+      default: {},
+    },
+    // Optional SQL Schema DDL (table creations + seed records for SQL questions)
+    schemaDdl: {
+      type: String,
+      default: '',
+    },
+    // Hard CPU wall-clock limit in milliseconds
+    cpuTimeLimitMs: {
+      type: Number,
+      default: 2000,
+      min: 500,
+      max: 10000,
+    },
+    // Memory ceiling in Megabytes
+    memoryLimitMb: {
+      type: Number,
+      default: 256,
+      min: 64,
+      max: 512,
+    },
+    // Test case suite
+    testCases: {
+      type: [testCaseSchema],
+      default: [],
+    },
+  },
+  { _id: false }
+);
+
 // Schema definition representing an individual question within an assessment
 const questionSchema = new mongoose.Schema(
   {
@@ -29,7 +123,7 @@ const questionSchema = new mongoose.Schema(
       // String type storing format enum
       type: String,
       // Permitted question types
-      enum: ['mcq', 'short_answer', 'long_answer', 'true_false', 'code', 'file_upload'],
+      enum: ['mcq', 'short_answer', 'long_answer', 'true_false', 'code', 'sql', 'file_upload'],
       // Default question format: multiple-choice
       default: 'mcq',
       // Mandatory question type
@@ -114,6 +208,11 @@ const questionSchema = new mongoose.Schema(
         // Default to true
         default: true,
       },
+    },
+    // Configuration and test cases for coding and SQL questions
+    codingConfig: {
+      type: codingConfigSchema,
+      default: () => ({}),
     },
     // Optional reference linking this question back to the central BankQuestion library record
     bankQuestionId: {

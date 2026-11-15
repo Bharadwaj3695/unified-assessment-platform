@@ -1,6 +1,8 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
+import { toast } from 'react-toastify';
 import analyticsService from '../../services/analytics.service';
+import { useRefresh } from '../../hooks/useRefresh';
 import Card from '../../components/ui/Card';
 import Badge from '../../components/ui/Badge';
 import Button from '../../components/ui/Button';
@@ -40,9 +42,11 @@ const AssessmentAnalytics = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState(null);
 
-  const loadAnalytics = useCallback(async () => {
+  const loadAnalytics = useCallback(async (isManual = false) => {
     try {
-      setIsLoading(true);
+      if (!isManual) {
+        setIsLoading(true);
+      }
       setError(null);
       const [analyticsRes, questionsRes] = await Promise.all([
         analyticsService.getInstructorAssessmentAnalytics(id),
@@ -53,13 +57,19 @@ const AssessmentAnalytics = () => {
       setQuestionData(questionsRes);
     } catch (err) {
       setError(err.message || 'Failed to retrieve assessment analytics');
+      throw err;
     } finally {
       setIsLoading(false);
     }
   }, [id]);
 
+  const { isRefreshing, refresh: handleRefresh } = useRefresh(
+    () => loadAnalytics(true),
+    { successMessage: 'Assessment analytics refreshed!' }
+  );
+
   useEffect(() => {
-    loadAnalytics();
+    loadAnalytics(false).catch(() => {});
   }, [loadAnalytics]);
 
   if (isLoading) {
@@ -138,7 +148,11 @@ const AssessmentAnalytics = () => {
             variant="outline"
             size="sm"
             icon={RefreshCw}
-            onClick={loadAnalytics}
+            iconClassName={isRefreshing ? 'animate-spin' : ''}
+            isLoading={isRefreshing}
+            loadingText="Refreshing..."
+            onClick={handleRefresh}
+            aria-label={isRefreshing ? 'Refreshing analytics' : 'Refresh analytics'}
           >
             Refresh Data
           </Button>

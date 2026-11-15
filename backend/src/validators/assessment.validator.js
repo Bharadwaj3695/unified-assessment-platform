@@ -1,5 +1,6 @@
 // Import body validator builder from express-validator
 const { body } = require('express-validator');
+const { validateGradingScheme } = require('../utils/gradingScheme');
 
 // Validation rules array for assessment creation (POST /api/assessments)
 const createAssessmentValidator = [
@@ -24,15 +25,64 @@ const createAssessmentValidator = [
   // Validate question prompt text within questions array
   body('questions.*.questionText').optional().trim().notEmpty().withMessage('Question text is required'),
   // Validate allowed question type formats
-  body('questions.*.type').optional().isIn(['mcq', 'multiple_choice', 'true_false', 'short_answer', 'long_answer', 'code', 'file_upload']).withMessage('Invalid question type'),
+  body('questions.*.type').optional().isIn(['mcq', 'multiple_choice', 'true_false', 'short_answer', 'long_answer', 'code', 'sql', 'file_upload']).withMessage('Invalid question type'),
   // Validate that points per question must be positive integer of at least 1
   body('questions.*.points').optional().isInt({ min: 1 }).withMessage('Points must be at least 1'),
   // Validate that fileUploadConfig if provided is an object
   body('questions.*.fileUploadConfig').optional().isObject().withMessage('fileUploadConfig must be an object'),
+  // Validate that codingConfig if provided is an object
+  body('questions.*.codingConfig').optional().isObject().withMessage('codingConfig must be an object'),
+  body('questions.*.codingConfig.executionCategory').optional().isIn(['code', 'sql']).withMessage('executionCategory must be one of: code, sql'),
+  body('questions.*.codingConfig.sqlDialect').optional().isIn(['sqlite']).withMessage('sqlDialect must be sqlite'),
+  body('questions.*.codingConfig.allowedLanguages')
+    .optional()
+    .isArray()
+    .withMessage('allowedLanguages must be an array')
+    .custom((langs) => {
+      const approved = ['python', 'javascript', 'sqlite'];
+      if (langs.some((l) => ['postgresql', 'mysql'].includes(String(l).toLowerCase()))) {
+        throw new Error('PostgreSQL and MySQL are rejected at the API boundary. Active SQL examination is restricted to SQLite only.');
+      }
+      if (!langs.every((l) => approved.includes(String(l).toLowerCase()))) {
+        throw new Error('Only Python, JavaScript, and SQLite are permitted');
+      }
+      return true;
+    }),
+  body('questions.*.codingConfig.defaultLanguage')
+    .optional()
+    .isString()
+    .trim()
+    .isIn(['python', 'javascript', 'sqlite'])
+    .withMessage('defaultLanguage must be one of: python, javascript, sqlite'),
+  body('questions.*.codingConfig.testCases').optional().isArray().withMessage('testCases must be an array'),
   // Validate that proctoringEnabled is boolean
   body('proctoringEnabled').optional().isBoolean().withMessage('proctoringEnabled must be a boolean'),
   // Validate that cameraRequired is boolean
   body('cameraRequired').optional().isBoolean().withMessage('cameraRequired must be a boolean'),
+  // Validate certification configuration
+  body('certification').optional().isObject().withMessage('certification must be an object'),
+  body('certification.enabled').optional().isBoolean().withMessage('certification.enabled must be a boolean'),
+  body('certification.passingPercentage').optional().isFloat({ min: 0, max: 100 }).withMessage('certification.passingPercentage must be between 0 and 100'),
+  body('certification.gradingScheme').optional().isArray().withMessage('certification.gradingScheme must be an array of grade bands').custom((scheme) => {
+    if (scheme !== undefined && scheme !== null) {
+      const result = validateGradingScheme(scheme);
+      if (!result.valid) {
+        throw new Error(result.error);
+      }
+    }
+    return true;
+  }),
+  body('certification.templateId').optional({ nullable: true }).custom((val) => {
+    if (val === null || val === '' || val === undefined) return true;
+    const mongoose = require('mongoose');
+    if (!mongoose.Types.ObjectId.isValid(val)) {
+      throw new Error('certification.templateId must be a valid MongoDB ObjectId');
+    }
+    return true;
+  }),
+  body('certification.certificateTitle').optional().isString().trim(),
+  body('certification.signatoryName').optional().isString().trim(),
+  body('certification.signatoryTitle').optional().isString().trim(),
 ];
 
 // Validation rules array for assessment updates (PUT /api/assessments/:id)
@@ -58,15 +108,64 @@ const updateAssessmentValidator = [
   // Validate question prompt text within questions array
   body('questions.*.questionText').optional().trim().notEmpty().withMessage('Question text is required'),
   // Validate allowed question type formats
-  body('questions.*.type').optional().isIn(['mcq', 'multiple_choice', 'true_false', 'short_answer', 'long_answer', 'code', 'file_upload']).withMessage('Invalid question type'),
+  body('questions.*.type').optional().isIn(['mcq', 'multiple_choice', 'true_false', 'short_answer', 'long_answer', 'code', 'sql', 'file_upload']).withMessage('Invalid question type'),
   // Validate that points per question must be positive integer of at least 1
   body('questions.*.points').optional().isInt({ min: 1 }).withMessage('Points must be at least 1'),
   // Validate that fileUploadConfig if provided is an object
   body('questions.*.fileUploadConfig').optional().isObject().withMessage('fileUploadConfig must be an object'),
+  // Validate that codingConfig if provided is an object
+  body('questions.*.codingConfig').optional().isObject().withMessage('codingConfig must be an object'),
+  body('questions.*.codingConfig.executionCategory').optional().isIn(['code', 'sql']).withMessage('executionCategory must be one of: code, sql'),
+  body('questions.*.codingConfig.sqlDialect').optional().isIn(['sqlite']).withMessage('sqlDialect must be sqlite'),
+  body('questions.*.codingConfig.allowedLanguages')
+    .optional()
+    .isArray()
+    .withMessage('allowedLanguages must be an array')
+    .custom((langs) => {
+      const approved = ['python', 'javascript', 'sqlite'];
+      if (langs.some((l) => ['postgresql', 'mysql'].includes(String(l).toLowerCase()))) {
+        throw new Error('PostgreSQL and MySQL are rejected at the API boundary. Active SQL examination is restricted to SQLite only.');
+      }
+      if (!langs.every((l) => approved.includes(String(l).toLowerCase()))) {
+        throw new Error('Only Python, JavaScript, and SQLite are permitted');
+      }
+      return true;
+    }),
+  body('questions.*.codingConfig.defaultLanguage')
+    .optional()
+    .isString()
+    .trim()
+    .isIn(['python', 'javascript', 'sqlite'])
+    .withMessage('defaultLanguage must be one of: python, javascript, sqlite'),
+  body('questions.*.codingConfig.testCases').optional().isArray().withMessage('testCases must be an array'),
   // Validate that proctoringEnabled is boolean
   body('proctoringEnabled').optional().isBoolean().withMessage('proctoringEnabled must be a boolean'),
   // Validate that cameraRequired is boolean
   body('cameraRequired').optional().isBoolean().withMessage('cameraRequired must be a boolean'),
+  // Validate certification configuration
+  body('certification').optional().isObject().withMessage('certification must be an object'),
+  body('certification.enabled').optional().isBoolean().withMessage('certification.enabled must be a boolean'),
+  body('certification.passingPercentage').optional().isFloat({ min: 0, max: 100 }).withMessage('certification.passingPercentage must be between 0 and 100'),
+  body('certification.gradingScheme').optional().isArray().withMessage('certification.gradingScheme must be an array of grade bands').custom((scheme) => {
+    if (scheme !== undefined && scheme !== null) {
+      const result = validateGradingScheme(scheme);
+      if (!result.valid) {
+        throw new Error(result.error);
+      }
+    }
+    return true;
+  }),
+  body('certification.templateId').optional({ nullable: true }).custom((val) => {
+    if (val === null || val === '' || val === undefined) return true;
+    const mongoose = require('mongoose');
+    if (!mongoose.Types.ObjectId.isValid(val)) {
+      throw new Error('certification.templateId must be a valid MongoDB ObjectId');
+    }
+    return true;
+  }),
+  body('certification.certificateTitle').optional().isString().trim(),
+  body('certification.signatoryName').optional().isString().trim(),
+  body('certification.signatoryTitle').optional().isString().trim(),
 ];
 
 // Export assessment validation chains

@@ -73,6 +73,41 @@ const mfaChallengeSchema = new mongoose.Schema(
       // Mandatory expiration timestamp set on issuance (strictly 5 minutes)
       required: true,
     },
+    // HMAC-SHA256 cryptographic hash of the 6-digit email OTP (never persisted in plaintext)
+    emailOtpHash: {
+      type: String,
+      default: null,
+    },
+    // Expiration timestamp for the email OTP code
+    emailOtpExpiresAt: {
+      type: Date,
+      default: null,
+    },
+    // Timestamp when the email OTP code was last dispatched (for resend throttling)
+    emailOtpSentAt: {
+      type: Date,
+      default: null,
+    },
+    // Counter tracking how many times an email OTP has been requested for this challenge
+    emailOtpResendCount: {
+      type: Number,
+      default: 0,
+    },
+    // Maximum allowed email OTP resends per challenge session
+    emailOtpMaxResends: {
+      type: Number,
+      default: 3,
+    },
+    // Counter tracking failed verification attempts specifically for email OTP
+    emailOtpAttempts: {
+      type: Number,
+      default: 0,
+    },
+    // Maximum allowed failed email OTP verification attempts
+    emailOtpMaxAttempts: {
+      type: Number,
+      default: 5,
+    },
   },
   {
     // Automatically manage createdAt and updatedAt timestamps
@@ -88,8 +123,9 @@ mfaChallengeSchema.pre('validate', function (next) {
   if (this.challengeId && !this.challengeHash) {
     this.challengeHash = hashChallengeId(this.challengeId);
   }
-  // Ensure raw challengeId property is never stored in MongoDB
+  // Ensure raw challengeId property and unhashed OTP are never stored in MongoDB
   this.set('challengeId', undefined, { strict: false });
+  this.set('emailOtp', undefined, { strict: false });
   next();
 });
 
@@ -115,9 +151,11 @@ mfaChallengeSchema.set('toJSON', {
   transform: (doc, ret) => {
     // Expose stringified id property
     ret.id = ret._id.toString();
-    // Strip sensitive challenge hash from serialized output
+    // Strip sensitive challenge hash and email OTP hash from serialized output
     delete ret.challengeHash;
     delete ret.challengeId;
+    delete ret.emailOtpHash;
+    delete ret.emailOtp;
     // Strip internal document version key
     delete ret.__v;
     // Return sanitized plain object

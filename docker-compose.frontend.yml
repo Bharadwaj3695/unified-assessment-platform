@@ -1,0 +1,25 @@
+# UAP Frontend Modular Docker Compose Configuration
+# Usage: docker compose -f docker-compose.frontend.yml up -d
+
+services:
+  uap-frontend:
+    image: uap-frontend:latest
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.dev
+    container_name: uap-frontend
+    restart: unless-stopped
+    ports:
+      - "5173:5173"
+    environment:
+      VITE_API_URL: http://localhost:5000/api
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    networks:
+      - uap-public-net
+
+networks:
+  uap-public-net:
+    name: uap-public-net
+    driver: bridge

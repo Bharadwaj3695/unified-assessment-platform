@@ -71,15 +71,15 @@ test.describe('Admin Platform Oversight & Account Lifecycle', () => {
     await expect(page.locator('table').locator(`text=${testEmail}`)).not.toBeVisible({ timeout: 10000 });
   });
 
-  test('4. Admin revokes active user access from all platform accounts view', async ({ page, request }) => {
-    const testEmail = `revoke_test_${Date.now()}@uap.edu`;
+  test('4. Admin deactivates and reactivates user access from all platform accounts view', async ({ page, request }) => {
+    const testEmail = `status_control_test_${Date.now()}@uap.edu`;
     const regRes = await request.post('http://localhost:5000/api/auth/register', {
       data: {
         name: 'Active User Gamma',
         email: testEmail,
         password: 'Password@123',
         role: 'student',
-        instituteCode: 'REVOKE-TEST',
+        instituteCode: 'STATUS-TEST',
       },
     });
     const regJson = await regRes.json();
@@ -100,17 +100,60 @@ test.describe('Admin Platform Oversight & Account Lifecycle', () => {
     await page.goto('/admin/users');
     await page.getByRole('button', { name: 'All Platform Accounts' }).click();
 
-    await page.fill('input[placeholder*="Search by name, email"]', testEmail);
-    await page.getByRole('button', { name: 'Search users' }).click();
+    // Search for user using top navbar search
+    const navSearch = page.locator('header input[placeholder="Search users, assessments..."]');
+    await navSearch.fill(testEmail);
+    await page.waitForTimeout(400);
+    const dropdown = page.locator('#admin-search-results');
+    await expect(dropdown.locator(`text=${testEmail}`).first()).toBeVisible({ timeout: 10000 });
+    await page.keyboard.press('Escape');
     await expect(page.locator(`text=${testEmail}`)).toBeVisible({ timeout: 10000 });
 
     const userRow = page.locator('tr', { hasText: testEmail });
-    await userRow.getByRole('button', { name: 'Revoke' }).click();
+    await expect(userRow.getByText('Active', { exact: true })).toBeVisible({ timeout: 10000 });
 
-    await expect(page.locator('text=Revoke Active Account Access')).toBeVisible();
-    await page.fill('input[placeholder*="Academic integrity violation"]', 'Honor code violation test');
-    await page.getByRole('button', { name: 'Revoke Account Access' }).click();
+    // Click Deactivate button
+    await userRow.getByRole('button', { name: 'Deactivate' }).click();
 
-    await expect(userRow.locator('text=revoked')).toBeVisible({ timeout: 10000 });
+    await expect(page.locator('text=Deactivate User Account')).toBeVisible();
+    await page.getByRole('button', { name: 'Deactivate Account' }).click();
+
+    // Verify user row transitions to Inactive badge
+    await expect(userRow.locator('text=Inactive')).toBeVisible({ timeout: 10000 });
+
+    // Verify Activate button is now available
+    await userRow.getByRole('button', { name: 'Activate' }).click();
+    await expect(page.locator('text=Activate User Account')).toBeVisible();
+    await page.getByRole('button', { name: 'Activate Account' }).click();
+
+    // Verify user row transitions back to Active badge
+    await expect(userRow.getByText('Active', { exact: true })).toBeVisible({ timeout: 10000 });
+  });
+
+  test('5. Admin Refresh Data button triggers genuine telemetry update with loading animation and recovery', async ({ page }) => {
+    await page.goto('/admin/dashboard');
+    await expect(page.locator('#adminRefreshDataBtn')).toBeVisible({ timeout: 10000 });
+
+    const refreshBtn = page.locator('#adminRefreshDataBtn');
+    await expect(refreshBtn).toHaveText(/Refresh Data/);
+    await expect(refreshBtn).toBeEnabled();
+
+    // Intercept admin stats request to verify genuine backend API call
+    const statsPromise = page.waitForResponse((response) =>
+      response.url().includes('/api/admin/stats') && response.status() === 200
+    );
+
+    // Click Refresh Data
+    await refreshBtn.click();
+
+    // Verify network response from genuine API
+    await statsPromise;
+
+    // Verify recovery to idle state and re-enabling
+    await expect(refreshBtn).toHaveText(/Refresh Data/, { timeout: 10000 });
+    await expect(refreshBtn).toBeEnabled({ timeout: 10000 });
+
+    // Verify dashboard statistics are rendered
+    await expect(page.locator('text=System Overview').or(page.locator('text=Platform Overview')).first()).toBeVisible();
   });
 });
