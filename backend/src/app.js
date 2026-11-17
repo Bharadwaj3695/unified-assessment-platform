@@ -50,6 +50,14 @@ const app = express();
 // Trust the first reverse proxy hop (Nginx, Cloudflare, load balancer) for accurate client IP identification
 app.set('trust proxy', 1);
 
+/* When setting your JWT/session cookie on login:
+res.cookie('token', token, {
+  httpOnly: true,
+  secure: true,       // Required because Cloudflare uses HTTPS
+  sameSite: 'lax',    // Works reliably when frontend & API share the Vite proxy
+  // DO NOT set 'domain: localhost' here! Leave domain undefined.
+  maxAge: 24 * 60 * 60 * 1000, // 1 day
+}); */
 // Mount Helmet security middleware configuring cross-origin resource policy to permit static file downloads
 app.use(helmet({
   // Allow cross-origin access to uploaded static assets like question files and avatars
@@ -79,7 +87,7 @@ app.use(cors({
       return callback(null, true);
     }
     // In non-production development environments, permit all local development origins (e.g. localhost, 127.0.0.1)
-    if (process.env.NODE_ENV !== 'production' && normalizedOrigin.includes('localhost')) {
+    if (process.env.NODE_ENV !== 'production' && normalizedOrigin.endsWith('.trycloudflare.com')) {
       // Permit local development client
       return callback(null, true);
     }

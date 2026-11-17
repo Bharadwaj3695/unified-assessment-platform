@@ -1,5 +1,8 @@
 # UAP Core Infrastructure Modular Docker Compose Configuration
-# Usage: docker compose -f docker-compose.infra.yml up -d
+# Usage from repo root: docker compose -f docker-compose/docker-compose.infra.yml up -d
+# Usage from docker-compose/: docker compose -f docker-compose.infra.yml up -d
+
+name: unifiedassessmentplatformoriginal
 
 services:
   uap-mongodb:

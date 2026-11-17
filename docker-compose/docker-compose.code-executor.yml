@@ -1,15 +1,18 @@
 # UAP Code Execution Microservice Modular Docker Compose Configuration
 # Provides independent containers for Executor API and Execution Worker
-# Usage: docker compose -f docker-compose.code-executor.yml up -d
-# With legacy SQL engines: docker compose -f docker-compose.code-executor.yml --profile sql-legacy up -d
+# Usage from repo root: docker compose -f docker-compose/docker-compose.code-executor.yml up -d
+# With legacy SQL engines: docker compose -f docker-compose/docker-compose.code-executor.yml --profile sql-legacy up -d
+# Usage from docker-compose/: docker compose -f docker-compose.code-executor.yml up -d
+
+name: unifiedassessmentplatformoriginal
 
 services:
   # 1. Independent Execution REST API Container (No Docker socket access)
   uap-code-executor:
     image: uap-code-executor:latest
     build:
-      context: ./code-IDE-service
-      dockerfile: Dockerfile.api
+      context: ../code-IDE-service
+      dockerfile: docker/Dockerfile.api
     container_name: uap-code-executor
     restart: unless-stopped
     ports:
@@ -23,7 +26,7 @@ services:
       REDIS_PORT: 6379
       USE_REDIS_QUEUE: "true"
     volumes:
-      - ./code-IDE-service/src:/app/src
+      - ../code-IDE-service/src:/app/src
     networks:
       - uap-exec-net
       - uap-queue-net
@@ -37,8 +40,8 @@ services:
   uap-execution-worker:
     image: uap-execution-worker:latest
     build:
-      context: ./code-IDE-service
-      dockerfile: Dockerfile.worker
+      context: ../code-IDE-service
+      dockerfile: docker/Dockerfile.worker
     container_name: uap-execution-worker
     restart: unless-stopped
     environment:
@@ -52,7 +55,7 @@ services:
       RUNNER_IMAGE_SQLITE: uap-runner-sqlite:3.45-alpine
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
-      - ./code-IDE-service/src:/app/src
+      - ../code-IDE-service/src:/app/src
     networks:
       - uap-queue-net
       - uap-sql-net
@@ -95,7 +98,7 @@ services:
       MYSQL_PASSWORD: ${MYSQL_PASSWORD:-dev_mysql_password_uap}
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-dev_mysql_root_password_uap}
     volumes:
-      - ./code-IDE-service/init-scripts/mysql-init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+      - ../code-IDE-service/init-scripts/mysql-init.sql:/docker-entrypoint-initdb.d/init.sql:ro
     networks:
       - uap-sql-net
     deploy:

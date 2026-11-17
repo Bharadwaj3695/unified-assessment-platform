@@ -1,4 +1,4 @@
-#version: '3.8'
+name: unifiedassessmentplatformoriginal
 
 services:
   uap-mongodb:
@@ -34,8 +34,8 @@ services:
   uap-code-executor:
     image: uap-code-executor:latest
     build:
-      context: ./code-IDE-service
-      dockerfile: Dockerfile.api
+      context: ../code-IDE-service
+      dockerfile: docker/Dockerfile.api
     container_name: uap-code-executor
     restart: unless-stopped
     ports:
@@ -48,7 +48,7 @@ services:
       REDIS_PORT: 6379
       USE_REDIS_QUEUE: "true"
     volumes:
-      - ./code-IDE-service/src:/app/src
+      - ../code-IDE-service/src:/app/src
     networks:
       - uap-exec-net
       - uap-queue-net
@@ -65,8 +65,8 @@ services:
   uap-execution-worker:
     image: uap-execution-worker:latest
     build:
-      context: ./code-IDE-service
-      dockerfile: Dockerfile.worker
+      context: ../code-IDE-service
+      dockerfile: docker/Dockerfile.worker
     container_name: uap-execution-worker
     restart: unless-stopped
     environment:
@@ -80,7 +80,7 @@ services:
       RUNNER_IMAGE_SQLITE: uap-runner-sqlite:3.45-alpine
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
-      - ./code-IDE-service/src:/app/src
+      - ../code-IDE-service/src:/app/src
     networks:
       - uap-queue-net
       - uap-sql-net
@@ -126,7 +126,7 @@ services:
       MYSQL_PASSWORD: ${MYSQL_PASSWORD:-dev_mysql_password_uap}
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-dev_mysql_root_password_uap}
     volumes:
-      - ./code-IDE-service/init-scripts/mysql-init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+      - ../code-IDE-service/init-scripts/mysql-init.sql:/docker-entrypoint-initdb.d/init.sql:ro
     networks:
       - uap-sql-net
     deploy:
@@ -145,8 +145,8 @@ services:
   uap-backend:
     image: uap-backend:latest
     build:
-      context: ./backend
-      dockerfile: Dockerfile.dev
+      context: ../backend
+      dockerfile: docker/Dockerfile
     container_name: uap-backend
     restart: unless-stopped
     ports:
@@ -164,7 +164,7 @@ services:
       uap-code-executor:
         condition: service_healthy
     volumes:
-      - ./backend:/app
+      - ../backend:/app
       - /app/node_modules
       - uap_uploads_data:/app/uploads
     networks:
@@ -180,19 +180,19 @@ services:
   uap-frontend:
     image: uap-frontend:latest
     build:
-      context: ./frontend
-      dockerfile: Dockerfile.dev
+      context: ../frontend
+      dockerfile: docker/Dockerfile
     container_name: uap-frontend
     restart: unless-stopped
     ports:
       - "5173:5173"
     environment:
-      VITE_API_URL: http://localhost:5000/api
+      VITE_API_URL: /api
     depends_on:
       uap-backend:
         condition: service_healthy
     volumes:
-      - ./frontend:/app
+      - ../frontend:/app
       - /app/node_modules
     networks:
       - uap-public-net

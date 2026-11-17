@@ -8,7 +8,7 @@ import { storage } from '../utils/storage';
 // Instantiate pre-configured Axios client instance with standard base URL, JSON headers, and credentials enabled
 const api = axios.create({
   // Backend API base path prefix (e.g. /api)
-  baseURL: API_BASE_URL,
+  baseURL: import.meta.env.VITE_API_URL || '/api',
   // Enable cookies across credentialed requests
   withCredentials: true,
   // Default request headers
