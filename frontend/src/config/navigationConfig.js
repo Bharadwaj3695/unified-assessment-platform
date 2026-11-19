@@ -519,6 +519,22 @@ export const adminNavigation = {
           description: 'Institutional assessment repository, review status, and oversight',
         // Conclude admin-assessments item definition
         },
+        // Navigation item linking to Certification Studio
+        {
+          // Unique item identifier
+          id: 'admin-certifications',
+          // Display label in navigation menu
+          name: 'Certification Studio',
+          // Target URL path to Certification Studio
+          path: '/admin/certifications',
+          // Lucide award icon
+          icon: Award,
+          // URL patterns matching certification studio
+          matchPatterns: ['/admin/certifications'],
+          // Description of certification studio features
+          description: 'Manage certificate templates, visual styling, issuance registry, and analytics',
+        // Conclude admin-certifications item definition
+        },
       // Conclude items array
       ],
     // Conclude admin-management-section

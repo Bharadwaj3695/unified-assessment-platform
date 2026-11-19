@@ -82,6 +82,10 @@ import StudentRegistryPage from '../pages/admin/StudentRegistry';
 import FacultyRegistryPage from '../pages/admin/FacultyRegistry';
 // Import the administrator account profile page component
 import AdminProfile from '../pages/admin/Profile';
+// Import the administrator Certification Studio component
+import CertificationStudio from '../pages/admin/CertificationStudio';
+// Import the public certificate verification page component
+import VerifyCertificate from '../pages/VerifyCertificate';
 // Import the generic 404 page not found fallback component
 import NotFound from '../pages/NotFound';
 
@@ -114,6 +118,9 @@ const AppRoutes = () => {
       <Route path="/" element={<PublicLayout />}>
         {/* Default index route rendering the LandingPage component */}
         <Route index element={<LandingPage />} />
+        {/* Public credential verification registry routes */}
+        <Route path="verify" element={<VerifyCertificate />} />
+        <Route path="verify/:code" element={<VerifyCertificate />} />
       {/* Conclude public landing page route container */}
       </Route>
 
@@ -238,6 +245,8 @@ const AppRoutes = () => {
             <Route path="assessments" element={<AdminDashboard />} />
             {/* Immutable security audit logs and event history */}
             <Route path="logs" element={<AdminDashboard />} />
+            {/* Administrator Certification Studio */}
+            <Route path="certifications" element={<CertificationStudio />} />
             {/* Global platform configuration, operational preferences, and MFA security settings */}
             <Route path="settings" element={<AdminDashboard />} />
             {/* Administrator personal and institutional identity, credentials, and profile details */}

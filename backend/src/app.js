@@ -51,6 +51,7 @@ const app = express();
 app.set('trust proxy', 1);
 
 /* When setting your JWT/session cookie on login:
+const isHttps = req.secure || req.headers['x-forwarded-proto'] === 'https';
 res.cookie('token', token, {
   httpOnly: true,
   secure: true,       // Required because Cloudflare uses HTTPS
@@ -64,31 +65,17 @@ app.use(helmet({
   crossOriginResourcePolicy: { policy: "cross-origin" }
 }));
 
-// Parse comma-separated list of allowed frontend origins, trimming whitespace and trailing slashes
-const allowedOrigins = (process.env.CLIENT_URL || 'http://localhost:5173')
-  // Split multiple configured client URLs by comma
-  .split(',')
-  // Strip whitespace and remove any trailing slashes to guarantee exact origin string matching
-  .map((origin) => origin.trim().replace(/\/+$/, ''))
-  // Filter out any empty strings resulting from extra commas
-  .filter(Boolean);
+// Import centralized origin validator ensuring consistency between CORS and CSRF
+const { isOriginAllowed } = require('./utils/origin');
 
-// Mount CORS middleware with dynamic origin evaluation and credential sharing support
+// Mount CORS middleware with consistent origin evaluation and credential sharing support
 app.use(cors({
   // Dynamic origin validator function
   origin: (origin, callback) => {
     // Allow non-browser requests (such as curl, Postman, or server-to-server calls) lacking Origin headers
     if (!origin) return callback(null, true);
-    // Normalize incoming client origin by stripping trailing slash
-    const normalizedOrigin = origin.replace(/\/+$/, '');
-    // Check if normalized client origin is present in the allowed whitelist
-    if (allowedOrigins.includes(normalizedOrigin)) {
-      // Permit cross-origin request
-      return callback(null, true);
-    }
-    // In non-production development environments, permit all local development origins (e.g. localhost, 127.0.0.1)
-    if (process.env.NODE_ENV !== 'production' && normalizedOrigin.endsWith('.trycloudflare.com')) {
-      // Permit local development client
+    // Check if client origin is approved according to centralized security policy
+    if (isOriginAllowed(origin, process.env.NODE_ENV)) {
       return callback(null, true);
     }
     // Reject origins that do not match configured client URLs

@@ -94,6 +94,36 @@ const certificateSchema = new mongoose.Schema(
       unique: true,
       index: true,
     },
+    // PDF document file metadata and storage references
+    pdf: {
+      fileKey: { type: String, default: null },
+      filePath: { type: String, default: null },
+      fileSize: { type: Number, default: 0 },
+      generatedAt: { type: Date, default: null },
+    },
+    // Issuance lifecycle state tracking
+    issuance: {
+      status: {
+        type: String,
+        enum: ['issued', 'failed', 'pending'],
+        default: 'issued',
+      },
+      failureReason: { type: String, default: null },
+      retryCount: { type: Number, default: 0 },
+      lastAttemptAt: { type: Date, default: Date.now },
+    },
+    // Transactional email delivery state tracking
+    emailDelivery: {
+      status: {
+        type: String,
+        enum: ['pending', 'sent', 'failed'],
+        default: 'pending',
+      },
+      sentAt: { type: Date, default: null },
+      error: { type: String, default: null },
+      retryCount: { type: Number, default: 0 },
+      lastAttemptAt: { type: Date, default: null },
+    },
     // Timestamp when certificate was initially awarded
     issuedAt: {
       type: Date,
@@ -113,6 +143,9 @@ certificateSchema.index({ studentId: 1, assessmentId: 1 }, { unique: true });
 
 // Index for chronological certificate queries
 certificateSchema.index({ issuedAt: -1 });
+certificateSchema.index({ status: 1, issuedAt: -1 });
+certificateSchema.index({ 'emailDelivery.status': 1 });
+certificateSchema.index({ 'issuance.status': 1 });
 
 // Virtual populating recipient student User details
 certificateSchema.virtual('student', {

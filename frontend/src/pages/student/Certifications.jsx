@@ -105,30 +105,20 @@ const StudentCertifications = () => {
     setTimeout(() => setCopiedId(null), 2000);
   };
 
-  // Download action with clear dependency reporting
+  // Download action with authoritative streaming
   const handleDownload = async (cert) => {
     const certId = cert._id || cert.id || cert.certificateId;
     setDownloadingId(certId);
     try {
-      await certificateService.downloadCertificate(certId);
-      toast.success('Download initiated');
+      const filename = `${cert.certificateId || 'Certificate'}.pdf`;
+      await certificateService.downloadCertificate(certId, filename);
+      toast.success('Certificate downloaded successfully');
     } catch (err) {
-      const isPending =
-        err.response?.status === 501 ||
-        /pending|not implemented/i.test(err.response?.data?.message || err.message);
-
-      if (isPending) {
-        toast.info(
-          'Certificate PDF rendering service is pending backend implementation. Your verification code and academic record are authentic.',
-          { autoClose: 6000 }
-        );
-      } else {
-        toast.error(
-          err.response?.data?.message ||
-            err.message ||
-            'Unable to process download at this time'
-        );
-      }
+      toast.error(
+        err.response?.data?.message ||
+          err.message ||
+          'Unable to process certificate download'
+      );
     } finally {
       setDownloadingId(null);
     }
@@ -682,7 +672,7 @@ const StudentCertifications = () => {
 
             {/* Verification Code Box */}
             {selectedCertForModal.verificationCode && (
-              <div className="p-3 rounded-xl bg-[#FCF8F3] dark:bg-surface-dark-muted/80 border border-brand-peach/20 dark:border-slate-700 flex items-center justify-between">
+              <div className="p-3 rounded-xl bg-[#FCF8F3] dark:bg-surface-dark-muted/80 border border-brand-peach/20 dark:border-slate-700 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                 <div>
                   <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400 block">
                     Cryptographic Verification Token
@@ -691,14 +681,30 @@ const StudentCertifications = () => {
                     {selectedCertForModal.verificationCode}
                   </span>
                 </div>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  icon={Copy}
-                  onClick={() => handleCopy(selectedCertForModal.verificationCode, 'modal-verify')}
-                >
-                  Copy
-                </Button>
+                <div className="flex items-center space-x-1.5 self-end sm:self-auto">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    icon={Copy}
+                    onClick={() => handleCopy(selectedCertForModal.verificationCode, 'modal-verify')}
+                  >
+                    Copy Token
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    icon={ExternalLink}
+                    onClick={() =>
+                      window.open(
+                        `/verify/${encodeURIComponent(selectedCertForModal.verificationCode)}`,
+                        '_blank',
+                        'noopener,noreferrer'
+                      )
+                    }
+                  >
+                    Verify Online
+                  </Button>
+                </div>
               </div>
             )}
 

@@ -105,6 +105,47 @@ const systemSettingSchema = new mongoose.Schema(
       min: 1,
       max: 10,
     },
+    // Institutional certification policy and default credential branding settings
+    certification: {
+      institutionName: {
+        type: String,
+        default: 'Unified Assessment Platform',
+        trim: true,
+      },
+      institutionLogoUrl: {
+        type: String,
+        default: '',
+        trim: true,
+      },
+      institutionSealUrl: {
+        type: String,
+        default: '',
+        trim: true,
+      },
+      defaultSignatoryName: {
+        type: String,
+        default: 'Dr. Jane Smith',
+        trim: true,
+      },
+      defaultSignatoryTitle: {
+        type: String,
+        default: 'Dean of Academic Affairs',
+        trim: true,
+      },
+      defaultSignatorySignatureUrl: {
+        type: String,
+        default: '',
+        trim: true,
+      },
+      autoEmailCertificates: {
+        type: Boolean,
+        default: true,
+      },
+      includePdfAttachment: {
+        type: Boolean,
+        default: true,
+      },
+    },
     // Reference to the administrator User who last modified platform settings
     updatedBy: {
       // MongoDB ObjectId type

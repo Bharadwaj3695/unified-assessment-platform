@@ -104,6 +104,15 @@ const certificateTemplateSchema = new mongoose.Schema(
       borderColor: { type: String, default: '#D4AF37' },
       borderWidth: { type: Number, default: 8 },
     },
+    // Institutional branding, signatories, and accreditation assets
+    branding: {
+      institutionName: { type: String, default: 'Unified Assessment Platform', trim: true },
+      logoUrl: { type: String, default: null },
+      sealUrl: { type: String, default: null },
+      signatureUrl: { type: String, default: null },
+      signatoryName: { type: String, default: '', trim: true },
+      signatoryTitle: { type: String, default: 'Dean of Academic Affairs', trim: true },
+    },
     // Array of customizable layout elements
     elements: {
       type: [templateElementSchema],
@@ -152,6 +161,10 @@ const certificateTemplateSchema = new mongoose.Schema(
     toObject: { virtuals: true },
   }
 );
+
+// Indexes optimizing default template resolution and status filtering
+certificateTemplateSchema.index({ isDefault: 1, status: 1 });
+certificateTemplateSchema.index({ status: 1, createdAt: -1 });
 
 // Virtual populating creator user details
 certificateTemplateSchema.virtual('creator', {

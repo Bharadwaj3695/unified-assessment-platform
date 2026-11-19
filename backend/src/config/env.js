@@ -7,6 +7,8 @@ module.exports = {
   PORT: process.env.PORT || 5000,
   NODE_ENV: process.env.NODE_ENV || 'development',
   CLIENT_URL: process.env.CLIENT_URL || 'http://localhost:5173',
+  CLOUDFLARE_TUNNEL_URL: process.env.CLOUDFLARE_TUNNEL_URL || process.env.CLOUDFLARE_URL || '',
+  ALLOWED_ORIGINS: process.env.ALLOWED_ORIGINS || '',
   MONGODB_URI: process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017/unified_assessment',
   ALLOW_IN_MEMORY_DB: process.env.ALLOW_IN_MEMORY_DB || 'false',
   JWT_SECRET: process.env.JWT_SECRET || 'dev_jwt_secret_unified_assessment_platform',

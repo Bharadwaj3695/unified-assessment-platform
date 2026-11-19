@@ -8,12 +8,27 @@ const CSRF_COOKIE_NAME = 'uap_csrf';
 const THIRTY_Day_SEC = 30 * 24 * 60 * 60;
 
 /**
+ * Determines whether the current outgoing response is over a secure connection.
+ * Production and SameSite=None are always Secure. In non-production, checks if
+ * the request was secure or forwarded via HTTPS (e.g. Cloudflare Tunnel, reverse proxy).
+ * @param {Object} res - Express response object
+ * @returns {boolean}
+ */
+function isSecureConnection(res) {
+  if (env.NODE_ENV === 'production') return true;
+  const sameSite = env.COOKIE_SAME_SITE || 'Lax';
+  if (sameSite.toLowerCase() === 'none') return true;
+  const req = res?.req;
+  if (!req) return false;
+  return Boolean(req.secure || req.headers?.['x-forwarded-proto'] === 'https');
+}
+
+/**
  * Sets the HttpOnly refresh token cookie on the outgoing HTTP response.
  * @param {Object} res - Express response object
  * @param {string} token - Plaintext refresh token string
  */
 function setRefreshCookie(res, token) {
-  const isProduction = env.NODE_ENV === 'production';
   const sameSite = env.COOKIE_SAME_SITE || 'Lax';
   const cookieParts = [
     `${COOKIE_NAME}=${encodeURIComponent(token)}`,
@@ -22,7 +37,7 @@ function setRefreshCookie(res, token) {
     `SameSite=${sameSite}`,
     `Max-Age=${THIRTY_Day_SEC}`,
   ];
-  if (isProduction || sameSite.toLowerCase() === 'none') {
+  if (isSecureConnection(res)) {
     cookieParts.push('Secure');
   }
   appendSetCookieHeader(res, cookieParts.join('; '));
@@ -34,7 +49,6 @@ function setRefreshCookie(res, token) {
  * @param {string} csrfToken - Cryptographic CSRF token string
  */
 function setCsrfCookie(res, csrfToken) {
-  const isProduction = env.NODE_ENV === 'production';
   const sameSite = env.COOKIE_SAME_SITE || 'Lax';
   const cookieParts = [
     `${CSRF_COOKIE_NAME}=${encodeURIComponent(csrfToken)}`,
@@ -42,7 +56,7 @@ function setCsrfCookie(res, csrfToken) {
     `SameSite=${sameSite}`,
     `Max-Age=${THIRTY_Day_SEC}`,
   ];
-  if (isProduction || sameSite.toLowerCase() === 'none') {
+  if (isSecureConnection(res)) {
     cookieParts.push('Secure');
   }
   appendSetCookieHeader(res, cookieParts.join('; '));
@@ -53,7 +67,6 @@ function setCsrfCookie(res, csrfToken) {
  * @param {Object} res - Express response object
  */
 function clearAuthCookies(res) {
-  const isProduction = env.NODE_ENV === 'production';
   const sameSite = env.COOKIE_SAME_SITE || 'Lax';
   const clearRefreshApi = [
     `${COOKIE_NAME}=`,
@@ -78,7 +91,7 @@ function clearAuthCookies(res) {
     'Max-Age=0',
     'Expires=Thu, 01 Jan 1970 00:00:00 GMT',
   ];
-  if (isProduction || sameSite.toLowerCase() === 'none') {
+  if (isSecureConnection(res)) {
     clearRefreshApi.push('Secure');
     clearRefreshRoot.push('Secure');
     clearCsrf.push('Secure');
@@ -166,4 +179,5 @@ module.exports = {
   generateCsrfToken,
   validateCsrfToken,
   parseCookies,
+  isSecureConnection,
 };

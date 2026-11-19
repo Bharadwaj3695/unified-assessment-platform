@@ -224,16 +224,19 @@ describe('Student Certifications: Backend API & Access Controls', () => {
     assert.strictEqual(body.data.certificateId, 'CERT-2026-CLOUD01');
   });
 
-  it('7. should return documented HTTP 501 when download is requested for an authorized certificate', async () => {
+  it('7. should return print-ready A4 PDF download when requested for an authorized certificate', async () => {
     const res = await fetch(`${baseUrl}/api/certificates/${student1Cert._id}/download`, {
       headers: {
         Authorization: `Bearer ${student1Token}`,
       },
     });
 
-    assert.strictEqual(res.status, 501);
-    const body = await res.json();
-    assert.match(body.message, /pending backend implementation/i);
+    assert.strictEqual(res.status, 200);
+    assert.strictEqual(res.headers.get('content-type'), 'application/pdf');
+    assert.match(res.headers.get('content-disposition'), /attachment; filename="CERT-2026-CLOUD01\.pdf"/);
+    const buffer = Buffer.from(await res.arrayBuffer());
+    assert.ok(buffer.length > 1000, 'PDF buffer must be non-empty');
+    assert.strictEqual(buffer.toString('utf-8', 0, 5), '%PDF-', 'Header must match PDF signature');
   });
 
   it('8. should reject instructor role from accessing student certificates endpoint (HTTP 403)', async () => {

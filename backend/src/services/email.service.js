@@ -216,7 +216,7 @@ class EmailService {
   }
 
   // Core email dispatch method accepting destination, subject, and message content
-  async sendMail({ to, subject, text, html }) {
+  async sendMail({ to, subject, text, html, attachments }) {
     // Resolve sender address from EMAIL_FROM environment variable or default system no-reply identity
     const from = process.env.EMAIL_FROM || '"Unified Assessment Platform" <no-reply@uap.edu>';
 
@@ -232,6 +232,8 @@ class EmailService {
       text: text || html.replace(/<[^>]*>?/gm, ''),
       // Provide the rendered HTML email body
       html,
+      // Optional file attachments (e.g. certificate PDF)
+      ...(attachments && attachments.length > 0 ? { attachments } : {}),
     // Close mail options object definition
     };
 
@@ -773,6 +775,76 @@ Unified Assessment Platform
     // Complete mail options
     });
   // End sendGradeReleasedEmail method
+  }
+
+  // 8b. Certificate Awarded Notification to Student with PDF Attachment
+  // Dispatches official accreditation award notification with attached print-ready PDF and verification links
+  async sendCertificateAwardedEmail({ student, certificate, assessment, pdfBuffer }) {
+    const snap = certificate.academicSnapshot || {};
+    const clientUrl = process.env.CLIENT_URL || 'http://localhost:5173';
+    const certificateUrl = `${clientUrl}/student/certifications`;
+    const verifyUrl = `${clientUrl}/verify/${certificate.verificationCode}`;
+
+    const html = this.buildHtmlTemplate({
+      title: 'Congratulations! Official Certificate Awarded',
+      recipientName: student.name,
+      messageHtml: `
+        <p>Congratulations! You have satisfied all criteria and earned an accredited institutional credential for <strong>${snap.assessmentTitle || assessment.title}</strong>.</p>
+        <div style="padding: 18px; background-color: #FFF8F5; border-radius: 12px; margin: 18px 0; border: 1px solid #FED7AA;">
+          <div style="font-size: 16px; font-weight: 700; color: #9A3412; margin-bottom: 6px;">
+            ${snap.certificateTitle || `${snap.assessmentTitle} Certificate`}
+          </div>
+          <div style="font-size: 13px; color: #431407; line-height: 1.6;">
+            <strong>Certificate ID:</strong> ${certificate.certificateId}<br />
+            <strong>Grade Achieved:</strong> ${snap.grade || 'Pass'} (${snap.percentage}%)<br />
+            <strong>Verification Code:</strong> <code>${certificate.verificationCode}</code>
+          </div>
+        </div>
+        <p>Your official accredited certificate is attached to this email as a print-ready PDF. You can also view, verify, and download it anytime in your Student Portal.</p>
+        <p style="font-size: 12px; color: #64748b; margin-top: 12px;">
+          Public verification link: <a href="${verifyUrl}" style="color: #E05D38;">${verifyUrl}</a>
+        </p>
+      `,
+      actionUrl: '/student/certifications',
+      actionText: 'View My Certifications',
+    });
+
+    const text = `
+Hello ${student.name || 'there'},
+
+Congratulations! You have earned an official accredited certificate for ${snap.assessmentTitle || assessment.title}.
+
+Certificate Title: ${snap.certificateTitle || `${snap.assessmentTitle} Certificate`}
+Certificate ID: ${certificate.certificateId}
+Grade: ${snap.grade || 'Pass'} (${snap.percentage}%)
+Verification Code: ${certificate.verificationCode}
+
+Verify credential: ${verifyUrl}
+Access portal: ${certificateUrl}
+
+Your certificate PDF is attached to this email.
+
+Regards,
+Unified Assessment Platform
+    `.trim();
+
+    const attachments = pdfBuffer
+      ? [
+          {
+            filename: `${certificate.certificateId}.pdf`,
+            content: pdfBuffer,
+            contentType: 'application/pdf',
+          },
+        ]
+      : [];
+
+    return this.sendMail({
+      to: student.email,
+      subject: `Certificate Awarded: ${snap.certificateTitle || assessment.title} — ${certificate.certificateId}`,
+      text,
+      html,
+      attachments,
+    });
   }
 
   // 9. Password Reset Email
