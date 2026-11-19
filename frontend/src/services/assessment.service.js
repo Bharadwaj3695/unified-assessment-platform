@@ -45,6 +45,39 @@ export const assessmentService = {
     // Return confirmation response data
     return res.data;
   },
+
+  // Submits a reassignment request for an eligible missed or failed assessment
+  requestReassignment: async (id, data) => {
+    // Send POST request with reason to /assessments/:id/reassignment-request
+    const res = await api.post(`/assessments/${id}/reassignment-request`, data);
+    return res.data;
+  },
+
+  // Retrieves all reassignment requests submitted by the authenticated student
+  getMyReassignmentRequests: async () => {
+    // Send GET request to /assessments/reassignment-requests/mine
+    const res = await api.get('/assessments/reassignment-requests/mine');
+    return res.data;
+  },
+
+  // Retrieves reassignment request status for a specific assessment
+  getAssessmentReassignmentRequest: async (id) => {
+    // Send GET request to /assessments/:id/reassignment-request
+    const res = await api.get(`/assessments/${id}/reassignment-request`);
+    return res.data;
+  },
+
+  // Retrieves approved certificate templates for assessment certification configuration
+  getCertificateTemplates: async () => {
+    const res = await api.get('/assessments/certificate-templates');
+    return res.data;
+  },
+
+  // Retrieves earned certificates for the authenticated student
+  getMyCertificates: async () => {
+    const res = await api.get('/certificates/mine');
+    return res.data;
+  },
 };
 
 // Export assessmentService as default export

@@ -48,6 +48,22 @@ const errorHandler = (err, req, res, next) => {
     return errorResponse(res, 'Validation failed', 422, errors);
   }
 
+  // MongoDB / Mongoose Connection & Server Selection Errors (Database Outage / 503)
+  if (
+    err.name === 'MongoServerSelectionError' ||
+    err.name === 'MongooseServerSelectionError' ||
+    err.name === 'MongoNetworkError' ||
+    err.name === 'MongoTimeoutError' ||
+    (err.message && (err.message.includes('ECONNREFUSED') || err.message.includes('buffering timed out')))
+  ) {
+    logger.error('[Database Outage] Database operation failed: %s', err.message);
+    return errorResponse(
+      res,
+      'Database service is currently unavailable. Please verify database connectivity.',
+      503
+    );
+  }
+
   // Standard or custom errors
   // Extract custom HTTP status code if attached to error object; default to 403 for CORS errors or 500 Internal Server Error
   const statusCode = err.statusCode || (err.message && err.message.startsWith('CORS blocked') ? 403 : 500);

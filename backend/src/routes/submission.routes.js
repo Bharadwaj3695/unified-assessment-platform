@@ -22,6 +22,8 @@ router.post('/:submissionId/answers/:questionId/file', authenticate, authorize('
 router.post('/:submissionId/answers/:questionId/google-docs', authenticate, authorize('student'), submissionController.attachGoogleDocsUrl);
 // Remove uploaded response file endpoint (DELETE /api/submissions/:submissionId/answers/:questionId/file)
 router.delete('/:submissionId/answers/:questionId/file', authenticate, authorize('student'), submissionController.removeAnswerFile);
+// Student code execution endpoint for coding and SQL questions (POST /api/submissions/:submissionId/run-code)
+router.post('/:submissionId/run-code', authenticate, authorize('student'), submissionController.runCode);
 // Bulk progress save endpoint (PUT /api/submissions/:id/progress) updating multiple answers simultaneously
 router.put('/:id/progress', authenticate, authorize('student'), submissionController.saveProgress);
 // Final assessment submission endpoint (POST /api/submissions/:id/submit) calculating autoScore and finalizing attempt

@@ -35,6 +35,16 @@ const colorStyles = {
     iconText: 'text-slate-600 dark:text-slate-300',
     border: 'hover:border-slate-300 dark:hover:border-slate-700',
   },
+  rose: {
+    iconBg: 'bg-rose-50 dark:bg-rose-950/40',
+    iconText: 'text-rose-600 dark:text-rose-400',
+    border: 'hover:border-rose-300 dark:hover:border-rose-800',
+  },
+  danger: {
+    iconBg: 'bg-rose-50 dark:bg-rose-950/40',
+    iconText: 'text-rose-600 dark:text-rose-400',
+    border: 'hover:border-rose-300 dark:hover:border-rose-800',
+  },
 };
 
 const StatCard = ({

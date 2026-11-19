@@ -1,7 +1,8 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useLocation } from 'react-router-dom';
+import { toast } from 'react-toastify';
 import instructorService from '../../services/instructor.service';
-import InstructorSearchBar from '../../components/instructor/InstructorSearchBar';
+import { useRefresh } from '../../hooks/useRefresh';
 import Card from '../../components/ui/Card';
 import Badge from '../../components/ui/Badge';
 import Button from '../../components/ui/Button';
@@ -18,10 +19,14 @@ import {
   TableCell,
 } from '../../components/ui/Table';
 import {
-Search} from 'lucide-react';
+  X,
+  Award,
+  RefreshCw,
+} from 'lucide-react';
 
 const SubmissionsQueue = () => {
   const navigate = useNavigate();
+  const location = useLocation();
   const [submissions, setSubmissions] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -30,38 +35,56 @@ const SubmissionsQueue = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
 
-  const loadSubmissions = useCallback(async () => {
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    const q = params.get('search');
+    if (q) setSearchTerm(q);
+  }, [location.search]);
+
+  const loadSubmissions = useCallback(async (isManual = false) => {
     try {
-      setIsLoading(true);
+      if (!isManual) {
+        setIsLoading(true);
+      }
       setError(null);
       const res = await instructorService.getInstructorSubmissions({ limit: 100 });
       const list = res.data || res.submissions || [];
       setSubmissions(list);
     } catch (err) {
       setError(err.message || 'Failed to retrieve instructor submissions.');
+      throw err;
     } finally {
       setIsLoading(false);
     }
   }, []);
 
+  const { isRefreshing, refresh: handleRefresh } = useRefresh(
+    () => loadSubmissions(true),
+    { successMessage: 'Submissions queue refreshed!' }
+  );
+
   useEffect(() => {
-    loadSubmissions();
+    loadSubmissions(false).catch(() => {});
   }, [loadSubmissions]);
 
   const filteredSubmissions = submissions.filter((sub) => {
     const isPending = sub.status === 'submitted' || sub.evaluationStatus === 'pending';
     const isEvaluated = sub.status === 'evaluated' || sub.evaluationStatus === 'completed';
+    const isCertified = Boolean(sub.certificate);
 
     if (statusFilter === 'pending' && !isPending) return false;
     if (statusFilter === 'evaluated' && !isEvaluated) return false;
+    if (statusFilter === 'certified' && !isCertified) return false;
 
     if (searchTerm.trim()) {
       const term = searchTerm.toLowerCase().trim();
       const matchStudent =
         sub.student?.name?.toLowerCase().includes(term) ||
-        sub.student?.email?.toLowerCase().includes(term);
+        sub.student?.email?.toLowerCase().includes(term) ||
+        sub.student?.studentId?.toLowerCase().includes(term);
       const matchAsmt = sub.assessment?.title?.toLowerCase().includes(term);
-      if (!matchStudent && !matchAsmt) return false;
+      const matchCert = sub.certificate?.certificateId?.toLowerCase().includes(term);
+      if (!matchStudent && !matchAsmt && !matchCert) return false;
     }
 
     return true;
@@ -69,11 +92,6 @@ const SubmissionsQueue = () => {
 
   return (
     <div className="space-y-6">
-      {/* Prominent Workspace Search Bar */}
-      <div className="rounded-2xl border border-surface-light-border dark:border-surface-dark-border bg-white dark:bg-surface-dark p-4 sm:p-5 shadow-sm">
-        <InstructorSearchBar placeholder="Search student name, email, or assessment title..." />
-      </div>
-
       {/* Header Banner */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
@@ -98,6 +116,7 @@ const SubmissionsQueue = () => {
               { id: 'all', label: 'All' },
               { id: 'pending', label: 'Needs Review' },
               { id: 'evaluated', label: 'Evaluated' },
+              { id: 'certified', label: 'Certificate Issued' },
             ].map((tab) => (
               <button
                 key={tab.id}
@@ -114,16 +133,34 @@ const SubmissionsQueue = () => {
             ))}
           </div>
 
-          <div className="relative">
-            <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-[#64748B]" />
-            <input
-              type="text"
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              placeholder="Search queue..."
-              className="pl-8 pr-3 py-1.5 text-xs bg-[#FFF9F2] dark:bg-[#12161F] border border-[#EBE3D8] dark:border-[#2D3748] rounded-xl text-[#1F2937] dark:text-[#F9FAFB] placeholder-[#64748B]/60 focus:outline-none focus:border-[#E05D38] focus:ring-1 focus:ring-[#E05D38]/20 transition-all"
-            />
-          </div>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            icon={RefreshCw}
+            iconClassName={isRefreshing ? 'animate-spin' : ''}
+            onClick={handleRefresh}
+            isLoading={isRefreshing}
+            loadingText="Refreshing..."
+            title="Refresh queue"
+            aria-label={isRefreshing ? 'Refreshing queue' : 'Refresh queue'}
+          >
+            Refresh
+          </Button>
+
+          {searchTerm && (
+            <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold bg-[#FDECE2] text-[#E05D38] dark:bg-[#341C16] dark:text-[#F4A261] border border-[#E05D38]/30">
+              <span>Filter: &ldquo;{searchTerm}&rdquo;</span>
+              <button
+                type="button"
+                onClick={() => setSearchTerm('')}
+                className="hover:text-red-600 transition-colors cursor-pointer ml-1"
+                title="Clear search filter"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          )}
         </div>
       </div>
 
@@ -154,9 +191,9 @@ const SubmissionsQueue = () => {
                 <TableHeader>Student</TableHeader>
                 <TableHeader>Assessment</TableHeader>
                 <TableHeader>Submitted</TableHeader>
-                <TableHeader>Auto Score</TableHeader>
-                <TableHeader>Manual Score</TableHeader>
-                <TableHeader>Final Result</TableHeader>
+                <TableHeader>Earned Marks</TableHeader>
+                <TableHeader>Grade & Result</TableHeader>
+                <TableHeader>Certification</TableHeader>
                 <TableHeader>Status</TableHeader>
                 <TableHeader className="text-right">Action</TableHeader>
               </TableRow>
@@ -166,6 +203,10 @@ const SubmissionsQueue = () => {
                 const subId = sub._id || sub.id;
                 const isPending =
                   sub.status === 'submitted' || sub.evaluationStatus === 'pending';
+                const certEnabled = Boolean(sub.assessment?.certification?.enabled);
+                const hasCert = Boolean(sub.certificate);
+                const isEligible = Boolean(sub.evaluation?.certificateEligible);
+                const isPassed = sub.passed || sub.resultStatus === 'passed';
 
                 return (
                   <TableRow key={subId}>
@@ -174,12 +215,18 @@ const SubmissionsQueue = () => {
                         <span className="font-semibold text-[#1F2937] dark:text-[#F9FAFB] block">
                           {sub.student?.name || 'Student Candidate'}
                         </span>
+                        {sub.student?.studentId && (
+                          <span className="text-[10px] font-mono text-[#E05D38] dark:text-[#F4A261] font-semibold block">
+                            ID: {sub.student.studentId}
+                          </span>
+                        )}
                         <span className="text-xs text-[#64748B] dark:text-[#94A3B8]">{sub.student?.email}</span>
                       </div>
                     </TableCell>
 
                     <TableCell className="max-w-xs truncate text-xs font-medium text-[#1F2937] dark:text-[#E2E8F0]">
-                      {sub.assessment?.title || 'Assessment'}
+                      <span className="block font-semibold truncate">{sub.assessment?.title || 'Assessment'}</span>
+                      <span className="text-[10px] text-[#64748B] dark:text-[#94A3B8]">{sub.assessment?.category || 'General'}</span>
                     </TableCell>
 
                     <TableCell className="text-xs text-[#64748B] dark:text-[#94A3B8]">
@@ -189,27 +236,65 @@ const SubmissionsQueue = () => {
                     </TableCell>
 
                     <TableCell className="text-xs text-[#1F2937] dark:text-[#F9FAFB] font-medium">
-                      {sub.autoScore !== undefined ? `${sub.autoScore} pts` : '—'}
-                    </TableCell>
-
-                    <TableCell className="text-xs text-[#1F2937] dark:text-[#F9FAFB] font-medium">
-                      {sub.manualScore !== undefined ? `${sub.manualScore} pts` : '—'}
+                      {isPending ? (
+                        <span>{sub.autoScore || 0} pts (Provisional)</span>
+                      ) : (
+                        <span>
+                          <strong>{sub.score || sub.finalScore || 0}</strong> / {sub.totalPoints || sub.assessment?.totalPoints || 100} pts{' '}
+                          <span className="text-[#64748B]">({sub.percentage || 0}%)</span>
+                        </span>
+                      )}
                     </TableCell>
 
                     <TableCell className="text-xs font-semibold">
                       {isPending ? (
-                        <span className="text-[#E05D38] dark:text-[#F4A261]">Pending Review</span>
+                        <Badge variant="peach" size="sm">
+                          Pending Evaluation
+                        </Badge>
                       ) : (
-                        <div className="flex items-center space-x-1.5">
-                          <span className="text-[#1F2937] dark:text-[#F9FAFB]">{sub.score || sub.finalScore || 0} pts</span>
-                          <span className="text-[#64748B]">({sub.percentage || 0}%)</span>
+                        <div className="flex flex-col gap-1 items-start">
                           <Badge
-                            variant={sub.passed || sub.resultStatus === 'passed' ? 'sage' : 'danger'}
+                            variant={isPassed ? 'sage' : 'danger'}
                             size="sm"
                           >
-                            {sub.passed || sub.resultStatus === 'passed' ? 'PASS' : 'FAIL'}
+                            {isPassed ? 'Passed' : 'Not Passed'}
                           </Badge>
+                          {sub.evaluation?.grade && (
+                            <span className="text-[11px] font-bold text-slate-700 dark:text-slate-300">
+                              Grade: {sub.evaluation.grade} {sub.evaluation.gradeLabel ? `(${sub.evaluation.gradeLabel})` : ''}
+                            </span>
+                          )}
                         </div>
+                      )}
+                    </TableCell>
+
+                    <TableCell>
+                      {!certEnabled ? (
+                        <Badge variant="neutral" size="sm">
+                          Certification Disabled
+                        </Badge>
+                      ) : isPending ? (
+                        <Badge variant="peach" size="sm">
+                          Pending Evaluation
+                        </Badge>
+                      ) : hasCert ? (
+                        <div className="flex flex-col gap-0.5 items-start">
+                          <Badge variant="sage" size="sm" className="flex items-center gap-1">
+                            <Award className="w-3 h-3 text-emerald-600 dark:text-emerald-400" />
+                            <span>Certificate Issued</span>
+                          </Badge>
+                          <span className="text-[10px] font-mono text-slate-500 font-semibold">
+                            {sub.certificate.certificateId}
+                          </span>
+                        </div>
+                      ) : isEligible ? (
+                        <Badge variant="peach" size="sm">
+                          Eligible for Certification
+                        </Badge>
+                      ) : (
+                        <Badge variant="neutral" size="sm">
+                          Not Eligible
+                        </Badge>
                       )}
                     </TableCell>
 

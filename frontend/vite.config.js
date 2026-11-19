@@ -5,13 +5,14 @@ export default defineConfig({
   plugins: [react()],
   server: {
     port: 5173,
+    allowedHosts: ['.trycloudflare.com','localhost'],
     proxy: {
       '/api': {
-        target: 'http://localhost:5000',
+        target: 'http://uap-backend:5000',
         changeOrigin: true,
       },
       '/uploads': {
-        target: 'http://localhost:5000',
+        target: 'http://uap-backend:5000',
         changeOrigin: true,
       },
     },

@@ -166,15 +166,11 @@ const Sidebar = ({ className = '', onItemClick, collapsible }) => {
 
         {/* Workspace Role Header (hidden when collapsed) */}
         {!effectiveCollapsed && (
-          <div className="px-3.5 py-1.5 mb-3 flex items-center justify-between border-b border-surface-light-border/60 dark:border-surface-dark-border/60 pb-2">
+          <div className="px-3.5 py-1.5 mb-3 border-b border-surface-light-border/60 dark:border-surface-dark-border/60 pb-2">
             {/* Active workspace title label */}
             <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500">
               {role ? `${role} Workspace` : 'Navigation'}
             </p>
-            {/* Version badge */}
-            <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-brand-primary-light/60 dark:bg-[#341C16] text-[#E05D38] dark:text-[#F4A261]">
-              v1.0
-            </span>
           </div>
         )}
 
