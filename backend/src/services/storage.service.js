@@ -66,11 +66,43 @@ class StorageService {
   }
 
   /**
+   * Validate file magic bytes against extension signature to prevent executable spoofing.
+   */
+  validateFileSignature(buffer, ext) {
+    if (!buffer || !Buffer.isBuffer(buffer)) {
+      const err = new Error('Invalid or missing file buffer');
+      err.statusCode = 400;
+      throw err;
+    }
+
+    if (ext === 'pdf') {
+      if (buffer.length < 4 || buffer.toString('utf8', 0, 4) !== '%PDF') {
+        const err = new Error('File signature does not match PDF format');
+        err.statusCode = 400;
+        throw err;
+      }
+    } else if (ext === 'docx') {
+      if (buffer.length < 2 || buffer[0] !== 0x50 || buffer[1] !== 0x4b) {
+        const err = new Error('File signature does not match DOCX format');
+        err.statusCode = 400;
+        throw err;
+      }
+    } else if (ext === 'doc') {
+      if (buffer.length < 2 || (buffer[0] !== 0xd0 && buffer[0] !== 0x50)) {
+        const err = new Error('File signature does not match DOC format');
+        err.statusCode = 400;
+        throw err;
+      }
+    }
+  }
+
+  /**
    * Save an uploaded document buffer to disk using a cryptographically random, collision-safe key.
    */
   async saveDocumentFile({ buffer, originalname, mimetype, size, submissionId, questionId, allowedExtensions }) {
     const ext = this.validateExtension(originalname, allowedExtensions);
     this.validateMimeType(mimetype, ext);
+    this.validateFileSignature(buffer, ext);
 
     const randomSuffix = crypto.randomBytes(8).toString('hex');
     const safeKey = `doc-${submissionId}-${questionId}-${Date.now()}-${randomSuffix}.${ext}`;

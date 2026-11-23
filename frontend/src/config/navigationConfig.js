@@ -261,13 +261,17 @@ export const instructorNavigation = {
           // Unique item identifier
           id: 'instructor-question-bank',
           // Display label in navigation menu
-          name: 'Question Bank',
+          name: 'Mock Bank',
           // Target URL path to question bank
           path: '/instructor/question-bank',
           // Lucide database icon
           icon: Database,
           // URL patterns matching question bank management
-          matchPatterns: ['/instructor/question-bank'],
+          matchPatterns: [
+            '/instructor/question-bank',
+            '/instructor/question-studio',
+            '/instructor/question-bank-hub',
+          ],
           // Description of question bank repository
           description: 'Reusable question repository categorized by discipline and difficulty',
         // Conclude instructor-question-bank item definition

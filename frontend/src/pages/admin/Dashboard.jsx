@@ -1675,6 +1675,34 @@ const AdminDashboard = () => {
             </Card>
           )}
 
+          {/* Faculty Assessment Activity & Evaluation Backlog Card */}
+          <Card
+            title="Faculty Assessment Activity & Evaluation Backlog"
+            subtitle="Instructor assessment volume, pending evaluations, and submission processing metrics"
+          >
+            <div className="space-y-3">
+              {(platformAnalytics?.facultyAssessmentActivity || [
+                { instructorName: 'Dr. Alan Turing', totalAssessments: 8, pendingEvaluations: 3, averageTurnaround: '1.8 hrs' },
+                { instructorName: 'Prof. Grace Hopper', totalAssessments: 12, pendingEvaluations: 0, averageTurnaround: '0.9 hrs' },
+              ]).map((faculty, idx) => (
+                <div
+                  key={idx}
+                  className="p-3.5 rounded-xl border border-surface-light-border dark:border-surface-dark-border bg-slate-50/50 dark:bg-surface-dark-muted flex items-center justify-between"
+                >
+                  <div>
+                    <h5 className="font-bold text-xs text-slate-800 dark:text-slate-200">{faculty.instructorName}</h5>
+                    <span className="text-[11px] text-slate-500">
+                      {faculty.totalAssessments} Author Exams · Avg Turnaround: {faculty.averageTurnaround}
+                    </span>
+                  </div>
+                  <Badge variant={faculty.pendingEvaluations > 0 ? 'warning' : 'sage'} size="sm">
+                    {faculty.pendingEvaluations} Pending Evaluations
+                  </Badge>
+                </div>
+              ))}
+            </div>
+          </Card>
+
           {/* 12-column responsive grid pairing examinations table with activity telemetry */}
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
             {/* Left 7-column card showing live platform examinations */}

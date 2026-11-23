@@ -54,7 +54,7 @@ const INSTRUCTOR_NAV_ITEMS = [
   },
   {
     id: 'inst-nav-qb',
-    title: 'Question Bank Repository',
+    title: 'Mock Bank Repository',
     subtitle: 'Manage Bloom taxonomy questions and categories',
     path: '/instructor/question-bank',
     category: 'Navigation',

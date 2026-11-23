@@ -1,5 +1,5 @@
 const mongoose = require('mongoose');
-const { Submission, Assessment, Question, User, Evaluation } = require('../models');
+const { Submission, Assessment, Question, User, Evaluation, MockTestAttempt } = require('../models');
 
 class AnalyticsService {
   /**
@@ -159,11 +159,27 @@ class AnalyticsService {
       .populate('assessmentId', 'title category totalPoints passingScore')
       .sort({ submittedAt: -1, createdAt: -1 });
 
-    const assessmentsAttempted = submissions.length;
+    // Also retrieve mock test attempts for this student
+    const mockAttemptQuery = { studentId: studentObjectId };
+    if (dateRange) {
+      mockAttemptQuery.submittedAt = dateRange;
+    }
+    const mockAttempts = await MockTestAttempt.find(mockAttemptQuery).lean();
+    const completedMockAttempts = mockAttempts.filter(
+      (m) => m.status === 'SUBMITTED' || m.status === 'EVALUATED' || m.evaluationStatus === 'COMPLETED'
+    );
+    const evaluatedMockAttempts = mockAttempts.filter(
+      (m) => m.status === 'EVALUATED' || m.evaluationStatus === 'COMPLETED'
+    );
+    const pendingMockAttempts = mockAttempts.filter(
+      (m) => m.status === 'SUBMITTED' || m.evaluationStatus === 'PENDING_MANUAL_REVIEW'
+    );
+
+    const assessmentsAttempted = submissions.length + mockAttempts.length;
     const completedSubmissions = submissions.filter(
       (s) => s.status === 'submitted' || s.status === 'evaluated'
     );
-    const assessmentsCompleted = completedSubmissions.length;
+    const assessmentsCompleted = completedSubmissions.length + completedMockAttempts.length;
 
     // Submissions pending instructor evaluation
     const pendingSubmissions = submissions.filter(
@@ -171,29 +187,42 @@ class AnalyticsService {
         s.status === 'submitted' ||
         (s.status !== 'in_progress' && s.evaluationStatus === 'pending')
     );
-    const pendingEvaluations = pendingSubmissions.length;
+    const pendingEvaluations = pendingSubmissions.length + pendingMockAttempts.length;
 
     // Strictly evaluated submissions (must not be pending evaluation)
     const evaluatedSubmissions = submissions.filter(
       (s) => s.status === 'evaluated' && s.evaluationStatus !== 'pending'
     );
-    const evaluatedAssessments = evaluatedSubmissions.length;
+    const evaluatedAssessments = evaluatedSubmissions.length + evaluatedMockAttempts.length;
 
     // Passed and failed metrics computed strictly over evaluated assessments
     const passedSubmissions = evaluatedSubmissions.filter((s) => Boolean(s.passed));
-    const passedAssessments = passedSubmissions.length;
+    const mockPassed = evaluatedMockAttempts.filter((m) => Boolean(m.passed)).length;
+    const passedAssessments = passedSubmissions.length + mockPassed;
     const failedAssessments = evaluatedAssessments - passedAssessments;
 
     const passRate =
       evaluatedAssessments > 0 ? Math.round((passedAssessments / evaluatedAssessments) * 100) : 0;
 
-    let overallAverageScore = null;
     const scoredSubmissions = evaluatedSubmissions.filter(
       (s) => typeof s.percentage === 'number' && !isNaN(s.percentage)
     );
-    if (scoredSubmissions.length > 0) {
-      const sumPercentage = scoredSubmissions.reduce((acc, s) => acc + s.percentage, 0);
-      overallAverageScore = Math.round((sumPercentage / scoredSubmissions.length) * 10) / 10;
+    const scoredMockAttempts = evaluatedMockAttempts.filter(
+      (m) => typeof m.percentage === 'number' && !isNaN(m.percentage)
+    );
+    const allScoredPercentages = [
+      ...scoredSubmissions.map((s) => s.percentage),
+      ...scoredMockAttempts.map((m) => m.percentage),
+    ];
+
+    let overallAverageScore = null;
+    let highestScore = null;
+    let lowestScore = null;
+    if (allScoredPercentages.length > 0) {
+      const sumPercentage = allScoredPercentages.reduce((acc, p) => acc + p, 0);
+      overallAverageScore = Math.round((sumPercentage / allScoredPercentages.length) * 10) / 10;
+      highestScore = Math.round(Math.max(...allScoredPercentages) * 10) / 10;
+      lowestScore = Math.round(Math.min(...allScoredPercentages) * 10) / 10;
     }
 
     // Historical streaks: Always computed over the entire academic history for completeness
@@ -202,8 +231,17 @@ class AnalyticsService {
       status: { $in: ['submitted', 'evaluated'] },
       submittedAt: { $ne: null },
     }).select('submittedAt');
+    const allHistoricalMock = await MockTestAttempt.find({
+      studentId: studentObjectId,
+      status: { $in: ['SUBMITTED', 'EVALUATED'] },
+      submittedAt: { $ne: null },
+    }).select('submittedAt');
 
-    const streakData = this.calculateStreaks(allHistoricalCompleted.map((s) => s.submittedAt));
+    const allActivityDates = [
+      ...allHistoricalCompleted.map((s) => s.submittedAt),
+      ...allHistoricalMock.map((m) => m.submittedAt),
+    ];
+    const streakData = this.calculateStreaks(allActivityDates);
 
     // Leaderboard Position: Determine overall rank across students
     let leaderboardPosition = null;
@@ -315,8 +353,156 @@ class AnalyticsService {
       };
     });
 
+    const subjectPerformance = categoryPerformance.map((c) => ({
+      subjectName: c.category,
+      category: c.category,
+      assessmentsAttempted: c.assessmentsAttempted,
+      assessmentsCompleted: c.assessmentsCompleted,
+      pendingEvaluations: c.pendingEvaluations,
+      evaluatedAssessments: c.evaluatedAssessments,
+      averageScore: c.averageScore,
+      passRate: c.passRate,
+    }));
+
+    const topicMap = new Map();
+    evaluatedMockAttempts.forEach((attempt) => {
+      if (Array.isArray(attempt.topicWiseAnalytics)) {
+        attempt.topicWiseAnalytics.forEach((item) => {
+          const key = item.topicName || (item.topicId ? item.topicId.toString() : 'Unknown');
+          if (!topicMap.has(key)) {
+            topicMap.set(key, {
+              topicId: item.topicId || null,
+              topicName: item.topicName || key,
+              totalQuestions: 0,
+              correctCount: 0,
+            });
+          }
+          const t = topicMap.get(key);
+          t.totalQuestions += item.totalQuestions || item.questionsAttempted || 0;
+          t.correctCount += item.correctCount || 0;
+        });
+      }
+    });
+
+    const topicPerformance = Array.from(topicMap.values()).map((t) => {
+      const accuracyPercentage = t.totalQuestions > 0 ? Math.round((t.correctCount / t.totalQuestions) * 100) : 0;
+      const confidenceScore = t.totalQuestions >= 6 ? 'HIGH' : t.totalQuestions >= 3 ? 'MEDIUM' : 'LOW';
+      let status = 'NEUTRAL';
+      if (accuracyPercentage >= 75 && t.totalQuestions >= 2) {
+        status = 'STRONG';
+      } else if (accuracyPercentage < 50) {
+        status = 'WEAK';
+      }
+      return {
+        ...t,
+        accuracyPercentage,
+        confidenceScore,
+        status,
+      };
+    });
+
+    const conceptMap = new Map();
+    evaluatedMockAttempts.forEach((attempt) => {
+      if (Array.isArray(attempt.conceptWiseAnalytics)) {
+        attempt.conceptWiseAnalytics.forEach((item) => {
+          const key = item.concept || 'Unknown';
+          if (!conceptMap.has(key)) {
+            conceptMap.set(key, {
+              concept: key,
+              questionsAttempted: 0,
+              correctCount: 0,
+            });
+          }
+          const c = conceptMap.get(key);
+          c.questionsAttempted += item.questionsAttempted || item.totalQuestions || 0;
+          c.correctCount += item.correctCount || 0;
+        });
+      }
+    });
+
+    const conceptPerformance = Array.from(conceptMap.values()).map((c) => {
+      const accuracyPercentage = c.questionsAttempted > 0 ? Math.round((c.correctCount / c.questionsAttempted) * 100) : 0;
+      const confidenceScore = c.questionsAttempted >= 6 ? 'HIGH' : c.questionsAttempted >= 3 ? 'MEDIUM' : 'LOW';
+      let status = 'NEUTRAL';
+      if (accuracyPercentage >= 75 && c.questionsAttempted >= 2) {
+        status = 'STRONG';
+      } else if (accuracyPercentage < 50) {
+        status = 'WEAK';
+      }
+      return {
+        ...c,
+        accuracyPercentage,
+        confidenceScore,
+        status,
+      };
+    });
+
+    const diffTotals = {
+      easy: { total: 0, correct: 0 },
+      medium: { total: 0, correct: 0 },
+      hard: { total: 0, correct: 0 },
+    };
+    evaluatedMockAttempts.forEach((attempt) => {
+      if (attempt.difficultyWiseAnalytics) {
+        for (const tier of ['easy', 'medium', 'hard']) {
+          const d = attempt.difficultyWiseAnalytics[tier];
+          if (d) {
+            diffTotals[tier].total += d.total || 0;
+            diffTotals[tier].correct += d.correct || 0;
+          }
+        }
+      }
+    });
+    const difficultyPerformance = {
+      easy: {
+        total: diffTotals.easy.total,
+        correct: diffTotals.easy.correct,
+        accuracyPercentage: diffTotals.easy.total > 0 ? Math.round((diffTotals.easy.correct / diffTotals.easy.total) * 100) : 0,
+      },
+      medium: {
+        total: diffTotals.medium.total,
+        correct: diffTotals.medium.correct,
+        accuracyPercentage: diffTotals.medium.total > 0 ? Math.round((diffTotals.medium.correct / diffTotals.medium.total) * 100) : 0,
+      },
+      hard: {
+        total: diffTotals.hard.total,
+        correct: diffTotals.hard.correct,
+        accuracyPercentage: diffTotals.hard.total > 0 ? Math.round((diffTotals.hard.correct / diffTotals.hard.total) * 100) : 0,
+      },
+    };
+
+    let mockTestPerformance = null;
+    if (mockAttempts.length > 0) {
+      const mockPercentages = evaluatedMockAttempts
+        .map((m) => m.percentage)
+        .filter((p) => typeof p === 'number' && !isNaN(p));
+      mockTestPerformance = {
+        totalAttempts: mockAttempts.length,
+        evaluatedAttempts: evaluatedMockAttempts.length,
+        highestScore: mockPercentages.length > 0 ? Math.max(...mockPercentages) : null,
+        averageScore:
+          mockPercentages.length > 0
+            ? Math.round((mockPercentages.reduce((a, b) => a + b, 0) / mockPercentages.length) * 10) / 10
+            : null,
+      };
+    }
+
+    const codingAndSqlPerformance = {
+      coding: { attempted: 0, passed: 0 },
+      sql: { attempted: 0, passed: 0 },
+    };
+
+    const topicMastery = topicPerformance.map((t) => ({
+      topic: t.topicName,
+      accuracyPercentage: t.accuracyPercentage,
+      confidenceScore: t.confidenceScore,
+      status: t.status,
+    }));
+
     return {
       overallAverageScore,
+      highestScore,
+      lowestScore,
       assessmentsAttempted,
       assessmentsCompleted,
       pendingEvaluations,
@@ -330,6 +516,13 @@ class AnalyticsService {
       streakActiveToday: streakData.streakActiveToday,
       leaderboardPosition,
       categoryPerformance,
+      subjectPerformance,
+      topicPerformance,
+      conceptPerformance,
+      difficultyPerformance,
+      mockTestPerformance,
+      codingAndSqlPerformance,
+      topicMastery,
       recentResults,
       hasData: evaluatedAssessments > 0,
     };
@@ -389,7 +582,41 @@ class AnalyticsService {
         };
       });
 
-    return trends;
+    const mockQuery = {
+      studentId: studentObjectId,
+      status: 'EVALUATED',
+    };
+    if (dateRange) {
+      mockQuery.submittedAt = dateRange;
+    }
+    const mockAttempts = await MockTestAttempt.find(mockQuery)
+      .populate('mockTestId', 'title examination totalMarks')
+      .sort({ submittedAt: 1, createdAt: 1 })
+      .lean();
+
+    const mockTrends = mockAttempts
+      .filter((m) => typeof m.percentage === 'number' && !isNaN(m.percentage))
+      .map((m) => {
+        const dateVal = m.submittedAt || m.createdAt;
+        return {
+          id: m._id.toString(),
+          date: dateVal ? new Date(dateVal).toISOString().split('T')[0] : '',
+          timestamp: dateVal,
+          assessmentId: m.mockTestId?._id?.toString() || m.mockTestId?.toString() || '',
+          assessmentTitle: m.mockTestId?.title || 'Mock Test',
+          category: m.mockTestId?.examination || 'Mock Test',
+          percentage: m.percentage,
+          score: m.score !== undefined ? m.score : (m.earnedMarks || 0),
+          totalPoints: m.totalMarks || 100,
+          passingScore: 60,
+          passed: Boolean(m.passed),
+          resultStatus: m.passed ? 'passed' : 'failed',
+        };
+      });
+
+    const combinedTrends = [...trends, ...mockTrends];
+    combinedTrends.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+    return combinedTrends;
   }
 
   /**
@@ -1044,6 +1271,26 @@ class AnalyticsService {
       published: c.published,
     }));
 
+    const scoreBuckets = [
+      { range: '0-20%', count: 0 },
+      { range: '21-40%', count: 0 },
+      { range: '41-60%', count: 0 },
+      { range: '61-80%', count: 0 },
+      { range: '81-100%', count: 0 },
+    ];
+    const scoredSubmissionsAll = await Submission.find({
+      status: { $in: ['submitted', 'evaluated'] },
+      percentage: { $ne: null },
+    }).select('percentage');
+    scoredSubmissionsAll.forEach((s) => {
+      const p = s.percentage;
+      if (p <= 20) scoreBuckets[0].count++;
+      else if (p <= 40) scoreBuckets[1].count++;
+      else if (p <= 60) scoreBuckets[2].count++;
+      else if (p <= 80) scoreBuckets[3].count++;
+      else scoreBuckets[4].count++;
+    });
+
     return {
       totalActiveStudents,
       totalInstructors,
@@ -1055,12 +1302,53 @@ class AnalyticsService {
       pendingEvaluations,
       overallAverageScore,
       overallPassRate,
+      scoreDistribution: scoreBuckets,
       activityTrend: activityAgg.map((a) => ({
         date: a._id,
         submissions: a.submissions,
         passed: a.passed,
       })),
       categories,
+    };
+  }
+
+  /**
+   * 12. Admin Faculty Activity Analytics
+   */
+  async getAdminFacultyActivity({ page = 1, limit = 10 } = {}) {
+    const pageNum = Math.max(1, parseInt(page, 10) || 1);
+    const limitNum = Math.max(1, parseInt(limit, 10) || 10);
+    const skip = (pageNum - 1) * limitNum;
+
+    const totalFaculty = await User.countDocuments({ role: 'instructor' });
+    const facultyUsers = await User.find({ role: 'instructor' })
+      .select('name email department facultyId')
+      .skip(skip)
+      .limit(limitNum)
+      .lean();
+
+    const faculty = await Promise.all(
+      facultyUsers.map(async (f) => {
+        const assessmentsCreated = await Assessment.countDocuments({ instructorId: f._id });
+        const evaluatedCount = await Evaluation.countDocuments({ evaluatorId: f._id });
+        return {
+          id: f._id.toString(),
+          name: f.name,
+          email: f.email,
+          department: f.department || '',
+          facultyId: f.facultyId || '',
+          assessmentsCreated,
+          totalSubmissionsEvaluated: evaluatedCount,
+        };
+      })
+    );
+
+    return {
+      page: pageNum,
+      limit: limitNum,
+      totalFaculty,
+      totalPages: Math.ceil(totalFaculty / limitNum),
+      faculty,
     };
   }
 }

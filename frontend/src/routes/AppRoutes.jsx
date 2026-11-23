@@ -42,12 +42,23 @@ import MfaSetup from '../pages/auth/MfaSetup';
 import StudentDashboard from '../pages/student/Dashboard';
 // Import the student interactive assessment taking component
 import StudentAttempt from '../pages/student/Attempt';
+// Import student mock test list, active attempt, and analytics pages
+import MockTestsList from '../pages/student/MockTestsList';
+import MockTestAttempt from '../pages/student/MockTestAttempt';
+import MockTestAnalytics from '../pages/student/MockTestAnalytics';
 // Import the student account profile and credentials settings page component
 import StudentProfile from '../pages/student/Profile';
 // Import the student certifications and earned credential awards page component
 import StudentCertifications from '../pages/student/Certifications';
 // Import the instructor main dashboard page component
 import InstructorDashboard from '../pages/instructor/Dashboard';
+// Import the dedicated multi-paradigm test creation hub
+import CreateTest from '../pages/instructor/CreateTest';
+// Import the consolidated Question Bank Hub and Question Studio
+import QuestionBankHub from '../pages/instructor/QuestionBankHub';
+import QuestionStudio from '../pages/instructor/QuestionStudio';
+// Import the Mock Test rubric evaluation studio
+import MockTestEvaluationStudio from '../pages/instructor/MockTestEvaluationStudio';
 // Import the instructor account profile page component
 import InstructorProfile from '../pages/instructor/Profile';
 // Import the instructor assessment list overview component
@@ -155,20 +166,26 @@ const AppRoutes = () => {
             <Route path="dashboard" element={<StudentDashboard />} />
             {/* Assessment catalog browsing route */}
             <Route path="catalog" element={<StudentDashboard />} />
-            {/* Route alias redirecting /student/assessments to /student/catalog */}
+            {/* Route aliases for tests, catalog, and assessments */}
+            <Route path="tests" element={<StudentDashboard />} />
             <Route path="assessments" element={<Navigate to="/student/catalog" replace />} />
             {/* Dynamic route for active assessment examination session */}
             <Route path="attempt/:id" element={<StudentAttempt />} />
+            {/* Student mock test examinations */}
+            <Route path="mock-tests" element={<MockTestsList />} />
+            <Route path="mock-test/:id" element={<MockTestAttempt />} />
+            <Route path="mock-test/analytics/:attemptId" element={<MockTestAnalytics />} />
             {/* Student certifications and earned credential awards */}
             <Route path="certifications" element={<StudentCertifications />} />
             {/* Route alias forwarding /student/my-certifications to /student/certifications */}
             <Route path="my-certifications" element={<Navigate to="/student/certifications" replace />} />
-            {/* Student submission history and score review */}
+            {/* Student submission history, attempts, results, and progress */}
             <Route path="submissions" element={<StudentDashboard />} />
-            {/* Direct deep-link to submission evaluation feedback */}
             <Route path="submissions/:id" element={<StudentDashboard />} />
-            {/* Legacy alias forwarding /student/results/:id to submissions feedback */}
+            <Route path="attempts" element={<StudentDashboard />} />
+            <Route path="results" element={<StudentDashboard />} />
             <Route path="results/:id" element={<StudentDashboard />} />
+            <Route path="progress" element={<StudentDashboard />} />
             {/* Student personal profile, credentials, and MFA settings */}
             <Route path="profile" element={<StudentProfile />} />
             {/* Default student index redirecting root /student path to /student/dashboard */}
@@ -188,8 +205,11 @@ const AppRoutes = () => {
           <Route path="/instructor" element={<InstructorLayout />}>
             {/* Instructor workspace main dashboard */}
             <Route path="dashboard" element={<InstructorDashboard />} />
+            {/* Dedicated Create Test paradigm selector */}
+            <Route path="create-test" element={<CreateTest />} />
             {/* Instructor assessments management list */}
             <Route path="assessments" element={<AssessmentsList />} />
+            <Route path="tests" element={<AssessmentsList />} />
             {/* Assessment creation builder screen */}
             <Route path="create" element={<AssessmentBuilder />} />
             {/* Assessment editing builder screen by ID */}
@@ -198,13 +218,17 @@ const AppRoutes = () => {
             <Route path="submissions" element={<SubmissionsQueue />} />
             {/* Detailed submission grading and evaluation studio by attempt ID */}
             <Route path="evaluate/:id" element={<EvaluationStudio />} />
+            {/* Mock test manual evaluation studio */}
+            <Route path="mock-tests/evaluate/:attemptId" element={<MockTestEvaluationStudio />} />
             {/* Assessment metrics and cohort analytics breakdown by assessment ID */}
             <Route path="analytics/:id" element={<AssessmentAnalytics />} />
-            {/* Question repository management list */}
-            <Route path="question-bank" element={<QuestionBankList />} />
-            {/* Question bank creation screen */}
+            {/* Centralized Question Bank Hub & Studio */}
+            <Route path="question-bank" element={<QuestionBankHub />} />
+            <Route path="question-bank-hub" element={<QuestionBankHub />} />
+            <Route path="mock-bank" element={<QuestionBankHub />} />
+            <Route path="question-studio" element={<QuestionStudio />} />
+            <Route path="question-studio/edit/:id" element={<QuestionStudio />} />
             <Route path="question-bank/create" element={<QuestionBankCreate />} />
-            {/* Question bank editing screen by question bank ID */}
             <Route path="question-bank/edit/:id" element={<QuestionBankCreate />} />
             {/* Question spreadsheet bulk upload screen */}
             <Route path="question-import" element={<QuestionImportUpload />} />

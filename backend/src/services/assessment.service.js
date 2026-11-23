@@ -458,6 +458,17 @@ class AssessmentService {
     if (isStudent && questions.length > 0) {
       questions = questions.map((q) => {
         const qObj = q.toObject ? q.toObject() : (q.toJSON ? q.toJSON() : { ...q });
+        delete qObj.correctAnswer;
+        delete qObj.answerKey;
+        delete qObj.explanation;
+        if (Array.isArray(qObj.options)) {
+          qObj.options = qObj.options.map((opt) => {
+            const o = typeof opt.toObject === 'function' ? opt.toObject() : { ...opt };
+            delete o.isCorrect;
+            delete o.explanation;
+            return o;
+          });
+        }
         if (qObj.codingConfig && Array.isArray(qObj.codingConfig.testCases)) {
           // Strictly strip hidden test cases for student callers to prevent cheating
           qObj.codingConfig.testCases = qObj.codingConfig.testCases.filter((tc) => !tc.isHidden);

@@ -98,36 +98,36 @@ const codingConfigSchema = new mongoose.Schema(
 // Schema definition representing an individual question within an assessment
 const questionSchema = new mongoose.Schema(
   {
-    // Foreign key reference linking this question to its parent Assessment document
+    // Foreign key reference linking this question to its parent Assessment document (optional if stored in Question Bank)
     assessmentId: {
-      // MongoDB ObjectId type
       type: mongoose.Schema.Types.ObjectId,
-      // Target referenced model
       ref: 'Assessment',
-      // Mandatory relationship
-      required: true,
-      // Index for optimized retrieval of all questions in an assessment
+      required: false,
+      default: null,
       index: true,
     },
     // The prompt or question text presented to students
     questionText: {
-      // String type storing question text
       type: String,
-      // Mandatory question text prompt
-      required: [true, 'Question prompt is required'],
-      // Automatically trim whitespace
       trim: true,
+      default: '',
+    },
+    // Statement prompt for Question Bank questions
+    statement: {
+      type: String,
+      trim: true,
+      default: '',
     },
     // Question format type (multiple choice, short answer, essay, code, or file submission)
     type: {
-      // String type storing format enum
       type: String,
-      // Permitted question types
-      enum: ['mcq', 'short_answer', 'long_answer', 'true_false', 'code', 'sql', 'file_upload'],
-      // Default question format: multiple-choice
       default: 'mcq',
-      // Mandatory question type
-      required: true,
+    },
+    // Upper-case Question Type used in Mock Bank and Blueprint systems
+    questionType: {
+      type: String,
+      default: 'SINGLE_MCQ',
+      index: true,
     },
     // Choice options array for multiple-choice questions
     options: [
@@ -136,8 +136,112 @@ const questionSchema = new mongoose.Schema(
         id: { type: String, required: true },
         // Text display label for this choice option
         text: { type: String, required: true },
+        // Flag for correct option in question bank
+        isCorrect: { type: Boolean, default: false },
+        // Explanation for this option
+        explanation: { type: String, default: null },
       },
     ],
+    // Authoritative answer key (supports single string, array for multi-select, boolean, etc.)
+    answerKey: {
+      type: mongoose.Schema.Types.Mixed,
+      default: null,
+    },
+    // Evaluation config for coding/SQL and multi-rubric questions
+    evaluationConfig: {
+      type: mongoose.Schema.Types.Mixed,
+      default: {},
+    },
+    // Marks/points awarded for question
+    marks: {
+      type: Number,
+      default: 1,
+    },
+    // Negative marks for incorrect answer
+    negativeMarks: {
+      type: Number,
+      default: 0,
+    },
+    // Estimated time in seconds to solve question
+    estimatedTimeSeconds: {
+      type: Number,
+      default: 60,
+    },
+    // Question publication and lifecycle status
+    status: {
+      type: String,
+      default: 'DRAFT',
+      index: true,
+    },
+    // Current revision version
+    currentVersion: {
+      type: Number,
+      default: 1,
+    },
+    // Visibility tier
+    visibility: {
+      type: String,
+      enum: ['PRIVATE', 'INSTITUTIONAL', 'PUBLIC'],
+      default: 'INSTITUTIONAL',
+      index: true,
+    },
+    // Question author faculty reference
+    ownerFacultyId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+      default: null,
+      index: true,
+    },
+    // Associated subject reference
+    subjectId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Subject',
+      default: null,
+      index: true,
+    },
+    // Associated subject name text
+    subject: {
+      type: String,
+      default: '',
+      trim: true,
+    },
+    // Associated topic references
+    topicIds: [
+      {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'Topic',
+      },
+    ],
+    // Associated topic names text
+    topics: [{ type: String, trim: true }],
+    // Concept tags
+    conceptTags: [{ type: String, trim: true }],
+    // Exam category
+    examCategory: {
+      type: String,
+      enum: ['COMPETITIVE', 'INSTITUTIONAL', 'PRACTICE', 'PLACEMENT', 'GENERAL'],
+      default: 'INSTITUTIONAL',
+      index: true,
+    },
+    // Exam identifier
+    examId: {
+      type: String,
+      default: '',
+      trim: true,
+    },
+    // Generation or creation source
+    source: {
+      type: String,
+      enum: ['MANUAL', 'BULK_IMPORT', 'AI_GENERATED'],
+      default: 'MANUAL',
+    },
+    // Unique question code
+    questionCode: {
+      type: String,
+      default: '',
+    },
+    // Attachments
+    attachments: [{ type: mongoose.Schema.Types.Mixed, default: [] }],
     // The authoritative correct answer used for automated scoring (never exposed to student before submission)
     correctAnswer: {
       // String representation of correct answer value or option ID
@@ -268,6 +372,34 @@ const questionSchema = new mongoose.Schema(
     timestamps: true,
   }
 );
+
+// Synchronize legacy and Question Bank schema properties
+questionSchema.pre('validate', function (next) {
+  if (this.statement && !this.questionText) {
+    this.questionText = this.statement;
+  } else if (this.questionText && !this.statement) {
+    this.statement = this.questionText;
+  }
+  if (!this.questionText && !this.statement) {
+    return next(new Error('Question prompt is required'));
+  }
+  if (this.questionType && !this.type) {
+    this.type = this.questionType.toLowerCase();
+  } else if (this.type && !this.questionType) {
+    this.questionType = this.type.toUpperCase();
+  }
+  if (this.answerKey !== undefined && this.answerKey !== null && !this.correctAnswer) {
+    this.correctAnswer = typeof this.answerKey === 'string' ? this.answerKey : JSON.stringify(this.answerKey);
+  } else if (this.correctAnswer && (this.answerKey === undefined || this.answerKey === null)) {
+    this.answerKey = this.correctAnswer;
+  }
+  if (this.marks !== undefined && !this.points) {
+    this.points = this.marks;
+  } else if (this.points !== undefined && !this.marks) {
+    this.marks = this.points;
+  }
+  next();
+});
 
 // Configure JSON serialization transformation
 questionSchema.set('toJSON', {

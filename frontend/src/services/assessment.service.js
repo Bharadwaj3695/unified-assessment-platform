@@ -72,12 +72,6 @@ export const assessmentService = {
     const res = await api.get('/assessments/certificate-templates');
     return res.data;
   },
-
-  // Retrieves earned certificates for the authenticated student
-  getMyCertificates: async () => {
-    const res = await api.get('/certificates/mine');
-    return res.data;
-  },
 };
 
 // Export assessmentService as default export

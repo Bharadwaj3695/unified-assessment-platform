@@ -117,12 +117,6 @@ class EvaluationService {
       throw error;
     }
 
-    if (submission.status === 'evaluated') {
-      const error = new Error('Evaluation conflict: This submission has already been evaluated.');
-      error.statusCode = 409;
-      throw error;
-    }
-
     if (submission.evaluationLock) {
       const error = new Error('Evaluation conflict: This submission is currently being evaluated.');
       error.statusCode = 409;
@@ -196,7 +190,6 @@ class EvaluationService {
     const claim = await Submission.findOneAndUpdate(
       {
         _id: submissionId,
-        status: { $ne: 'evaluated' },
         evaluationLock: { $ne: true },
       },
       {
@@ -208,7 +201,7 @@ class EvaluationService {
     );
 
     if (!claim) {
-      const error = new Error('Evaluation conflict: This submission is currently being evaluated or has already been evaluated.');
+      const error = new Error('Evaluation conflict: This submission is currently being evaluated.');
       error.statusCode = 409;
       throw error;
     }
@@ -375,7 +368,7 @@ class EvaluationService {
     // Release the lock reliably when evaluation fails
     try {
       await Submission.updateOne(
-        { _id: submissionId, status: { $ne: 'evaluated' } },
+        { _id: submissionId },
         { $set: { evaluationLock: false } }
       );
     } catch (unlockErr) {

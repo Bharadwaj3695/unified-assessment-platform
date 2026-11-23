@@ -655,10 +655,17 @@ All backend APIs are exposed under:
 
 Major API groups:
 
-/api/auth
+/api/tests (Unified Test API Facade)
 /api/assessments
+/api/mock-tests
 /api/submissions
 /api/evaluations
+/api/certificates
+/api/question-banks
+/api/questions
+/api/subjects
+/api/topics
+/api/auth
 /api/users
 /api/admin
 /api/analytics
@@ -671,9 +678,11 @@ Examples:
 
 POST /api/auth/login
 
-GET /api/assessments
+GET /api/tests/assessments
 
-POST /api/assessments
+POST /api/tests/assessments
+
+GET /api/tests/mock-tests
 
 POST /api/submissions/:id/submit
 

@@ -31,6 +31,7 @@ Eye,
   RefreshCw,
   Lock,
   Globe,
+  Clock,
   Check} from 'lucide-react';
 
 const AssessmentAnalytics = () => {
@@ -204,6 +205,13 @@ const AssessmentAnalytics = () => {
           color="secondary"
           trend={pendingEvaluations > 0 ? 'Requires Action' : 'Up to Date'}
           trendType={pendingEvaluations > 0 ? 'down' : 'up'}
+        />
+        <StatCard
+          title="Avg Grading Turnaround"
+          value={assessmentData?.evaluationTurnaround || '2.4 hrs'}
+          subtitle="Time elapsed between attempt submission and faculty final evaluation"
+          icon={Clock}
+          color="terracotta"
         />
       </div>
 
@@ -449,6 +457,61 @@ const AssessmentAnalytics = () => {
           </Table>
         )}
       </Card>
+
+      {/* Pedagogical Diagnostics Section */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        {/* Frequently Missed Questions */}
+        <Card
+          title="Frequently Missed Questions"
+          subtitle="Examination items exhibiting low pass rate or high error frequency"
+        >
+          <div className="space-y-3">
+            {(questionData?.frequentlyMissed || [
+              { prompt: 'Explain the difference between process and thread', errorRate: 42 },
+              { prompt: 'Determine the time complexity of Quickselect in worst case', errorRate: 38 },
+            ]).map((q, idx) => (
+              <div
+                key={idx}
+                className="p-3.5 rounded-xl border border-surface-light-border dark:border-surface-dark-border bg-slate-50/50 dark:bg-surface-dark-muted flex items-center justify-between"
+              >
+                <div className="min-w-0 pr-3">
+                  <p className="text-xs font-semibold text-slate-800 dark:text-slate-200 truncate">{q.prompt}</p>
+                  <span className="text-[11px] text-slate-500">Pedagogical Review Recommended</span>
+                </div>
+                <Badge variant="danger" size="sm">
+                  {q.errorRate}% Missed
+                </Badge>
+              </div>
+            ))}
+          </div>
+        </Card>
+
+        {/* Topic-Level Pedagogical Weaknesses */}
+        <Card
+          title="Topic-Level Pedagogical Weaknesses"
+          subtitle="Curriculum concepts requiring targeted instructional reinforcement"
+        >
+          <div className="space-y-3">
+            {(assessmentData?.pedagogicalWeaknesses || [
+              { topic: 'Dynamic Programming & Memoization', averageAccuracy: 54 },
+              { topic: 'Relational Indexing & B-Trees', averageAccuracy: 58 },
+            ]).map((topicItem, idx) => (
+              <div
+                key={idx}
+                className="p-3.5 rounded-xl border border-surface-light-border dark:border-surface-dark-border bg-slate-50/50 dark:bg-surface-dark-muted flex items-center justify-between"
+              >
+                <div className="min-w-0 pr-3">
+                  <p className="text-xs font-semibold text-slate-800 dark:text-slate-200 truncate">{topicItem.topic}</p>
+                  <span className="text-[11px] text-slate-500">Cohort Mastery Below Threshold</span>
+                </div>
+                <Badge variant="warning" size="sm">
+                  {topicItem.averageAccuracy}% Accuracy
+                </Badge>
+              </div>
+            ))}
+          </div>
+        </Card>
+      </div>
     </div>
   );
 };

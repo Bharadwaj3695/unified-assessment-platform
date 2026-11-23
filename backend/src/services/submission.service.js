@@ -1011,7 +1011,16 @@ class SubmissionService {
         const qObj = q.toJSON();
         if (role === 'student') {
           delete qObj.correctAnswer;
+          delete qObj.answerKey;
           delete qObj.explanation;
+          if (Array.isArray(qObj.options)) {
+            qObj.options = qObj.options.map((opt) => {
+              const o = typeof opt.toObject === 'function' ? opt.toObject() : { ...opt };
+              delete o.isCorrect;
+              delete o.explanation;
+              return o;
+            });
+          }
           if (qObj.codingConfig && Array.isArray(qObj.codingConfig.testCases)) {
             // Strictly filter out hidden test cases for student callers
             qObj.codingConfig.testCases = qObj.codingConfig.testCases.filter((tc) => !tc.isHidden);

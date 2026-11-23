@@ -41,6 +41,16 @@ const questionImportRoutes = require('./routes/questionImport.routes');
 const certificateRoutes = require('./routes/certificate.routes');
 // System-wide broadcast announcement routes
 const announcementRoutes = require('./routes/announcement.routes');
+// Unified Test API route aggregator
+const testRoutes = require('./routes');
+// Mock test authoring, lifecycle, and attempt routes
+const mockTestRoutes = require('./routes/mockTest.routes');
+// Centralized Question Bank subsystem routes
+const questionsRoutes = require('./routes/questions.routes');
+const subjectTopicRoutes = require('./routes/subjectTopic.routes');
+const topicsRoutes = require('./routes/topics.routes');
+const questionBanksRoutes = require('./routes/questionBanks.routes');
+const questionGenerationRoutes = require('./routes/questionGeneration.routes');
 // Centralized rate limiting middleware to prevent brute-force attacks and throttle excessive API traffic
 const { apiRateLimiter, authRateLimiter } = require('./middleware/rateLimit.middleware');
 
@@ -104,6 +114,17 @@ app.use((req, res, next) => {
   next();
 });
 
+// Reject prohibited test bypass headers in production environments
+app.use((req, res, next) => {
+  if (process.env.NODE_ENV === 'production' && req.headers['x-test-bypass']) {
+    return res.status(403).json({
+      success: false,
+      message: 'Test bypass headers are strictly prohibited in production environment.',
+    });
+  }
+  next();
+});
+
 // Parse JSON request bodies with an expanded 10MB limit to accommodate rich question schemas and imports
 app.use(express.json({ limit: '10mb' }));
 // Parse URL-encoded form request bodies with 10MB limit and extended object support
@@ -143,6 +164,7 @@ app.get('/', (req, res) => {
     healthCheck: '/api/health',
     // Map of primary REST resource route prefixes
     endpoints: {
+      tests: '/api/tests',
       auth: '/api/auth',
       assessments: '/api/assessments',
       certificates: '/api/certificates',
@@ -219,6 +241,17 @@ app.use('/api/question-bank', questionBankRoutes);
 app.use('/api/question-import', questionImportRoutes);
 // Mount system-wide broadcast announcement routes
 app.use('/api/announcements', announcementRoutes);
+
+// Mount Unified Test API facade
+app.use('/api/tests', testRoutes);
+// Mount Mock Test domain routes (legacy API prefix)
+app.use('/api/mock-tests', mockTestRoutes);
+// Mount Centralized Question Bank subsystem routes
+app.use('/api/questions', questionsRoutes);
+app.use('/api/subjects', subjectTopicRoutes);
+app.use('/api/topics', topicsRoutes);
+app.use('/api/question-banks', questionBanksRoutes);
+app.use('/api/question-generation', questionGenerationRoutes);
 
 // Register centralized error handling middleware as the terminal handler in the Express pipeline
 app.use(errorHandler);

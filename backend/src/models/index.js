@@ -46,6 +46,8 @@ const MockTestAttempt = require('./MockTestAttempt');
 const QuestionVersion = require('./QuestionVersion');
 const Subject = require('./Subject');
 const Topic = require('./Topic');
+const QuestionBank = require('./QuestionBank');
+const QuestionGenerationJob = require('./QuestionGenerationJob');
 
 
 // Export an aggregated object containing all Mongoose models for unified access across the platform
@@ -97,5 +99,7 @@ module.exports = {
   QuestionVersion,
   Subject,
   Topic,
+  QuestionBank,
+  QuestionGenerationJob,
 // Close the exported models dictionary
 };

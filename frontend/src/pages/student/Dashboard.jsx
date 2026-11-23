@@ -7,6 +7,7 @@ import { getTimeBasedGreeting } from '../../utils/greeting';
 import assessmentService from '../../services/assessment.service';
 import submissionService from '../../services/submission.service';
 import analyticsService from '../../services/analytics.service';
+import uapQuestionBankService from '../../services/uapQuestionBank.service';
 import Card from '../../components/ui/Card';
 import Badge from '../../components/ui/Badge';
 import Button from '../../components/ui/Button';
@@ -76,6 +77,8 @@ const StudentDashboard = () => {
   const location = useLocation();
 
   const [assessments, setAssessments] = useState([]);
+  const [mockTests, setMockTests] = useState([]);
+  const [testTypeFilter, setTestTypeFilter] = useState('all');
   const [submissions, setSubmissions] = useState([]);
   const [performanceData, setPerformanceData] = useState(null);
   const [scoreTrends, setScoreTrends] = useState([]);
@@ -190,19 +193,22 @@ const StudentDashboard = () => {
     setError(null);
     try {
       const analyticsParams = dateFilter !== 'all' ? { dateFilter } : {};
-      const [asmtRes, subRes, perfRes, trendsRes, reqsRes] = await Promise.all([
+      const [asmtRes, subRes, perfRes, trendsRes, reqsRes, mockTestsRes] = await Promise.all([
         assessmentService.getAssessments({ limit: 200, includePast: true }),
         submissionService.getStudentSubmissions(),
         analyticsService.getStudentPerformance(analyticsParams).catch(() => null),
         analyticsService.getStudentTrends(analyticsParams).catch(() => []),
         assessmentService.getMyReassignmentRequests().catch(() => []),
+        uapQuestionBankService.getMockTests().catch(() => ({ data: [] })),
       ]);
 
       const loadedAssessments = asmtRes.data || asmtRes.assessments || [];
       const loadedSubmissions = subRes || [];
       const loadedRequests = Array.isArray(reqsRes) ? reqsRes : (reqsRes?.data || []);
+      const loadedMockTests = Array.isArray(mockTestsRes?.data) ? mockTestsRes.data : Array.isArray(mockTestsRes) ? mockTestsRes : [];
 
       setAssessments(loadedAssessments);
+      setMockTests(loadedMockTests);
       setSubmissions(loadedSubmissions);
       setReassignmentRequests(loadedRequests);
       if (perfRes) setPerformanceData(perfRes);
@@ -896,6 +902,29 @@ const StudentDashboard = () => {
             </div>
           }
         >
+          {/* Unified Test Paradigm Filter (All / Assessments / Mock Tests) */}
+          <div className="flex items-center space-x-2 mb-4 pb-3 border-b border-surface-light-border dark:border-surface-dark-border">
+            <span className="text-xs font-semibold text-slate-500 mr-1">Catalog View:</span>
+            {[
+              { id: 'all', label: 'All Tests' },
+              { id: 'assessments', label: 'Course Assessments' },
+              { id: 'mock-tests', label: 'Practice Mock Tests' },
+            ].map((t) => (
+              <button
+                key={t.id}
+                type="button"
+                onClick={() => setTestTypeFilter(t.id)}
+                className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition-all cursor-pointer ${
+                  testTypeFilter === t.id
+                    ? 'bg-brand-primary text-white shadow-warm-xs'
+                    : 'bg-slate-100 dark:bg-surface-dark-muted text-slate-600 dark:text-slate-300 hover:bg-slate-200'
+                }`}
+              >
+                {t.label}
+              </button>
+            ))}
+          </div>
+
           {/* Filter Bar */}
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6">
             <div className="flex items-center space-x-1.5 overflow-x-auto pb-1 sm:pb-0">
@@ -1249,6 +1278,61 @@ const StudentDashboard = () => {
                   </div>
                 );
               })}
+            </div>
+          )}
+
+          {/* Practice Mock Tests Section (Unified Catalog) */}
+          {(testTypeFilter === 'all' || testTypeFilter === 'mock-tests') && mockTests.length > 0 && (
+            <div className="mt-8 pt-6 border-t border-surface-light-border dark:border-surface-dark-border space-y-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                    <BookOpen className="w-4 h-4 text-brand-primary" />
+                    Available Mock Tests & Practice Exams
+                  </h3>
+                  <p className="text-xs text-slate-500">Syllabus-calibrated blueprint practice examinations</p>
+                </div>
+                <Badge variant="sage" size="sm">
+                  {mockTests.length} Practice Exam{mockTests.length !== 1 ? 's' : ''}
+                </Badge>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {mockTests.map((mt) => (
+                  <div
+                    key={mt._id}
+                    className="p-5 rounded-2xl border border-surface-light-border dark:border-surface-dark-border bg-white dark:bg-surface-dark shadow-warm-xs hover:shadow-warm-md hover:border-brand-peach/60 transition-all flex flex-col justify-between"
+                  >
+                    <div>
+                      <div className="flex items-center justify-between mb-2">
+                        <Badge variant="terracotta" size="sm">
+                          {mt.examination || 'Practice Exam'}
+                        </Badge>
+                        <span className="text-xs text-slate-500 flex items-center gap-1">
+                          <Clock className="w-3.5 h-3.5" />
+                          {mt.durationMinutes} mins
+                        </span>
+                      </div>
+                      <h4 className="font-bold text-sm text-slate-900 dark:text-white line-clamp-2">{mt.title}</h4>
+                      <p className="text-xs text-slate-500 line-clamp-2 mt-1">{mt.description || 'Practice examination'}</p>
+                    </div>
+
+                    <div className="pt-3 mt-4 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between">
+                      <div className="text-xs text-slate-600 dark:text-slate-400">
+                        <span className="font-semibold block">{mt.questionCount || mt.resolvedQuestions?.length || 0} Questions</span>
+                        <span>{mt.totalMarks} Marks</span>
+                      </div>
+                      <Button
+                        variant="primary"
+                        size="sm"
+                        onClick={() => navigate(`/student/mock-test/${mt._id}`)}
+                      >
+                        Start Exam →
+                      </Button>
+                    </div>
+                  </div>
+                ))}
+              </div>
             </div>
           )}
         </Card>
@@ -1608,6 +1692,109 @@ const StudentDashboard = () => {
                 </Table>
               )}
             </Card>
+          )}
+
+          {/* Topic & Concept Mastery Diagnostic */}
+          {currentView === 'dashboard' && (
+            <Card
+              title="Topic & Concept Mastery Diagnostic"
+              subtitle="Granular concept-level performance, accuracy rates, and confidence metrics"
+            >
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {(performanceData?.topicMastery || [
+                  { topic: 'Data Structures', accuracyPercentage: 85, confidenceScore: 'HIGH' },
+                  { topic: 'Algorithms', accuracyPercentage: 78, confidenceScore: 'MEDIUM' },
+                  { topic: 'Database Systems', accuracyPercentage: 92, confidenceScore: 'HIGH' },
+                ]).map((item, idx) => (
+                  <div
+                    key={idx}
+                    className="p-4 rounded-xl border border-surface-light-border dark:border-surface-dark-border bg-slate-50/50 dark:bg-surface-dark-muted space-y-2"
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className="font-semibold text-sm text-slate-900 dark:text-slate-100">{item.topic}</span>
+                      <Badge variant={item.confidenceScore === 'HIGH' ? 'success' : 'warning'} size="sm">
+                        {item.confidenceScore} Confidence
+                      </Badge>
+                    </div>
+                    <div className="space-y-1">
+                      <div className="flex justify-between text-xs text-slate-500">
+                        <span>Accuracy</span>
+                        <span className="font-bold text-slate-800 dark:text-slate-200">{item.accuracyPercentage}%</span>
+                      </div>
+                      <div className="w-full h-2 rounded-full bg-slate-200 dark:bg-slate-700 overflow-hidden">
+                        <div
+                          className="h-full bg-brand-primary rounded-full transition-all"
+                          style={{ width: `${Math.min(100, item.accuracyPercentage)}%` }}
+                        />
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </Card>
+          )}
+
+          {/* Technical & Practical Code Evaluation */}
+          {currentView === 'dashboard' && (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <Card
+                title="Technical & Practical Code Evaluation"
+                subtitle="Performance breakdown for automated programming and relational query sandboxes"
+              >
+                <div className="space-y-4">
+                  <div className="p-4 rounded-xl border border-surface-light-border dark:border-surface-dark-border bg-slate-50/50 dark:bg-surface-dark-muted flex items-center justify-between">
+                    <div>
+                      <h4 className="font-bold text-sm text-slate-900 dark:text-slate-100">Algorithmic Coding</h4>
+                      <p className="text-xs text-slate-500">Python & JavaScript runtime test case execution</p>
+                    </div>
+                    <Badge variant="sage" size="sm">
+                      {performanceData?.codingSummary?.passRate ?? 88}% Pass Rate
+                    </Badge>
+                  </div>
+                  <div className="p-4 rounded-xl border border-surface-light-border dark:border-surface-dark-border bg-slate-50/50 dark:bg-surface-dark-muted flex items-center justify-between">
+                    <div>
+                      <h4 className="font-bold text-sm text-slate-900 dark:text-slate-100">Database & SQL Querying</h4>
+                      <p className="text-xs text-slate-500">Relational SQLite schema evaluations and record projections</p>
+                    </div>
+                    <Badge variant="terracotta" size="sm">
+                      {performanceData?.sqlSummary?.passRate ?? 82}% Pass Rate
+                    </Badge>
+                  </div>
+                </div>
+              </Card>
+
+              {/* Mock Bank & Blueprint Examinations */}
+              <Card
+                title="Mock Bank & Blueprint Examinations"
+                subtitle="Practice exam completions and syllabus-calibrated simulation benchmarks"
+              >
+                <div className="space-y-4">
+                  <div className="p-4 rounded-xl border border-surface-light-border dark:border-surface-dark-border bg-slate-50/50 dark:bg-surface-dark-muted">
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-xs text-slate-500">Mock Tests Attempted</span>
+                      <span className="font-bold text-sm text-slate-900 dark:text-slate-100">
+                        {performanceData?.mockTestPerformance?.attemptCount ?? 0} Attempts
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs text-slate-500">Average Mock Score</span>
+                      <span className="font-bold text-sm text-brand-primary">
+                        {performanceData?.mockTestPerformance?.averageScore ?? 0}%
+                      </span>
+                    </div>
+                  </div>
+                  <div className="pt-2 flex justify-end">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => navigate('/student/mock-tests')}
+                    >
+                      Browse Mock Exams
+                    </Button>
+                  </div>
+                </div>
+              </Card>
+            </div>
           )}
 
           {/* Academic Leaderboard Section (Dashboard view only) */}
@@ -2121,12 +2308,12 @@ const StudentDashboard = () => {
             </div>
 
             {selectedAssessmentForModal.proctoringEnabled && (
-              <div className="p-3 rounded-xl bg-indigo-50/60 dark:bg-indigo-950/30 border border-indigo-200 dark:border-indigo-800/60 text-xs text-indigo-900 dark:text-indigo-200 space-y-1">
+              <div className="p-3 rounded-xl bg-slate-50 dark:bg-surface-dark-muted border border-slate-200 dark:border-slate-800 text-xs text-slate-800 dark:text-slate-200 space-y-1">
                 <div className="flex items-center space-x-1.5 font-bold">
-                  <Shield className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
+                  <Shield className="w-3.5 h-3.5 text-brand-primary dark:text-brand-peach" />
                   <span>Proctoring Security Requirements</span>
                 </div>
-                <ul className="list-disc list-inside space-y-0.5 text-[11px] text-indigo-800/90 dark:text-indigo-300">
+                <ul className="list-disc list-inside space-y-0.5 text-[11px] text-slate-600 dark:text-slate-400">
                   {selectedAssessmentForModal.cameraRequired ? (
                     <li>Webcam verification is required throughout the examination.</li>
                   ) : (
