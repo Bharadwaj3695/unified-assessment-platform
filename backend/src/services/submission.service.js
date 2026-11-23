@@ -209,7 +209,7 @@ class SubmissionService {
     return submission;
   }
 
-  async autosaveAnswer(submissionId, studentId, questionId, answer) {
+  async autosaveAnswer(submissionId, studentId, questionId, answer, clientTimestamp) {
     if (!mongoose.Types.ObjectId.isValid(submissionId) || !mongoose.Types.ObjectId.isValid(questionId)) {
       const error = new Error('Invalid submission or question ID format');
       error.statusCode = 400;
@@ -275,13 +275,58 @@ class SubmissionService {
       throw error;
     }
 
+    // Timestamp-based stale request protection
+    const hasClientTimestamp = clientTimestamp !== undefined && clientTimestamp !== null;
+    let timestampNum;
+    if (hasClientTimestamp) {
+      timestampNum = typeof clientTimestamp === 'number' ? clientTimestamp : new Date(clientTimestamp).getTime();
+      if (isNaN(timestampNum)) {
+        const error = new Error('Invalid client timestamp format');
+        error.statusCode = 400;
+        throw error;
+      }
+    }
+
+    const qIdStr = questionId.toString();
+    let existingTimestamp;
+    if (submission.answerTimestamps instanceof Map) {
+      existingTimestamp = submission.answerTimestamps.get(qIdStr);
+    } else if (submission.answerTimestamps) {
+      existingTimestamp = submission.answerTimestamps[qIdStr];
+    }
+
+    if (hasClientTimestamp && existingTimestamp !== undefined && existingTimestamp !== null) {
+      if (timestampNum < existingTimestamp) {
+        const error = new Error('Stale request rejected. A newer answer has already been saved for this question.');
+        error.statusCode = 409;
+        throw error;
+      }
+    }
+
     // Update answer
+    if (!submission.answers) {
+      submission.answers = new Map();
+    }
     if (submission.answers instanceof Map) {
-      submission.answers.set(questionId.toString(), answer);
+      submission.answers.set(qIdStr, answer);
     } else {
       submission.answers = {
         ...(submission.answers || {}),
-        [questionId.toString()]: answer,
+        [qIdStr]: answer,
+      };
+    }
+
+    // Update answer timestamp
+    const recordedTimestamp = hasClientTimestamp ? timestampNum : Date.now();
+    if (!submission.answerTimestamps) {
+      submission.answerTimestamps = new Map();
+    }
+    if (submission.answerTimestamps instanceof Map) {
+      submission.answerTimestamps.set(qIdStr, recordedTimestamp);
+    } else {
+      submission.answerTimestamps = {
+        ...(submission.answerTimestamps || {}),
+        [qIdStr]: recordedTimestamp,
       };
     }
 

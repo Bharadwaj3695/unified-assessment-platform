@@ -40,6 +40,13 @@ const CertificateTemplate = require('./CertificateTemplate');
 const Certificate = require('./Certificate');
 // Import the Announcement Mongoose model representing system-wide broadcast banners
 const Announcement = require('./Announcement');
+// Recovered models required by the mock test and question lifecycle
+const MockTest = require('./MockTest');
+const MockTestAttempt = require('./MockTestAttempt');
+const QuestionVersion = require('./QuestionVersion');
+const Subject = require('./Subject');
+const Topic = require('./Topic');
+
 
 // Export an aggregated object containing all Mongoose models for unified access across the platform
 module.exports = {
@@ -85,5 +92,10 @@ module.exports = {
   Certificate,
   // Export Announcement model
   Announcement,
+  MockTest,
+  MockTestAttempt,
+  QuestionVersion,
+  Subject,
+  Topic,
 // Close the exported models dictionary
 };

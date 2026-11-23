@@ -99,12 +99,6 @@ class EvaluationService {
       throw error;
     }
 
-    if (submission.status === 'in_progress') {
-      const error = new Error('Cannot evaluate an in-progress submission');
-      error.statusCode = 400;
-      throw error;
-    }
-
     const assessment = submission.assessmentId;
 
     // Resource-level authorization: instructor may evaluate only submissions belonging to assessments they own.
@@ -114,6 +108,24 @@ class EvaluationService {
         'Access denied. You are not authorized to evaluate this submission.'
       );
       error.statusCode = 403;
+      throw error;
+    }
+
+    if (submission.status === 'in_progress') {
+      const error = new Error('Cannot evaluate an in-progress submission');
+      error.statusCode = 400;
+      throw error;
+    }
+
+    if (submission.status === 'evaluated') {
+      const error = new Error('Evaluation conflict: This submission has already been evaluated.');
+      error.statusCode = 409;
+      throw error;
+    }
+
+    if (submission.evaluationLock) {
+      const error = new Error('Evaluation conflict: This submission is currently being evaluated.');
+      error.statusCode = 409;
       throw error;
     }
 
@@ -180,6 +192,30 @@ class EvaluationService {
       }
     }
 
+    // Atomic CAS lock: claim submission atomically using conditional database operation
+    const claim = await Submission.findOneAndUpdate(
+      {
+        _id: submissionId,
+        status: { $ne: 'evaluated' },
+        evaluationLock: { $ne: true },
+      },
+      {
+        $set: { evaluationLock: true },
+      },
+      {
+        new: true,
+      }
+    );
+
+    if (!claim) {
+      const error = new Error('Evaluation conflict: This submission is currently being evaluated or has already been evaluated.');
+      error.statusCode = 409;
+      throw error;
+    }
+
+    submission.evaluationLock = true;
+
+    try {
     // Check whether all required subjective questions have been evaluated
     const allSubjectiveEvaluated =
       subjectiveQuestions.length === 0 ||
@@ -227,6 +263,7 @@ class EvaluationService {
       submission.resultStatus = passed ? 'passed' : 'failed';
       submission.status = 'evaluated';
       submission.evaluationStatus = 'completed';
+      submission.evaluationLock = false;
     } else {
       // Incomplete subjective evaluation: do NOT calculate final PASS/FAIL
       submission.manualScore = calculatedManualScore;
@@ -237,6 +274,7 @@ class EvaluationService {
       submission.resultStatus = 'pending_evaluation';
       submission.status = 'submitted';
       submission.evaluationStatus = 'pending';
+      submission.evaluationLock = false;
     }
 
     submission.feedback = generalFeedback;
@@ -333,7 +371,19 @@ class EvaluationService {
       submission,
       evaluation,
     };
+  } catch (err) {
+    // Release the lock reliably when evaluation fails
+    try {
+      await Submission.updateOne(
+        { _id: submissionId, status: { $ne: 'evaluated' } },
+        { $set: { evaluationLock: false } }
+      );
+    } catch (unlockErr) {
+      console.warn('[EvaluationService] Failed to release evaluationLock on error:', unlockErr.message);
+    }
+    throw err;
   }
+}
 
   async sendStudentEmail(instructorId, submissionId, { subject, message }) {
     if (!subject || !subject.trim()) {
