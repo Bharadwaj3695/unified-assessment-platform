@@ -1,4 +1,6 @@
 const analyticsService = require('../services/analytics.service');
+const examReportService = require('../services/examReport.service');
+const pdfGenerator = require('../utils/pdfGenerator');
 const { successResponse } = require('../utils/response');
 
 class AnalyticsController {
@@ -42,6 +44,75 @@ class AnalyticsController {
       const streak = await analyticsService.getStudentStreak(studentId, req.user);
 
       return successResponse(res, 'Student streak details retrieved successfully', streak);
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  async getStudentExamProgress(req, res, next) {
+    try {
+      const studentId = req.query.studentId || req.user.id;
+      const { search, examType, resultFilter, sortBy } = req.query;
+      const progress = await examReportService.getStudentExamProgress(studentId, req.user, {
+        search,
+        examType,
+        resultFilter,
+        sortBy,
+      });
+
+      return successResponse(res, 'Exam-wise progress retrieved successfully', progress);
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  async getStudentAiPredictor(req, res, next) {
+    try {
+      const studentId = req.query.studentId || req.user.id;
+      const progress = await examReportService.getStudentExamProgress(studentId, req.user);
+
+      return successResponse(
+        res,
+        'AI performance analysis integration status retrieved successfully',
+        progress.aiPredictor
+      );
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  async getIndividualExamReport(req, res, next) {
+    try {
+      const { attemptType, attemptId } = req.params;
+      const report = await examReportService.getIndividualExamReport(
+        attemptType,
+        attemptId,
+        req.user
+      );
+
+      return successResponse(res, 'Exam performance report retrieved successfully', report);
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  async downloadIndividualExamReportPdf(req, res, next) {
+    try {
+      const { attemptType, attemptId } = req.params;
+      const report = await examReportService.getIndividualExamReport(
+        attemptType,
+        attemptId,
+        req.user
+      );
+      const pdfBuffer = await pdfGenerator.generateExamReportPdf(report);
+
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader(
+        'Content-Disposition',
+        `attachment; filename="uap-exam-report-${report.meta.attemptId}.pdf"`
+      );
+      res.setHeader('Content-Length', pdfBuffer.length);
+      return res.send(pdfBuffer);
     } catch (err) {
       next(err);
     }

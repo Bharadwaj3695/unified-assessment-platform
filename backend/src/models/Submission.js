@@ -193,6 +193,18 @@ const submissionSchema = new mongoose.Schema(
         ref: 'Question',
       },
     ],
+    // Dynamic Map storing client or server timestamps of autosaved answers keyed by question ID
+    answerTimestamps: {
+      type: Map,
+      of: Number,
+      default: {},
+    },
+    // Database-backed lock preventing concurrent evaluation of the same submission
+    evaluationLock: {
+      type: Boolean,
+      default: false,
+      index: true,
+    },
   },
   {
     // Automatically manage createdAt and updatedAt timestamps
@@ -211,6 +223,7 @@ submissionSchema.index({ assessmentId: 1, studentId: 1 }, { unique: true });
 submissionSchema.index({ studentId: 1, status: 1, submittedAt: -1 });
 submissionSchema.index({ assessmentId: 1, status: 1 });
 submissionSchema.index({ submittedAt: -1 });
+
 
 // Virtual populating associated Evaluation record containing question-by-question grading details
 submissionSchema.virtual('evaluation', {

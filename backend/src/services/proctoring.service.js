@@ -165,6 +165,12 @@ class ProctoringService {
       throw error;
     }
 
+    if (userId && session.studentId && session.studentId.toString() !== userId.toString()) {
+      const error = new Error('Access denied. You do not own this proctoring session.');
+      error.statusCode = 403;
+      throw error;
+    }
+
     if (session.status === 'completed') {
       return session;
     }

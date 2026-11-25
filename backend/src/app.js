@@ -10,6 +10,10 @@ const morgan = require('morgan');
 const path = require('path');
 // Centralized application error handling middleware that captures and formats synchronous and asynchronous errors
 const { errorHandler } = require('./middleware/error.middleware');
+// Mongoose ODM for database connection state inspection
+const mongoose = require('mongoose');
+// Database readiness middleware preventing queries against disconnected database
+const { checkDbReady } = require('./middleware/dbCheck.middleware');
 
 // Authentication and session management routes (register, login, MFA, Google SSO, password recovery)
 const authRoutes = require('./routes/auth.routes');
@@ -33,6 +37,20 @@ const analyticsRoutes = require('./routes/analytics.routes');
 const questionBankRoutes = require('./routes/questionBank.routes');
 // Question document ingestion (PDF, DOCX) and Google Forms import pipeline routes
 const questionImportRoutes = require('./routes/questionImport.routes');
+// Student credential, award snapshot, and certificate verification routes
+const certificateRoutes = require('./routes/certificate.routes');
+// System-wide broadcast announcement routes
+const announcementRoutes = require('./routes/announcement.routes');
+// Unified Test API route aggregator
+const testRoutes = require('./routes');
+// Mock test authoring, lifecycle, and attempt routes
+const mockTestRoutes = require('./routes/mockTest.routes');
+// Centralized Question Bank subsystem routes
+const questionsRoutes = require('./routes/questions.routes');
+const subjectTopicRoutes = require('./routes/subjectTopic.routes');
+const topicsRoutes = require('./routes/topics.routes');
+const questionBanksRoutes = require('./routes/questionBanks.routes');
+const questionGenerationRoutes = require('./routes/questionGeneration.routes');
 // Centralized rate limiting middleware to prevent brute-force attacks and throttle excessive API traffic
 const { apiRateLimiter, authRateLimiter } = require('./middleware/rateLimit.middleware');
 
@@ -42,37 +60,32 @@ const app = express();
 // Trust the first reverse proxy hop (Nginx, Cloudflare, load balancer) for accurate client IP identification
 app.set('trust proxy', 1);
 
+/* When setting your JWT/session cookie on login:
+const isHttps = req.secure || req.headers['x-forwarded-proto'] === 'https';
+res.cookie('token', token, {
+  httpOnly: true,
+  secure: true,       // Required because Cloudflare uses HTTPS
+  sameSite: 'lax',    // Works reliably when frontend & API share the Vite proxy
+  // DO NOT set 'domain: localhost' here! Leave domain undefined.
+  maxAge: 24 * 60 * 60 * 1000, // 1 day
+}); */
 // Mount Helmet security middleware configuring cross-origin resource policy to permit static file downloads
 app.use(helmet({
   // Allow cross-origin access to uploaded static assets like question files and avatars
   crossOriginResourcePolicy: { policy: "cross-origin" }
 }));
 
-// Parse comma-separated list of allowed frontend origins, trimming whitespace and trailing slashes
-const allowedOrigins = (process.env.CLIENT_URL || 'http://localhost:5173')
-  // Split multiple configured client URLs by comma
-  .split(',')
-  // Strip whitespace and remove any trailing slashes to guarantee exact origin string matching
-  .map((origin) => origin.trim().replace(/\/+$/, ''))
-  // Filter out any empty strings resulting from extra commas
-  .filter(Boolean);
+// Import centralized origin validator ensuring consistency between CORS and CSRF
+const { isOriginAllowed } = require('./utils/origin');
 
-// Mount CORS middleware with dynamic origin evaluation and credential sharing support
+// Mount CORS middleware with consistent origin evaluation and credential sharing support
 app.use(cors({
   // Dynamic origin validator function
   origin: (origin, callback) => {
     // Allow non-browser requests (such as curl, Postman, or server-to-server calls) lacking Origin headers
     if (!origin) return callback(null, true);
-    // Normalize incoming client origin by stripping trailing slash
-    const normalizedOrigin = origin.replace(/\/+$/, '');
-    // Check if normalized client origin is present in the allowed whitelist
-    if (allowedOrigins.includes(normalizedOrigin)) {
-      // Permit cross-origin request
-      return callback(null, true);
-    }
-    // In non-production development environments, permit all local development origins (e.g. localhost, 127.0.0.1)
-    if (process.env.NODE_ENV !== 'production' && normalizedOrigin.includes('localhost')) {
-      // Permit local development client
+    // Check if client origin is approved according to centralized security policy
+    if (isOriginAllowed(origin, process.env.NODE_ENV)) {
       return callback(null, true);
     }
     // Reject origins that do not match configured client URLs
@@ -97,6 +110,17 @@ app.use((req, res, next) => {
     res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, private');
     res.setHeader('Pragma', 'no-cache');
     res.setHeader('Expires', '0');
+  }
+  next();
+});
+
+// Reject prohibited test bypass headers in production environments
+app.use((req, res, next) => {
+  if (process.env.NODE_ENV === 'production' && req.headers['x-test-bypass']) {
+    return res.status(403).json({
+      success: false,
+      message: 'Test bypass headers are strictly prohibited in production environment.',
+    });
   }
   next();
 });
@@ -140,8 +164,10 @@ app.get('/', (req, res) => {
     healthCheck: '/api/health',
     // Map of primary REST resource route prefixes
     endpoints: {
+      tests: '/api/tests',
       auth: '/api/auth',
       assessments: '/api/assessments',
+      certificates: '/api/certificates',
       submissions: '/api/submissions',
       evaluations: '/api/evaluations',
       users: '/api/users',
@@ -151,16 +177,24 @@ app.get('/', (req, res) => {
       questionImport: '/api/question-import',
       notifications: '/api/notifications',
       proctoring: '/api/proctoring',
+      announcements: '/api/announcements',
     },
   });
 });
 
 // Centralized health check handler returning JSON status and timestamp for container orchestrators and monitoring
 const handleHealthCheck = (req, res) => {
-  // Return HTTP 200 OK with health confirmation and ISO timestamp
-  res.status(200).json({
+  // Check active Mongoose database connection state (1 = connected)
+  const isDbConnected = mongoose.connection.readyState === 1;
+  const status = isDbConnected ? 'healthy' : 'unhealthy';
+  const statusCode = isDbConnected ? 200 : 503;
+
+  // Return health status along with explicit database connectivity state
+  res.status(statusCode).json({
     // Service operational state
-    status: 'healthy',
+    status,
+    // Database connectivity state
+    database: isDbConnected ? 'connected' : 'disconnected',
     // Current UTC timestamp in ISO 8601 format
     timestamp: new Date().toISOString(),
     // Service name identifier
@@ -172,10 +206,21 @@ app.get('/api/health', handleHealthCheck);
 // Bind health check handler to /health for load balancer probes and Kubernetes readiness probes
 app.get('/health', handleHealthCheck);
 
+// Guard all stateful API endpoints ensuring database is ready before executing queries
+app.use('/api', (req, res, next) => {
+  // Allow health checks through unconditionally
+  if (req.path === '/health' || req.path === '/health/') {
+    return next();
+  }
+  return checkDbReady(req, res, next);
+});
+
 // Mount authentication routes with dedicated brute-force rate limiter to protect login and registration
 app.use('/api/auth', authRateLimiter, authRoutes);
 // Mount assessment authoring, scheduling, and catalog management routes
 app.use('/api/assessments', assessmentRoutes);
+// Mount student credential awards and certificate verification routes
+app.use('/api/certificates', certificateRoutes);
 // Mount student assessment attempt and autosave submission routes
 app.use('/api/submissions', submissionRoutes);
 // Mount instructor evaluation, subjective grading, and feedback routes
@@ -194,6 +239,19 @@ app.use('/api/analytics', analyticsRoutes);
 app.use('/api/question-bank', questionBankRoutes);
 // Mount multi-format question file parser and Google Forms import processing routes
 app.use('/api/question-import', questionImportRoutes);
+// Mount system-wide broadcast announcement routes
+app.use('/api/announcements', announcementRoutes);
+
+// Mount Unified Test API facade
+app.use('/api/tests', testRoutes);
+// Mount Mock Test domain routes (legacy API prefix)
+app.use('/api/mock-tests', mockTestRoutes);
+// Mount Centralized Question Bank subsystem routes
+app.use('/api/questions', questionsRoutes);
+app.use('/api/subjects', subjectTopicRoutes);
+app.use('/api/topics', topicsRoutes);
+app.use('/api/question-banks', questionBanksRoutes);
+app.use('/api/question-generation', questionGenerationRoutes);
 
 // Register centralized error handling middleware as the terminal handler in the Express pipeline
 app.use(errorHandler);

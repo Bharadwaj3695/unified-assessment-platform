@@ -9,6 +9,16 @@ const submitEvaluationValidator = [
   body('generalFeedback').optional().trim(),
   // Validate that questionFeedback if supplied is an object mapping question IDs to feedback sub-objects
   body('questionFeedback').optional().isObject().withMessage('Question feedback must be an object'),
+  body('questionFeedback.*.pointsAwarded')
+    .optional()
+    .custom((val) => {
+      if (val === null || val === undefined || val === '') return true;
+      const num = Number(val);
+      if (isNaN(num) || num < 0) {
+        throw new Error('Points awarded must be a non-negative number');
+      }
+      return true;
+    }),
 ];
 
 // Export evaluation validation chain

@@ -5,17 +5,25 @@
   "private": true,
   "workspaces": [
     "frontend",
-    "backend"
+    "backend",
+    "code-IDE-service"
   ],
   "scripts": {
-    "install:all": "npm install && npm --prefix backend install && npm --prefix frontend install",
+    "install:all": "npm install && npm --prefix backend install && npm --prefix frontend install && npm --prefix code-IDE-service install",
     "dev": "concurrently -n \"BACKEND,FRONTEND\" -c \"blue.bold,magenta.bold\" \"npm --prefix backend run dev\" \"npm --prefix frontend run dev\"",
     "dev:backend": "npm --prefix backend run dev",
     "dev:frontend": "npm --prefix frontend run dev",
     "build": "npm --prefix frontend run build",
     "start": "npm --prefix backend start",
     "seed": "npm --prefix backend run seed",
-    "test:e2e": "npx playwright test --config=tests/playwright.config.js"
+    "test:e2e": "npx playwright test --config=tests/playwright.config.js",
+    "docker:up": "docker compose -f docker-compose/docker-compose.yml up -d",
+    "docker:down": "docker compose -f docker-compose/docker-compose.yml down",
+    "docker:build": "docker compose -f docker-compose/docker-compose.yml build",
+    "docker:backend": "docker compose -f docker-compose/docker-compose.backend.yml up -d",
+    "docker:frontend": "docker compose -f docker-compose/docker-compose.frontend.yml up -d",
+    "docker:executor": "docker compose -f docker-compose/docker-compose.code-executor.yml up -d",
+    "docker:infra": "docker compose -f docker-compose/docker-compose.infra.yml up -d"
   },
   "devDependencies": {
     "@playwright/test": "^1.62.1",

@@ -8,7 +8,7 @@ import { storage } from '../utils/storage';
 // Instantiate pre-configured Axios client instance with standard base URL, JSON headers, and credentials enabled
 const api = axios.create({
   // Backend API base path prefix (e.g. /api)
-  baseURL: API_BASE_URL,
+  baseURL: import.meta.env.VITE_API_URL || '/api',
   // Enable cookies across credentialed requests
   withCredentials: true,
   // Default request headers
@@ -141,12 +141,18 @@ api.interceptors.response.use(
       const isAuthEndpoint =
         // Login credential endpoint
         originalRequest?.url?.includes('/auth/login') ||
+        // Google authentication endpoints
+        originalRequest?.url?.includes('/auth/google') ||
         // Token refresh endpoint itself
         originalRequest?.url?.includes('/auth/refresh') ||
         // MFA TOTP verification endpoint
         originalRequest?.url?.includes('/auth/mfa/verify') ||
         // MFA backup recovery code verification endpoint
         originalRequest?.url?.includes('/auth/mfa/recovery') ||
+        // MFA email OTP endpoints
+        originalRequest?.url?.includes('/auth/mfa/email-otp') ||
+        originalRequest?.url?.includes('/auth/mfa/send-email-otp') ||
+        originalRequest?.url?.includes('/auth/mfa/verify-email-otp') ||
         // User registration endpoint
         originalRequest?.url?.includes('/auth/register');
 
@@ -329,7 +335,10 @@ api.interceptors.response.use(
       const isChallengeUrl =
         originalRequest?.url?.includes('/auth/login') ||
         originalRequest?.url?.includes('/auth/mfa/verify') ||
-        originalRequest?.url?.includes('/auth/mfa/recovery');
+        originalRequest?.url?.includes('/auth/mfa/recovery') ||
+        originalRequest?.url?.includes('/auth/mfa/email-otp') ||
+        originalRequest?.url?.includes('/auth/mfa/send-email-otp') ||
+        originalRequest?.url?.includes('/auth/mfa/verify-email-otp');
       // If not a pending challenge URL, purge stored token
       if (!isChallengeUrl) {
         // Remove token from storage

@@ -213,6 +213,59 @@ function hashMfaChallenge(challenge) {
 }
 
 // Export MFA utility functions for encryption, TOTP processing, and recovery codes
+/**
+ * Generates a cryptographically secure 6-digit numeric email OTP.
+ * Uses crypto.randomInt to guarantee uniform randomness and eliminate modulo bias.
+ */
+function generateEmailOtp() {
+  return crypto.randomInt(100000, 1000000).toString();
+}
+
+/**
+ * Computes an HMAC-SHA256 cryptographic hash of the 6-digit email OTP.
+ * Ensures the OTP code is never stored in plaintext in the database.
+ */
+function hashEmailOtp(code) {
+  if (!code) return '';
+  const normalized = String(code).trim();
+  const salt = env.JWT_SECRET || 'uap_email_otp_salt';
+  return crypto.createHmac('sha256', salt).update(normalized).digest('hex');
+}
+
+/**
+ * Verifies a candidate email OTP code against the stored HMAC-SHA256 hash using constant-time comparison.
+ * Prevents side-channel timing attacks that could leak hash characters.
+ */
+function verifyEmailOtp(inputCode, storedHash) {
+  if (!inputCode || !storedHash) return false;
+  const cleanCode = String(inputCode).trim();
+  if (!/^\d{6}$/.test(cleanCode)) return false;
+  const inputHash = hashEmailOtp(cleanCode);
+  const bufA = Buffer.from(inputHash, 'hex');
+  const bufB = Buffer.from(storedHash, 'hex');
+  if (bufA.length !== bufB.length) return false;
+  return crypto.timingSafeEqual(bufA, bufB);
+}
+
+/**
+ * Masks an email address for safe display in verification screens and audit logs.
+ * Example: 'student@uap.edu' -> 's***t@uap.edu', 'john.doe@gmail.com' -> 'j****e@gmail.com'
+ */
+function maskEmail(email) {
+  if (!email || typeof email !== 'string') return '';
+  const parts = email.trim().split('@');
+  if (parts.length !== 2) return email;
+  const [local, domain] = parts;
+  if (local.length <= 1) {
+    return `*@${domain}`;
+  }
+  if (local.length === 2) {
+    return `${local[0]}*@${domain}`;
+  }
+  const maskedLocal = `${local[0]}${'*'.repeat(Math.min(local.length - 2, 4))}${local[local.length - 1]}`;
+  return `${maskedLocal}@${domain}`;
+}
+
 module.exports = {
   encryptSecret,
   decryptSecret,
@@ -225,5 +278,9 @@ module.exports = {
   generateRecoveryCodes,
   verifyRecoveryCode,
   hashMfaChallenge,
+  generateEmailOtp,
+  hashEmailOtp,
+  verifyEmailOtp,
+  maskEmail,
 };
 
