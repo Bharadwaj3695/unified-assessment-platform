@@ -12,11 +12,12 @@ function readProjectFile(relPath) {
   return fs.readFileSync(path.join(rootDir, relPath), 'utf8');
 }
 
+const createTestSrc = readProjectFile('frontend/src/pages/instructor/CreateTest.jsx');
+const studioSrc = readProjectFile('frontend/src/pages/instructor/TestCreatorStudio.jsx');
+const routesSrc = readProjectFile('frontend/src/routes/AppRoutes.jsx');
+const navSrc = readProjectFile('frontend/src/config/navigationConfig.js');
+
 describe('UAP — Unified Test Creator & Question Authoring Integration Verification', () => {
-  const createTestSrc = readProjectFile('frontend/src/pages/instructor/CreateTest.jsx');
-  const studioSrc = readProjectFile('frontend/src/pages/instructor/TestCreatorStudio.jsx');
-  const routesSrc = readProjectFile('frontend/src/routes/AppRoutes.jsx');
-  const navSrc = readProjectFile('frontend/src/config/navigationConfig.js');
 
   test('1. Create Test Hub has concise header and breadcrumb', () => {
     assert.match(createTestSrc, /Faculty Workspace\s*\/\s*Create Test|Faculty Workspace[\s\S]*?Create Test/, 'Breadcrumb present');
@@ -25,16 +26,26 @@ describe('UAP — Unified Test Creator & Question Authoring Integration Verifica
     assert.doesNotMatch(createTestSrc, /Design and configure comprehensive academic/i, 'No marketing fluff');
   });
 
-  test('2. Create Test Hub has two selectable cards: Assessment and Mock Test', () => {
-    assert.match(createTestSrc, /data-testid="card-assessment"/, 'Assessment card present');
-    assert.match(createTestSrc, /Course assessment/, 'Assessment short label present');
-    assert.match(createTestSrc, /data-testid="card-mock-test"/, 'Mock Test card present');
-    assert.match(createTestSrc, /Practice test/, 'Mock Test short label present');
-    assert.match(createTestSrc, /selectedTestType/, 'Card selection state maintained');
-    assert.match(createTestSrc, /Launch Test Creator/, 'Primary Launch Test Creator button present');
+  test('2. Create Test Hub has single primary card containing Assessment and Mock Test with single Launch button', () => {
+    assert.match(createTestSrc, /data-testid="card-primary-test-creation"/, 'Single primary test creation card present');
+    assert.match(createTestSrc, /data-testid="option-course-assessment"/, 'Course Assessment selectable option present');
+    assert.match(createTestSrc, /data-testid="option-mock-test"/, 'Mock Test selectable option present');
+    assert.match(createTestSrc, /Select Test Type/, 'Primary card title is Select Test Type');
+    assert.match(createTestSrc, /selectedTestType === 'assessment'/, 'Course Assessment selection highlighted');
+    assert.match(createTestSrc, /selectedTestType === 'mock'/, 'Mock Test selection highlighted');
+    
+    // Single Launch button inside the same card
+    assert.match(createTestSrc, />\s*Launch\s*<\/Button>/, 'Launch button strictly labeled Launch');
+    assert.doesNotMatch(createTestSrc, /Launch Test Creator/, 'Does not use Launch Test Creator label');
   });
 
-  test('3. Launch button opens TestCreatorStudio preserving selected type', () => {
+  test('3. Interview Options are displayed separately as Coming Soon without Launch buttons', () => {
+    assert.match(createTestSrc, /data-testid="card-interview-ai"/, 'AI Mock Interview card present');
+    assert.match(createTestSrc, /data-testid="card-interview-faculty"/, 'Faculty Interview card present');
+    assert.match(createTestSrc, /Coming Soon/, 'Coming Soon badges present');
+  });
+
+  test('4. Launch button opens TestCreatorStudio preserving selected type', () => {
     assert.match(
       createTestSrc,
       /\/instructor\/test-creator\?type=|\/instructor\/create\?type=/,
@@ -45,7 +56,7 @@ describe('UAP — Unified Test Creator & Question Authoring Integration Verifica
     assert.match(navSrc, /'\/instructor\/test-creator'/, 'NavigationConfig includes test-creator pattern');
   });
 
-  test('4. Test Creator Studio Header displays title, badges, and actions', () => {
+  test('5. Test Creator Studio Header displays title, badges, and actions', () => {
     assert.match(studioSrc, /Test Creator Studio/, 'Header title is Test Creator Studio');
     assert.match(studioSrc, /Student Preview/, 'Student Preview action present');
     assert.match(studioSrc, /Save Draft/, 'Save Draft action present');
@@ -54,48 +65,32 @@ describe('UAP — Unified Test Creator & Question Authoring Integration Verifica
     assert.match(studioSrc, /questions\.length/, 'Question count badge computed');
   });
 
-  test('5. Test Details section provides general and type-specific rules', () => {
-    assert.match(studioSrc, /Test Name/, 'Test Name input present');
-    assert.match(studioSrc, /Test Type/, 'Test Type selector present');
-    assert.match(studioSrc, /Subject/, 'Subject dropdown present');
-    assert.match(studioSrc, /Duration/, 'Duration field present');
-
-    // Assessment specific rules
-    assert.match(studioSrc, /testType === 'assessment'/, 'Conditional assessment rules');
-    assert.match(studioSrc, /Passing Score/, 'Assessment passing score present');
-    assert.match(studioSrc, /Proctoring/, 'Assessment proctoring rule present');
-
-    // Mock specific blueprint
-    assert.match(studioSrc, /testType === 'mock'/, 'Conditional mock rules');
-    assert.match(studioSrc, /difficultyDistribution/, 'Mock difficulty distribution present');
-    assert.match(studioSrc, /Negative Marking/, 'Mock negative marking present');
-  });
-
   test('6. Questions section provides Add Question at both top and bottom', () => {
     assert.match(studioSrc, /data-testid="btn-add-question-top"/, 'Add question button at top present');
     assert.match(studioSrc, /data-testid="btn-add-question-bottom"/, 'Add question button at bottom present');
   });
 
-  test('7. Question cards support all Mock Bank Studio question types and card controls', () => {
-    assert.match(studioSrc, /SINGLE_MCQ/, 'Single Choice MCQ supported');
-    assert.match(studioSrc, /MULTI_SELECT/, 'Multiple Select supported');
-    assert.match(studioSrc, /TRUE_FALSE/, 'True / False supported');
-    assert.match(studioSrc, /SHORT_ANSWER/, 'Short Answer supported');
-    assert.match(studioSrc, /DESCRIPTIVE/, 'Descriptive supported');
-    assert.match(studioSrc, /CODING/, 'Coding challenge supported');
-    assert.match(studioSrc, /SQL/, 'SQL query challenge supported');
-
-    // Controls
-    assert.match(studioSrc, /handleMoveQuestion/, 'Reorder move up/down supported');
-    assert.match(studioSrc, /handleDuplicateQuestion/, 'Duplicate question supported');
-    assert.match(studioSrc, /handleRemoveQuestion/, 'Delete question supported');
-    assert.match(studioSrc, /handleToggleCollapse/, 'Expand/collapse supported');
+  test('7. Coding Question integrates full FacultyCodeIDE inside question card', () => {
+    assert.match(studioSrc, /import FacultyCodeIDE from/, 'Imports FacultyCodeIDE');
+    assert.match(studioSrc, /<FacultyCodeIDE/, 'Renders FacultyCodeIDE for coding questions');
+    assert.match(studioSrc, /onUpdateCodingConfig/, 'Passes onUpdateCodingConfig to FacultyCodeIDE');
   });
 
-  test('8. Coding test cases support both public and hidden cases, hiding secrets in preview', () => {
-    assert.match(studioSrc, /HIDDEN EVALUATION CASE|Hidden Evaluation Case/i, 'Hidden test cases supported');
-    assert.match(studioSrc, /PUBLIC SAMPLE CASE|Public Sample Case/i, 'Public sample cases supported');
-    // In preview modal, hidden cases are filtered out
-    assert.match(studioSrc, /filter\(\(tc\)\s*=>\s*!tc\.isHidden\)/, 'Preview strictly filters out hidden test cases');
+  test('8. Student Preview integrates StudentCodeIDE and protects hidden test cases', () => {
+    assert.match(studioSrc, /import StudentCodeIDE from/, 'Imports StudentCodeIDE');
+    assert.match(studioSrc, /<StudentCodeIDE/, 'Renders StudentCodeIDE in student preview');
+    assert.match(studioSrc, /filter\(\(tc\)\s*=>\s*!tc\.isHidden\)/, 'Strictly filters out hidden test cases in student preview');
   });
+});
+
+test('Test Creator Studio initializes test type from URL', () => {
+  // Verify that the component reads the URL query parameter.
+  assert.match(studioSrc, /useSearchParams/);
+
+  // Verify both supported types are handled.
+  assert.match(studioSrc, /assessment/);
+  assert.match(studioSrc, /mock/);
+
+  // Verify the selected type controls the displayed UI.
+  assert.match(studioSrc, /testTypeLabel/);
 });

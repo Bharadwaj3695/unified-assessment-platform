@@ -57,8 +57,6 @@ test.describe('UAP Shared Layout & Footer Architecture Suite', () => {
 
       // E. Bottom copyright bar
       await expect(marketingFooter.getByText(/Unified Assessment Platform \(UAP\)\. All rights reserved\./)).toBeVisible();
-      await expect(marketingFooter.getByText('Production Grade')).toBeVisible();
-
       // F. Exactly one footer rendered on public landing page
       const footers = page.locator('footer');
       await expect(footers).toHaveCount(1);
@@ -111,7 +109,6 @@ test.describe('UAP Shared Layout & Footer Architecture Suite', () => {
         const appFooter = page.locator('[data-testid="app-footer"]');
         await expect(appFooter).toBeVisible();
         await expect(appFooter.getByText(/Unified Assessment Platform \(UAP\)\. All rights reserved\./)).toBeVisible();
-        await expect(appFooter.getByText('Production Grade')).toBeVisible();
 
         // Exactly one footer rendered on page
         await expect(page.locator('footer')).toHaveCount(1);
@@ -207,7 +204,7 @@ test.describe('UAP Shared Layout & Footer Architecture Suite', () => {
         const appFooter = page.locator('[data-testid="app-footer"]');
         await expect(appFooter).toBeVisible();
         await expect(appFooter.getByText(/Unified Assessment Platform \(UAP\)\. All rights reserved\./)).toBeVisible();
-        await expect(appFooter.getByText('Production Grade')).toBeVisible();
+        
 
         // Exactly one footer rendered on page
         await expect(page.locator('footer')).toHaveCount(1);
@@ -292,7 +289,7 @@ test.describe('UAP Shared Layout & Footer Architecture Suite', () => {
         const appFooter = page.locator('[data-testid="app-footer"]');
         await expect(appFooter).toBeVisible();
         await expect(appFooter.getByText(/Unified Assessment Platform \(UAP\)\. All rights reserved\./)).toBeVisible();
-        await expect(appFooter.getByText('Production Grade')).toBeVisible();
+        
 
         // Exactly one footer rendered on page
         await expect(page.locator('footer')).toHaveCount(1);

@@ -84,6 +84,8 @@ class AssessmentService {
         certificateTitle: (certification.certificateTitle || '').trim(),
         signatoryName: (certification.signatoryName || '').trim(),
         signatoryTitle: (certification.signatoryTitle || 'Dean of Academic Affairs').trim(),
+        issuingOrganization: (certification.issuingOrganization || 'Unified Assessment Platform').trim(),
+        description: (certification.description || '').trim(),
       };
     }
 
@@ -225,6 +227,8 @@ class AssessmentService {
         certificateTitle: certification.certificateTitle !== undefined ? String(certification.certificateTitle).trim() : currentCert.certificateTitle,
         signatoryName: certification.signatoryName !== undefined ? String(certification.signatoryName).trim() : currentCert.signatoryName,
         signatoryTitle: certification.signatoryTitle !== undefined ? String(certification.signatoryTitle).trim() : currentCert.signatoryTitle,
+        issuingOrganization: certification.issuingOrganization !== undefined ? String(certification.issuingOrganization).trim() : (currentCert.issuingOrganization || 'Unified Assessment Platform'),
+        description: certification.description !== undefined ? String(certification.description).trim() : (currentCert.description || ''),
       };
     }
 
@@ -887,6 +891,158 @@ class AssessmentService {
       valid: errors.length === 0,
       errors,
       warnings,
+    };
+  }
+
+  /**
+   * Attaches existing Question Bank questions to an assessment.
+   * Copies question snapshots into Assessment Question collection to guarantee test immutability.
+   */
+  async addQuestionsFromBank(assessmentId, instructorId, questionIds, isAdmin = false) {
+    const mongoose = require('mongoose');
+    if (!mongoose.Types.ObjectId.isValid(assessmentId)) {
+      const error = new Error('Invalid assessment ID format');
+      error.statusCode = 400;
+      throw error;
+    }
+
+    const assessment = await Assessment.findById(assessmentId);
+    if (!assessment) {
+      const error = new Error('Assessment not found');
+      error.statusCode = 404;
+      throw error;
+    }
+
+    if (!isAdmin && assessment.instructorId.toString() !== instructorId.toString()) {
+      const error = new Error('You do not have permission to modify this assessment');
+      error.statusCode = 403;
+      throw error;
+    }
+
+    if (!Array.isArray(questionIds) || questionIds.length === 0) {
+      const error = new Error('questionIds array is required');
+      error.statusCode = 400;
+      throw error;
+    }
+
+    const validIds = questionIds.filter((id) => mongoose.Types.ObjectId.isValid(id));
+    if (validIds.length === 0) {
+      const error = new Error('No valid question IDs provided');
+      error.statusCode = 400;
+      throw error;
+    }
+
+    const { Question } = require('../models');
+    let bankQuestions = await Question.find({ _id: { $in: validIds } });
+
+    if (bankQuestions.length === 0) {
+      const { BankQuestion } = require('../models');
+      if (BankQuestion) {
+        bankQuestions = await BankQuestion.find({ _id: { $in: validIds } });
+      }
+    }
+
+    if (bankQuestions.length === 0) {
+      const error = new Error('No matching questions found in Question Bank');
+      error.statusCode = 404;
+      throw error;
+    }
+
+    const existingQuestions = await Question.find({ assessmentId: assessment._id });
+    const existingBankQIds = new Set(
+      existingQuestions.map((q) => q.bankQuestionId ? q.bankQuestionId.toString() : null).filter(Boolean)
+    );
+
+    let nextOrderIndex = existingQuestions.length;
+    const questionsToInsert = [];
+
+    for (const bq of bankQuestions) {
+      const bqIdStr = bq._id.toString();
+      if (existingBankQIds.has(bqIdStr)) {
+        continue;
+      }
+      existingBankQIds.add(bqIdStr);
+
+      const qText = bq.questionText || bq.statement || '';
+      let qType = bq.type || 'mcq';
+      if (bq.questionType) {
+        const qt = bq.questionType.toUpperCase();
+        if (qt === 'CODING') qType = 'code';
+        else if (qt === 'SQL') qType = 'sql';
+        else if (qt === 'TRUE_FALSE') qType = 'true_false';
+        else if (qt === 'SHORT_ANSWER' || qt === 'FILL_BLANK') qType = 'short_answer';
+        else if (qt === 'DESCRIPTIVE') qType = 'long_answer';
+        else if (qt === 'FILE_UPLOAD') qType = 'file_upload';
+        else qType = 'mcq';
+      }
+
+      const evalCfg = bq.evaluationConfig || {};
+      const codingCfg = bq.codingConfig || {};
+      const mergedCodingConfig = (qType === 'code' || qType === 'sql') ? {
+        problemTitle: evalCfg.problemTitle || codingCfg.problemTitle || '',
+        problemDescription: evalCfg.problemDescription || codingCfg.problemDescription || '',
+        inputFormat: evalCfg.inputFormat || codingCfg.inputFormat || '',
+        outputFormat: evalCfg.outputFormat || codingCfg.outputFormat || '',
+        constraints: evalCfg.constraints || codingCfg.constraints || '',
+        sampleInput: evalCfg.sampleInput || codingCfg.sampleInput || '',
+        sampleOutput: evalCfg.sampleOutput || codingCfg.sampleOutput || '',
+        executionCategory: qType === 'sql' ? 'sql' : (codingCfg.executionCategory || 'code'),
+        allowedLanguages: evalCfg.allowedLanguages || codingCfg.allowedLanguages || ['python', 'javascript'],
+        defaultLanguage: evalCfg.defaultLanguage || codingCfg.defaultLanguage || 'python',
+        sqlDialect: evalCfg.sqlDialect || codingCfg.sqlDialect || 'sqlite',
+        schemaDdl: evalCfg.schemaDdl || codingCfg.schemaDdl || '',
+        starterCode: evalCfg.starterCode || codingCfg.starterCode || {},
+        cpuTimeLimitMs: evalCfg.cpuTimeLimitMs || codingCfg.cpuTimeLimitMs || 2000,
+        memoryLimitMb: evalCfg.memoryLimitMb || codingCfg.memoryLimitMb || 256,
+        testCases: evalCfg.testCases || codingCfg.testCases || [],
+      } : undefined;
+
+      const pts = parseInt(bq.points || bq.marks, 10) || (qType === 'code' || qType === 'sql' ? 10 : 5);
+
+      questionsToInsert.push({
+        assessmentId: assessment._id,
+        questionText: qText,
+        statement: qText,
+        type: qType,
+        questionType: bq.questionType || (qType === 'code' ? 'CODING' : qType === 'sql' ? 'SQL' : 'SINGLE_MCQ'),
+        options: bq.options || [],
+        correctAnswer: bq.correctAnswer || bq.answerKey || null,
+        answerKey: bq.answerKey || bq.correctAnswer || null,
+        explanation: bq.explanation || '',
+        points: pts,
+        marks: pts,
+        orderIndex: nextOrderIndex++,
+        bankQuestionId: bq._id,
+        questionBankId: bq.questionBankId || null,
+        questionBankVersion: bq.currentVersion || bq.version || 1,
+        difficulty: bq.difficulty || 'MEDIUM',
+        bloomLevel: bq.bloomLevel || null,
+        tags: Array.isArray(bq.tags) ? bq.tags : (bq.conceptTags || []),
+        codingConfig: mergedCodingConfig,
+        fileUploadConfig: bq.fileUploadConfig || undefined,
+      });
+    }
+
+    if (questionsToInsert.length === 0) {
+      return {
+        message: 'All selected questions were already added to this assessment',
+        addedCount: 0,
+        questions: existingQuestions,
+      };
+    }
+
+    const insertedDocs = await Question.insertMany(questionsToInsert);
+
+    const allQuestions = await Question.find({ assessmentId: assessment._id });
+    const newTotalPoints = allQuestions.reduce((sum, q) => sum + (parseInt(q.points, 10) || 5), 0);
+    assessment.totalPoints = newTotalPoints;
+    await assessment.save();
+
+    return {
+      message: `Successfully added ${insertedDocs.length} question(s) from Question Bank`,
+      addedCount: insertedDocs.length,
+      questions: insertedDocs,
+      totalPoints: newTotalPoints,
     };
   }
 

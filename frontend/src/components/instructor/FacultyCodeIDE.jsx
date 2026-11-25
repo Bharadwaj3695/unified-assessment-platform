@@ -315,7 +315,10 @@ export default function FacultyCodeIDE({
   const isQuestionPublishReady = hasPrompt && hasAtLeastOneTestCase && allCasesHaveExpected && hasSupportedLang;
 
   return (
-    <div className="space-y-4 rounded-2xl border border-[#EBE3D8] dark:border-[#2D3748] bg-white dark:bg-[#12161F] p-4 sm:p-5 shadow-xs">
+    <div
+      className="space-y-4 rounded-2xl border border-[#EBE3D8] dark:border-[#2D3748] bg-white dark:bg-[#12161F] p-4 sm:p-5 shadow-xs"
+      data-testid="faculty-code-ide"
+    >
       {/* Faculty IDE Top Navigation Bar */}
       <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-[#EBE3D8] dark:border-[#2D3748]">
         <div className="flex items-center space-x-2">

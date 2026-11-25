@@ -18,12 +18,10 @@ services:
     environment:
       VITE_API_URL: http://localhost:5000/api
     healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:80/health || exit 1"]
+      test: ["CMD-SHELL", "curl -sf http://localhost:80/health && curl -sf -o /dev/null http://localhost:80/ || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 3
-    volumes:
-      - ../frontend/dist:/usr/share/nginx/html:ro
     networks:
       - uap-public-net
 

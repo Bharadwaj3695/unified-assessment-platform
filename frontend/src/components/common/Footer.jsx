@@ -124,7 +124,6 @@ const Footer = ({ variant = 'marketing' }) => {
           <p className="flex flex-wrap items-center justify-center sm:justify-end gap-x-2 gap-y-0.5 text-center sm:text-right">
             <span>Academic & Technical Evaluation Suite</span>
             <span>·</span>
-            <span className="font-medium text-brand-terracotta dark:text-brand-peach">Production Grade</span>
           </p>
         </div>
       </div>

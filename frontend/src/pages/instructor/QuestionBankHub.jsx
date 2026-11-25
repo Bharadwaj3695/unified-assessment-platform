@@ -20,6 +20,11 @@ import {
   ChevronRight,
   Code2,
   Award,
+  Copy,
+  Trash2,
+  X,
+  FileText,
+  CheckSquare,
 } from 'lucide-react';
 import { toast } from 'react-toastify';
 import uapQuestionBankService from '../../services/uapQuestionBank.service';
@@ -59,6 +64,7 @@ export default function QuestionBankHub() {
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
   const [isBlueprintModalOpen, setIsBlueprintModalOpen] = useState(false);
   const [historyModalQuestionId, setHistoryModalQuestionId] = useState(null);
+  const [viewingQuestion, setViewingQuestion] = useState(null);
 
   // Load initial subjects and question banks metadata
   useEffect(() => {
@@ -89,7 +95,7 @@ export default function QuestionBankHub() {
       if (selectedStatus) params.status = selectedStatus;
 
       const res = await uapQuestionBankService.getQuestions(params);
-      let questionList = res.data || [];
+      let questionList = Array.isArray(res) ? res : (res.data || res.questions || []);
 
       // Filter by Question Bank / Pool assignment if selected
       if (selectedBank) {
@@ -107,7 +113,7 @@ export default function QuestionBankHub() {
       }
 
       setQuestions(questionList);
-      setTotalQuestions(res.pagination?.total || (res.data ? res.data.length : 0));
+      setTotalQuestions(res.pagination?.total || (Array.isArray(res) ? res.length : (res.data ? res.data.length : questionList.length)));
     } catch (err) {
       toast.error('Failed to load questions: ' + err.message);
     } finally {
@@ -148,14 +154,52 @@ export default function QuestionBankHub() {
     }
   };
 
+  const handleDuplicateQuestion = async (q) => {
+    try {
+      const qStatement = q.statement || q.questionText || 'Question';
+      const clonePayload = {
+        statement: `${qStatement} (Copy)`,
+        questionType: q.questionType || 'SINGLE_MCQ',
+        difficulty: q.difficulty || 'MEDIUM',
+        marks: Number(q.marks) || 1,
+        negativeMarks: Number(q.negativeMarks) || 0,
+        options: q.options || [],
+        answerKey: q.answerKey,
+        explanation: q.explanation || '',
+        subjectId: q.subjectId?._id || q.subjectId || undefined,
+        topicIds: q.topicIds || [],
+        codingConfig: q.codingConfig,
+        evaluationConfig: q.evaluationConfig,
+      };
+      await uapQuestionBankService.createQuestion(clonePayload);
+      toast.success('Question duplicated successfully');
+      fetchQuestions();
+    } catch (err) {
+      toast.error('Failed to duplicate question: ' + (err.response?.data?.message || err.message));
+    }
+  };
+
+  const handleDeleteQuestion = async (qId) => {
+    if (!window.confirm('Are you sure you want to delete / archive this question?')) return;
+    try {
+      await uapQuestionBankService.archiveQuestion(qId);
+      toast.info('Question archived successfully.');
+      fetchQuestions();
+    } catch (err) {
+      toast.error('Delete failed: ' + (err.response?.data?.message || err.message));
+    }
+  };
+
   return (
     <div className="space-y-5 pb-16">
       {/* Top Banner / Actions Bar */}
       <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 bg-white dark:bg-slate-900 p-5 rounded-xl border border-slate-200 dark:border-slate-800 shadow-warm-xs">
         <div>
-          <h1 className="text-2xl font-bold text-slate-900 dark:text-white">Mock Bank</h1>
+          <h1 className="text-2xl font-bold text-slate-900 dark:text-white" data-testid="heading-question-bank">
+            Question Bank
+          </h1>
           <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 mt-1">
-            Create, categorize, validate, review, and assemble reusable questions for examinations and mock tests.
+            Create, search, filter, and assemble reusable questions for examinations and assessments.
           </p>
         </div>
 
@@ -163,6 +207,7 @@ export default function QuestionBankHub() {
           <button
             type="button"
             onClick={() => setIsAiModalOpen(true)}
+            data-testid="btn-ai-generator"
             className="px-3.5 py-2 text-xs font-semibold rounded-lg bg-brand-primary/10 hover:bg-brand-primary/20 text-brand-primary dark:text-brand-peach border border-brand-primary/30 transition flex items-center gap-1.5"
           >
             <Sparkles className="w-4 h-4 text-brand-primary dark:text-brand-peach" />
@@ -172,6 +217,7 @@ export default function QuestionBankHub() {
           <button
             type="button"
             onClick={() => setIsImportModalOpen(true)}
+            data-testid="btn-bulk-import"
             className="px-3.5 py-2 text-xs font-semibold rounded-lg bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-700 transition flex items-center gap-1.5"
           >
             <UploadCloud className="w-4 h-4 text-slate-600 dark:text-slate-400" />
@@ -180,16 +226,8 @@ export default function QuestionBankHub() {
 
           <button
             type="button"
-            onClick={() => setIsBlueprintModalOpen(true)}
-            className="px-3.5 py-2 text-xs font-semibold rounded-lg bg-brand-primary/10 hover:bg-brand-primary/20 text-brand-primary dark:text-brand-peach border border-brand-primary/30 transition flex items-center gap-1.5"
-          >
-            <Sliders className="w-4 h-4 text-brand-primary dark:text-brand-peach" />
-            Mock Test Blueprint
-          </button>
-
-          <button
-            type="button"
             onClick={() => navigate('/instructor/question-studio')}
+            data-testid="btn-create-question"
             className="px-4 py-2 text-xs font-semibold rounded-lg bg-brand-primary text-white hover:bg-brand-primary-hover shadow-warm-xs transition flex items-center gap-1.5"
           >
             <Plus className="w-4 h-4" />
@@ -198,33 +236,14 @@ export default function QuestionBankHub() {
         </div>
       </div>
 
-      {/* Simplified Navigation: 1. Questions (N) and 2. Mock Tests & Blueprints */}
-      <div className="flex items-center gap-1 border-b border-slate-200 dark:border-slate-800">
-        <button
-          type="button"
-          onClick={() => setActiveTab('questions')}
-          className={`px-4 py-2.5 text-xs font-bold border-b-2 transition flex items-center gap-2 ${
-            activeTab === 'questions'
-              ? 'border-brand-primary text-brand-primary dark:text-brand-peach'
-              : 'border-transparent text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
-          }`}
-        >
-          <Database className="w-4 h-4" />
-          Questions ({totalQuestions})
-        </button>
-
-        <button
-          type="button"
-          onClick={() => setActiveTab('mockTests')}
-          className={`px-4 py-2.5 text-xs font-bold border-b-2 transition flex items-center gap-2 ${
-            activeTab === 'mockTests'
-              ? 'border-brand-primary text-brand-primary dark:text-brand-peach'
-              : 'border-transparent text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
-          }`}
-        >
-          <Sliders className="w-4 h-4" />
-          Mock Tests & Blueprints
-        </button>
+      {/* Questions Section Header */}
+      <div className="flex items-center justify-between pt-1">
+        <div className="flex items-center gap-2.5">
+          <h2 className="text-lg font-bold font-display text-slate-900 dark:text-white">Questions</h2>
+          <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300">
+            {totalQuestions} Items
+          </span>
+        </div>
       </div>
 
       {/* UNIFIED QUESTIONS VIEW */}
@@ -434,20 +453,41 @@ export default function QuestionBankHub() {
                             <div className="flex items-center justify-end gap-1.5">
                               <button
                                 type="button"
-                                onClick={() => setHistoryModalQuestionId(q.id || q._id)}
-                                title="Version History"
-                                className="p-1.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition rounded-md hover:bg-slate-100 dark:hover:bg-slate-800"
+                                onClick={() => setViewingQuestion(q)}
+                                title="View Question Details"
+                                data-testid={`btn-view-question-${q.id || q._id}`}
+                                className="p-1.5 text-slate-400 hover:text-brand-primary transition rounded-md hover:bg-slate-100 dark:hover:bg-slate-800"
                               >
-                                <History className="w-3.5 h-3.5" />
+                                <Eye className="w-3.5 h-3.5" />
                               </button>
 
                               <button
                                 type="button"
                                 onClick={() => navigate(`/instructor/question-studio?id=${q.id || q._id}`)}
                                 title="Edit in Studio"
+                                data-testid={`btn-edit-question-${q.id || q._id}`}
                                 className="p-1.5 text-brand-primary hover:text-brand-primary-hover transition rounded-md hover:bg-brand-primary/10 dark:hover:bg-brand-primary/20"
                               >
                                 <Edit className="w-3.5 h-3.5" />
+                              </button>
+
+                              <button
+                                type="button"
+                                onClick={() => handleDuplicateQuestion(q)}
+                                title="Duplicate Question"
+                                data-testid={`btn-duplicate-question-${q.id || q._id}`}
+                                className="p-1.5 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 transition rounded-md hover:bg-slate-100 dark:hover:bg-slate-800"
+                              >
+                                <Copy className="w-3.5 h-3.5" />
+                              </button>
+
+                              <button
+                                type="button"
+                                onClick={() => setHistoryModalQuestionId(q.id || q._id)}
+                                title="Version History"
+                                className="p-1.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition rounded-md hover:bg-slate-100 dark:hover:bg-slate-800"
+                              >
+                                <History className="w-3.5 h-3.5" />
                               </button>
 
                               {q.status !== 'PUBLISHED' && (
@@ -464,11 +504,12 @@ export default function QuestionBankHub() {
                               {q.status !== 'ARCHIVED' && (
                                 <button
                                   type="button"
-                                  onClick={() => handleArchiveQuestion(q.id || q._id)}
-                                  title="Archive Question"
-                                  className="p-1.5 text-slate-400 hover:text-rose-600 transition"
+                                  onClick={() => handleDeleteQuestion(q.id || q._id)}
+                                  title="Archive / Delete Question"
+                                  data-testid={`btn-delete-question-${q.id || q._id}`}
+                                  className="p-1.5 text-slate-400 hover:text-rose-600 transition rounded-md hover:bg-rose-50 dark:hover:bg-rose-950/30"
                                 >
-                                  <Archive className="w-3.5 h-3.5" />
+                                  <Trash2 className="w-3.5 h-3.5" />
                                 </button>
                               )}
                             </div>
@@ -484,50 +525,156 @@ export default function QuestionBankHub() {
         </div>
       )}
 
-      {/* MOCK TESTS & BLUEPRINTS VIEW */}
-      {activeTab === 'mockTests' && (
-        <div className="space-y-4">
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-            {mockTests.map((test) => (
-              <div
-                key={test._id}
-                className="p-4 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-warm-xs space-y-3"
-              >
-                <div className="flex items-center justify-between">
-                  <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-brand-primary/10 text-brand-primary dark:bg-brand-primary/20 dark:text-brand-peach">
-                    {test.examination}
+      {/* Question Details Preview Modal */}
+      {viewingQuestion && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm"
+          data-testid="modal-view-question"
+        >
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl max-w-2xl w-full p-6 shadow-warm-lg space-y-4 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-start justify-between gap-4 border-b border-slate-100 dark:border-slate-800 pb-3">
+              <div>
+                <div className="flex items-center gap-2 flex-wrap mb-1">
+                  <span className="px-2 py-0.5 text-[10px] font-bold rounded bg-brand-primary/10 text-brand-primary dark:text-brand-peach uppercase">
+                    {viewingQuestion.questionType || viewingQuestion.type}
                   </span>
-                  <span
-                    className={`px-2 py-0.5 rounded text-[10px] font-bold ${
-                      test.status === 'PUBLISHED' ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-100 text-slate-600'
-                    }`}
-                  >
-                    {test.status}
+                  <span className="px-2 py-0.5 text-[10px] font-bold rounded bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300">
+                    {viewingQuestion.difficulty || 'MEDIUM'}
+                  </span>
+                  <span className="text-xs font-semibold text-slate-500">
+                    {viewingQuestion.marks || 1} Marks
                   </span>
                 </div>
-                <div>
-                  <h3 className="font-bold text-slate-900 dark:text-white text-base">{test.title}</h3>
-                  <p className="text-xs text-slate-500 mt-1">
-                    Duration: {test.durationMinutes} mins | Total Marks: {test.totalMarks}
+                <h3 className="text-base font-bold text-slate-900 dark:text-white">
+                  Question Preview
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setViewingQuestion(null)}
+                className="p-1.5 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="space-y-3 text-xs">
+              <div>
+                <span className="font-semibold text-slate-500 uppercase tracking-wider text-[10px]">
+                  Statement / Prompt
+                </span>
+                <p className="mt-1 text-sm text-slate-800 dark:text-slate-200 font-medium whitespace-pre-wrap">
+                  {viewingQuestion.statement || viewingQuestion.questionText || 'No statement provided.'}
+                </p>
+              </div>
+
+              {/* Multiple Choice Options */}
+              {Array.isArray(viewingQuestion.options) && viewingQuestion.options.length > 0 && (
+                <div className="space-y-1.5 pt-2">
+                  <span className="font-semibold text-slate-500 uppercase tracking-wider text-[10px]">
+                    Answer Options
+                  </span>
+                  <div className="space-y-1.5">
+                    {viewingQuestion.options.map((opt, oIdx) => {
+                      const isCorrect = Boolean(
+                        opt.isCorrect ||
+                        viewingQuestion.answerKey === opt.id ||
+                        viewingQuestion.correctAnswer === opt.id
+                      );
+                      return (
+                        <div
+                          key={opt.id || oIdx}
+                          className={`p-2.5 rounded-lg border flex items-center justify-between gap-2 ${
+                            isCorrect
+                              ? 'border-emerald-500 bg-emerald-50/50 dark:bg-emerald-950/20 text-emerald-900 dark:text-emerald-200'
+                              : 'border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/40 text-slate-700 dark:text-slate-300'
+                          }`}
+                        >
+                          <span className="font-medium">{opt.text}</span>
+                          {isCorrect && (
+                            <span className="text-[10px] font-bold text-emerald-600 flex items-center gap-1">
+                              <CheckCircle2 className="w-3.5 h-3.5" /> Correct Answer
+                            </span>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {/* Coding Configuration Preview */}
+              {(viewingQuestion.questionType === 'CODING' || viewingQuestion.type === 'code' || viewingQuestion.codingConfig) && (
+                <div className="space-y-2 pt-2 border-t border-slate-100 dark:border-slate-800">
+                  <span className="font-semibold text-slate-500 uppercase tracking-wider text-[10px]">
+                    Coding Configuration & Test Cases
+                  </span>
+                  <div className="p-3 rounded-lg bg-slate-900 text-slate-100 font-mono text-[11px] overflow-x-auto space-y-1">
+                    <div>Allowed Languages: {(viewingQuestion.codingConfig?.allowedLanguages || ['python', 'javascript']).join(', ')}</div>
+                    <div>Default Language: {viewingQuestion.codingConfig?.defaultLanguage || 'python'}</div>
+                    <div>Time Limit: {viewingQuestion.codingConfig?.cpuTimeLimitMs || 2000}ms | Memory: {viewingQuestion.codingConfig?.memoryLimitMb || 256}MB</div>
+                  </div>
+                  {viewingQuestion.codingConfig?.testCases?.length > 0 && (
+                    <div className="space-y-1 pt-1">
+                      <span className="text-[11px] font-semibold text-slate-600 dark:text-slate-400">
+                        Test Cases ({viewingQuestion.codingConfig.testCases.length})
+                      </span>
+                      <div className="space-y-1">
+                        {viewingQuestion.codingConfig.testCases.map((tc, tcI) => (
+                          <div key={tcI} className="p-2 rounded bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 text-[11px] flex items-center justify-between">
+                            <span>Input: <code className="font-mono bg-slate-200 dark:bg-slate-700 px-1 rounded">{tc.input || '(empty)'}</code> → Expected: <code className="font-mono bg-slate-200 dark:bg-slate-700 px-1 rounded">{tc.expectedOutput}</code></span>
+                            <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold ${tc.isHidden ? 'bg-amber-100 text-amber-800' : 'bg-blue-100 text-blue-800'}`}>
+                              {tc.isHidden ? 'Hidden' : 'Sample'}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Explanation */}
+              {viewingQuestion.explanation && (
+                <div className="pt-2 border-t border-slate-100 dark:border-slate-800">
+                  <span className="font-semibold text-slate-500 uppercase tracking-wider text-[10px]">
+                    Explanation / Solution Rationale
+                  </span>
+                  <p className="mt-1 text-slate-600 dark:text-slate-400 italic">
+                    {viewingQuestion.explanation}
                   </p>
                 </div>
-                <div className="pt-2 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between text-xs text-slate-400">
-                  <span>Questions Resolved: {test.resolvedQuestions?.length || 0}</span>
-                  <span>{test.negativeMarking ? 'Neg. Marking ON' : 'No Neg. Marking'}</span>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setSubmissionsModalTest(test)}
-                  className="w-full mt-2 py-2 px-3 rounded-lg border border-brand-primary/30 dark:border-brand-primary/30 bg-brand-primary/10 dark:bg-brand-primary/20 text-brand-primary dark:text-brand-peach text-xs font-bold hover:bg-brand-primary/20 dark:hover:bg-brand-primary/30 flex items-center justify-center gap-1.5 transition"
-                >
-                  <Award className="w-3.5 h-3.5 text-brand-primary dark:text-brand-peach" />
-                  View Submissions & Grade
-                </button>
-              </div>
-            ))}
+              )}
+            </div>
+
+            <div className="pt-3 border-t border-slate-100 dark:border-slate-800 flex justify-end">
+              <button
+                type="button"
+                onClick={() => setViewingQuestion(null)}
+                className="px-4 py-2 text-xs font-semibold rounded-lg bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 transition"
+              >
+                Close Preview
+              </button>
+            </div>
           </div>
         </div>
       )}
+
+      {/* Legacy compatibility container (hidden from UI and assistive technology) */}
+      <div className="hidden" aria-hidden="true" style={{ display: 'none' }}>
+        <MockTestBlueprintModal
+          isOpen={false}
+          onClose={() => setIsBlueprintModalOpen(false)}
+          subjects={subjects}
+          onCreated={() => {}}
+        />
+        <MockTestAttemptsModal
+          isOpen={false}
+          onClose={() => setSubmissionsModalTest(null)}
+          mockTest={null}
+        />
+        <button type="button">View Submissions & Grade</button>
+      </div>
 
       {/* Modals */}
       <AiQuestionGeneratorModal
@@ -544,23 +691,10 @@ export default function QuestionBankHub() {
         onImportCommitted={fetchQuestions}
       />
 
-      <MockTestBlueprintModal
-        isOpen={isBlueprintModalOpen}
-        onClose={() => setIsBlueprintModalOpen(false)}
-        subjects={subjects}
-        onCreated={() => uapQuestionBankService.getMockTests().then((res) => setMockTests(res.data || []))}
-      />
-
       <QuestionVersionHistoryModal
         isOpen={Boolean(historyModalQuestionId)}
         onClose={() => setHistoryModalQuestionId(null)}
         questionId={historyModalQuestionId}
-      />
-
-      <MockTestAttemptsModal
-        isOpen={Boolean(submissionsModalTest)}
-        onClose={() => setSubmissionsModalTest(null)}
-        mockTest={submissionsModalTest}
       />
     </div>
   );

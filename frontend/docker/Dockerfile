@@ -27,6 +27,6 @@ RUN apk add --no-cache curl
 EXPOSE 80 5173
 
 HEALTHCHECK --interval=10s --timeout=5s --retries=3 \
-  CMD curl -f http://localhost:80/health || exit 1
+  CMD curl -sf http://localhost:80/health && curl -sf -o /dev/null http://localhost:80/ || exit 1
 
 CMD ["nginx", "-g", "daemon off;"]

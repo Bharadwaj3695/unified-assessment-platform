@@ -24,6 +24,7 @@ import {
   Shield,
   Layers,
   Sparkles,
+  Award,
 } from 'lucide-react';
 import { toast } from 'react-toastify';
 import Badge from '../../components/ui/Badge';
@@ -31,8 +32,12 @@ import Button from '../../components/ui/Button';
 import Card from '../../components/ui/Card';
 import Modal from '../../components/ui/Modal';
 import CodeEditor from '../../components/common/CodeEditor';
+import FacultyCodeIDE from '../../components/instructor/FacultyCodeIDE';
+import StudentCodeIDE from '../../components/student/StudentCodeIDE';
+import QuestionBankPickerModal from '../../components/modals/QuestionBankPickerModal';
 import uapQuestionBankService from '../../services/uapQuestionBank.service';
 import { assessmentService } from '../../services/assessment.service';
+import instructorService from '../../services/instructor.service';
 
 // Supported Question Types aligned with Mock Bank Studio
 const QUESTION_TYPES = [
@@ -73,6 +78,13 @@ const createNewQuestion = (type = 'SINGLE_MCQ', number = 1) => {
     ],
     answerKey: 'opt_1',
     evaluationConfig: {
+      problemTitle: '',
+      problemDescription: '',
+      inputFormat: '',
+      outputFormat: '',
+      constraints: '',
+      sampleInput: '',
+      sampleOutput: '',
       scoringPolicy: 'ALL_OR_NOTHING',
       caseSensitive: false,
       acceptedAnswers: [],
@@ -84,8 +96,8 @@ const createNewQuestion = (type = 'SINGLE_MCQ', number = 1) => {
       cpuTimeLimitMs: 2000,
       memoryLimitMb: 256,
       testCases: [
-        { input: '', expectedOutput: '', isHidden: false, weight: 1, description: 'Public Sample Case' },
-        { input: '', expectedOutput: '', isHidden: true, weight: 2, description: 'Hidden Evaluation Case' },
+        { id: 'tc-1', input: '5', expectedOutput: '25', isHidden: false, isEnabled: true, weight: 1, description: 'Public Sample Case' },
+        { id: 'tc-2', input: '10', expectedOutput: '100', isHidden: true, isEnabled: true, weight: 2, description: 'Hidden Evaluation Case' },
       ],
       rubric: [
         { criterion: 'Accuracy & Completeness', maxMarks: 5, description: 'Core problem points addressed' },
@@ -100,13 +112,52 @@ const createNewQuestion = (type = 'SINGLE_MCQ', number = 1) => {
 
 export default function TestCreatorStudio() {
   const navigate = useNavigate();
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { id: editId } = useParams();
+  const effectiveId = editId || searchParams.get('id') || searchParams.get('draftId') || null;
+  const [activeDraftId, setActiveDraftId] = useState(effectiveId);
 
   // Test Type: 'assessment' | 'mock'
-  const initialType = searchParams.get('type') === 'mock' ? 'mock' : 'assessment';
+  const rawTypeParam = searchParams.get('type');
+  const initialType = rawTypeParam === 'mock' ? 'mock' : 'assessment';
   const [testType, setTestType] = useState(initialType);
   const [status, setStatus] = useState('draft');
+  const testTypeLabel = testType === 'assessment' ? 'Course Assessment' : 'Mock Test';
+
+  // Synchronize testType if the URL query parameter changes externally (e.g. browser Back/Forward)
+  useEffect(() => {
+    const currentParam = searchParams.get('type');
+    if (currentParam === 'mock' || currentParam === 'assessment') {
+      if (currentParam !== testType) {
+        setTestType(currentParam);
+      }
+    } else if (!effectiveId && !currentParam) {
+      // Set explicit type in URL when creating a new test
+      setSearchParams({ type: 'assessment' }, { replace: true });
+    }
+  }, [searchParams.get('type')]);
+
+  // Handler for test type changes via dropdown
+  const handleTestTypeChange = (newType) => {
+    if (newType !== 'mock' && newType !== 'assessment') return;
+    setTestType(newType);
+
+    // Immediately update URL query param without full page reload
+    setSearchParams((prev) => {
+      const updated = new URLSearchParams(prev);
+      updated.set('type', newType);
+      // If switching test types on an unsaved draft, clear the previous draft ID
+      if (newType !== testType) {
+        updated.delete('id');
+        updated.delete('draftId');
+      }
+      return updated;
+    }, { replace: true });
+
+    if (newType !== testType) {
+      setActiveDraftId(null);
+    }
+  };
 
   // Subjects & Topics state
   const [subjects, setSubjects] = useState([]);
@@ -140,11 +191,34 @@ export default function TestCreatorStudio() {
   // Questions List
   const [questions, setQuestions] = useState([createNewQuestion('SINGLE_MCQ', 1)]);
 
+  // Certification Configuration state
+  const [certificationEnabled, setCertificationEnabled] = useState(false);
+  const [certificateTitle, setCertificateTitle] = useState('');
+  const [issuingOrganization, setIssuingOrganization] = useState('Unified Assessment Platform');
+  const [certificateDescription, setCertificateDescription] = useState('');
+  const [certificateTemplateId, setCertificateTemplateId] = useState(null);
+  const [certificateTemplates, setCertificateTemplates] = useState([]);
+  const [signatoryName, setSignatoryName] = useState('');
+  const [signatoryTitle, setSignatoryTitle] = useState('Dean of Academic Affairs');
+  const [certPassingPercentage, setCertPassingPercentage] = useState(60);
+  const [isCertPreviewOpen, setIsCertPreviewOpen] = useState(false);
+
+  // Question Bank Picker Modal state
+  const [isQuestionBankModalOpen, setIsQuestionBankModalOpen] = useState(false);
+
   // UI state
   const [isSaving, setIsSaving] = useState(false);
   const [isPublishing, setIsPublishing] = useState(false);
   const [isPreviewOpen, setIsPreviewOpen] = useState(false);
   const [previewQuestionIndex, setPreviewQuestionIndex] = useState(0);
+
+  // Student Preview IDE state
+  const [previewCode, setPreviewCode] = useState('');
+  const [previewLang, setPreviewLang] = useState('python');
+  const [previewCustomStdin, setPreviewCustomStdin] = useState('');
+  const [previewShowCustomStdin, setPreviewShowCustomStdin] = useState(false);
+  const [previewIsExecuting, setPreviewIsExecuting] = useState(false);
+  const [previewExecutionResult, setPreviewExecutionResult] = useState(null);
 
   // Load available subjects
   useEffect(() => {
@@ -152,7 +226,7 @@ export default function TestCreatorStudio() {
       try {
         setLoadingSubjects(true);
         const res = await uapQuestionBankService.getSubjects();
-        const subList = res.data || [];
+        const subList = Array.isArray(res) ? res : (res?.data || res?.subjects || []);
         setSubjects(subList);
         if (subList.length > 0 && !subjectId) {
           setSubjectId(subList[0]._id || subList[0].id);
@@ -166,6 +240,20 @@ export default function TestCreatorStudio() {
     fetchSubjects();
   }, []);
 
+  // Load certificate templates for certification configuration
+  useEffect(() => {
+    async function fetchTemplates() {
+      try {
+        const res = await assessmentService.getCertificateTemplates();
+        const list = res?.data || res || [];
+        setCertificateTemplates(Array.isArray(list) ? list : []);
+      } catch (_err) {
+        setCertificateTemplates([]);
+      }
+    }
+    fetchTemplates();
+  }, []);
+
   // Fetch topics when subjectId changes
   useEffect(() => {
     if (subjectId) {
@@ -173,7 +261,8 @@ export default function TestCreatorStudio() {
         try {
           setLoadingTopics(true);
           const res = await uapQuestionBankService.getTopics({ subjectId });
-          setTopics(res.data || []);
+          const topicList = Array.isArray(res) ? res : (res?.data || res?.topics || []);
+          setTopics(topicList);
         } catch (_err) {
           setTopics([]);
         } finally {
@@ -184,57 +273,146 @@ export default function TestCreatorStudio() {
     }
   }, [subjectId]);
 
-  // Load existing test if edit mode
+  // Load existing test or draft if ID exists
   useEffect(() => {
-    if (editId) {
-      async function loadExistingTest() {
-        try {
-          if (testType === 'assessment') {
-            const res = await assessmentService.getAssessmentById(editId);
-            const asmt = res.data || res;
-            setTitle(asmt.title || '');
-            setDescription(asmt.description || '');
-            setSubjectId(asmt.subjectId || '');
-            setDurationMinutes(asmt.durationMinutes || 60);
-            setStatus(asmt.status || 'draft');
-            setAssessmentCategory(asmt.category || 'General');
-            setPassingScore(asmt.passingScore || 60);
-            setAccessType(asmt.accessType || 'public');
-            setProctoringEnabled(Boolean(asmt.proctoringEnabled));
-            setCameraRequired(Boolean(asmt.cameraRequired));
-            if (asmt.questions && asmt.questions.length > 0) {
-              setQuestions(
-                asmt.questions.map((q, idx) => ({
-                  clientId: `q_loaded_${idx}`,
-                  statement: q.questionText || q.statement || '',
-                  questionType: mapBackendTypeToStudio(q.type),
-                  difficulty: q.difficulty || 'MEDIUM',
-                  marks: q.points || 5,
-                  negativeMarks: 0,
-                  explanation: q.explanation || '',
-                  isCollapsed: false,
-                  options: q.options || [],
-                  answerKey: q.correctAnswer || 'opt_1',
-                  evaluationConfig: {
-                    allowedLanguages: q.codingConfig?.allowedLanguages || ['python', 'javascript'],
-                    defaultLanguage: q.codingConfig?.defaultLanguage || 'python',
-                    sqlDialect: q.codingConfig?.sqlDialect || 'sqlite',
-                    schemaDdl: q.codingConfig?.schemaDdl || '',
-                    testCases: q.codingConfig?.testCases || [],
-                    rubric: [],
-                    fileUploadConfig: q.fileUploadConfig || { allowedFileTypes: ['.pdf', '.docx'] },
-                  },
-                }))
-              );
-            }
+    const targetId = activeDraftId || editId || searchParams.get('id') || searchParams.get('draftId');
+    if (!targetId) return;
+
+    let isMounted = true;
+    async function loadExistingTest() {
+      try {
+        const preferredType = searchParams.get('type') || testType;
+        let loadedData = null;
+        let resolvedType = preferredType;
+
+        if (preferredType === 'mock') {
+          try {
+            const res = await uapQuestionBankService.getMockTestById(targetId);
+            loadedData = res.data || res;
+            resolvedType = 'mock';
+          } catch (_e) {
+            const res = await assessmentService.getAssessmentById(targetId);
+            loadedData = res.data || res;
+            resolvedType = 'assessment';
           }
-        } catch (err) {
-          toast.error('Failed to load test details.');
+        } else {
+          try {
+            const res = await assessmentService.getAssessmentById(targetId);
+            loadedData = res.data || res;
+            resolvedType = 'assessment';
+          } catch (_e) {
+            const res = await uapQuestionBankService.getMockTestById(targetId);
+            loadedData = res.data || res;
+            resolvedType = 'mock';
+          }
         }
+
+        if (!isMounted || !loadedData) return;
+
+        // Reconcile test type & URL query parameters
+        setTestType(resolvedType);
+        setActiveDraftId(targetId);
+        setSearchParams((prev) => {
+          const updated = new URLSearchParams(prev);
+          updated.set('type', resolvedType);
+          updated.set('id', targetId);
+          return updated;
+        }, { replace: true });
+
+        if (resolvedType === 'assessment') {
+          const asmt = loadedData;
+          setTitle(asmt.title || '');
+          setDescription(asmt.description || '');
+          setSubjectId(asmt.subjectId?._id || asmt.subjectId || '');
+          setDurationMinutes(asmt.durationMinutes || 60);
+          setStatus((asmt.status || 'draft').toLowerCase());
+          setAssessmentCategory(asmt.category || 'General');
+          setPassingScore(asmt.passingScore || 60);
+          setAccessType(asmt.accessType || 'public');
+          setProctoringEnabled(Boolean(asmt.proctoringEnabled));
+          setCameraRequired(Boolean(asmt.cameraRequired));
+          if (asmt.certification) {
+            setCertificationEnabled(Boolean(asmt.certification.enabled));
+            setCertPassingPercentage(asmt.certification.passingPercentage ?? asmt.passingScore ?? 60);
+            setCertificateTitle(asmt.certification.certificateTitle || '');
+            setIssuingOrganization(asmt.certification.issuingOrganization || 'Unified Assessment Platform');
+            setCertificateDescription(asmt.certification.description || '');
+            setCertificateTemplateId(asmt.certification.templateId?._id || asmt.certification.templateId || null);
+            setSignatoryName(asmt.certification.signatoryName || '');
+            setSignatoryTitle(asmt.certification.signatoryTitle || 'Dean of Academic Affairs');
+          }
+          if (asmt.questions && asmt.questions.length > 0) {
+            setQuestions(
+              asmt.questions.map((q, idx) => ({
+                clientId: `q_loaded_${idx}`,
+                bankQuestionId: q.bankQuestionId || null,
+                statement: q.questionText || q.statement || '',
+                questionType: mapBackendTypeToStudio(q.type),
+                difficulty: q.difficulty || 'MEDIUM',
+                marks: q.points || 5,
+                negativeMarks: 0,
+                explanation: q.explanation || '',
+                isCollapsed: false,
+                options: q.options || [],
+                answerKey: q.correctAnswer || 'opt_1',
+                evaluationConfig: {
+                  allowedLanguages: q.codingConfig?.allowedLanguages || ['python', 'javascript'],
+                  defaultLanguage: q.codingConfig?.defaultLanguage || 'python',
+                  sqlDialect: q.codingConfig?.sqlDialect || 'sqlite',
+                  schemaDdl: q.codingConfig?.schemaDdl || '',
+                  testCases: q.codingConfig?.testCases || [],
+                  rubric: [],
+                  fileUploadConfig: q.fileUploadConfig || { allowedFileTypes: ['.pdf', '.docx'] },
+                },
+              }))
+            );
+          }
+        } else {
+          // Mock test document
+          const mock = loadedData;
+          setTitle(mock.title || '');
+          setDescription(mock.description || '');
+          setExamination(mock.examination || 'GATE');
+          setSubjectId(mock.subjectId?._id || mock.subjectId || '');
+          setSelectedTopicIds((mock.topicIds || []).map((t) => t._id || t));
+          setDurationMinutes(mock.durationMinutes || 60);
+          setStatus((mock.status || 'DRAFT').toLowerCase());
+          setDifficultyDistribution(mock.difficultyDistribution || { easy: 30, medium: 50, hard: 20 });
+          setNegativeMarking(Boolean(mock.negativeMarking));
+          setNegativeMarkingRatio(Number(mock.negativeMarkingRatio) || 0.33);
+
+          if (mock.resolvedQuestions && mock.resolvedQuestions.length > 0) {
+            setQuestions(
+              mock.resolvedQuestions.map((rq, idx) => {
+                const snap = rq.questionSnapshot || {};
+                return {
+                  clientId: `q_loaded_mock_${idx}`,
+                  bankQuestionId: rq.questionId || snap._id || null,
+                  statement: snap.statement || snap.questionText || '',
+                  questionType: snap.questionType || (snap.type ? snap.type.toUpperCase() : 'SINGLE_MCQ'),
+                  difficulty: snap.difficulty || 'MEDIUM',
+                  marks: rq.marks || 5,
+                  negativeMarks: rq.negativeMarks || 0,
+                  explanation: snap.explanation || '',
+                  isCollapsed: false,
+                  options: snap.options || [],
+                  answerKey: snap.answerKey || 'opt_1',
+                  evaluationConfig: snap.evaluationConfig || snap.codingConfig || {},
+                };
+              })
+            );
+          }
+        }
+      } catch (err) {
+        toast.error('Failed to load test details.');
       }
-      loadExistingTest();
     }
-  }, [editId, testType]);
+    loadExistingTest();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [editId, searchParams.get('id'), searchParams.get('draftId')]);
 
   // Derived metrics
   const totalMarks = useMemo(() => {
@@ -297,6 +475,27 @@ export default function TestCreatorStudio() {
   const handleAddQuestion = (type = 'SINGLE_MCQ') => {
     setQuestions((prev) => [...prev, createNewQuestion(type, prev.length + 1)]);
     toast.info(`Question #${questions.length + 1} added.`);
+  };
+
+  // Add Questions from Question Bank
+  const handleImportFromQuestionBank = (importedQuestions) => {
+    if (!Array.isArray(importedQuestions) || importedQuestions.length === 0) return;
+
+    const existingBankIds = new Set(
+      questions.map((q) => (q.bankQuestionId ? q.bankQuestionId.toString() : null)).filter(Boolean)
+    );
+
+    const nonDuplicates = importedQuestions.filter(
+      (iq) => !iq.bankQuestionId || !existingBankIds.has(iq.bankQuestionId.toString())
+    );
+
+    if (nonDuplicates.length === 0) {
+      toast.info('All selected questions are already present in this test.');
+      return;
+    }
+
+    setQuestions((prev) => [...prev, ...nonDuplicates]);
+    toast.success(`Added ${nonDuplicates.length} question(s) from Question Bank.`);
   };
 
   // Change Question Type
@@ -558,6 +757,102 @@ export default function TestCreatorStudio() {
     });
   };
 
+  // Faculty IDE Integration Handlers
+  const handleUpdateQuestionFromIDE = (qIdx, field, val) => {
+    setQuestions((prev) => {
+      const updated = [...prev];
+      const targetField = field === 'questionText' ? 'statement' : field;
+      updated[qIdx] = {
+        ...updated[qIdx],
+        [targetField]: val,
+        [field]: val,
+      };
+      return updated;
+    });
+  };
+
+  const updateCodingConfig = (qIdx, field, val) => {
+    setQuestions((prev) => {
+      const updated = [...prev];
+      const cur = updated[qIdx];
+      const curConfig = cur.evaluationConfig || {};
+      updated[qIdx] = {
+        ...cur,
+        evaluationConfig: {
+          ...curConfig,
+          [field]: val,
+        },
+        codingConfig: {
+          ...curConfig,
+          [field]: val,
+        },
+      };
+      return updated;
+    });
+  };
+
+  // Sync preview IDE whenever preview modal opens or preview question index changes
+  useEffect(() => {
+    if (isPreviewOpen && questions[previewQuestionIndex]) {
+      const curQ = questions[previewQuestionIndex];
+      if (curQ.questionType === 'CODING' || curQ.questionType === 'SQL') {
+        const cfg = curQ.evaluationConfig || {};
+        const isSql = curQ.questionType === 'SQL';
+        const lang = cfg.defaultLanguage || (isSql ? 'sqlite' : 'python');
+        setPreviewLang(lang);
+        const starter = (cfg.starterCode && cfg.starterCode[lang]) || (
+          isSql ? 'SELECT * FROM students;' : '# Python Solution\nimport sys\n\ndef main():\n    print("Welcome")\n\nif __name__ == "__main__":\n    main()\n'
+        );
+        setPreviewCode(starter);
+        setPreviewExecutionResult(null);
+        setPreviewCustomStdin('');
+        setPreviewShowCustomStdin(false);
+      }
+    }
+  }, [isPreviewOpen, previewQuestionIndex, questions]);
+
+  const handlePreviewRunCode = async () => {
+    const activeQ = questions[previewQuestionIndex];
+    if (!activeQ) return;
+    const cfg = activeQ.evaluationConfig || {};
+    const publicCases = (cfg.testCases || []).filter((tc) => !tc.isHidden);
+
+    try {
+      setPreviewIsExecuting(true);
+      const res = await instructorService.testCode({
+        language: previewLang,
+        code: previewCode,
+        stdin: previewShowCustomStdin ? previewCustomStdin : '',
+        schemaDdl: cfg.schemaDdl || '',
+        testCases: publicCases,
+        timeoutMs: cfg.cpuTimeLimitMs || 2000,
+        memoryLimitMb: cfg.memoryLimitMb || 256,
+      });
+      const data = res.data || res;
+      setPreviewExecutionResult({
+        stdout: data.stdout || '',
+        stderr: data.stderr || '',
+        verdict: data.verdict || 'ACCEPTED',
+        executionTimeMs: data.executionTimeMs || 0,
+        sampleResults: (data.testCases || []).map((stc) => ({
+          input: stc.input,
+          expectedOutput: stc.expectedOutput,
+          actualOutput: stc.actualOutput,
+          passed: stc.passed,
+        })),
+      });
+      toast.success('Code executed successfully');
+    } catch (err) {
+      toast.error('Code execution failed: ' + (err.message || 'Execution error'));
+      setPreviewExecutionResult({
+        verdict: 'ERROR',
+        stderr: err.message,
+      });
+    } finally {
+      setPreviewIsExecuting(false);
+    }
+  };
+
   // --- VALIDATION, SAVE DRAFT & PUBLISH ---
 
   const validateTestForm = (isPublishingMode = false) => {
@@ -565,7 +860,7 @@ export default function TestCreatorStudio() {
       toast.error('Please enter a test title.');
       return false;
     }
-    if (!subjectId) {
+    if (testType === 'mock' && subjects.length > 0 && !subjectId) {
       toast.error('Please select a subject.');
       return false;
     }
@@ -573,7 +868,11 @@ export default function TestCreatorStudio() {
     if (isPublishingMode) {
       for (let i = 0; i < questions.length; i++) {
         const q = questions[i];
-        if (!q.statement.trim()) {
+        const qStatement =
+          q.statement?.trim() ||
+          q.evaluationConfig?.problemDescription?.trim() ||
+          q.evaluationConfig?.problemTitle?.trim();
+        if (!qStatement) {
           toast.error(`Question #${i + 1} statement is empty.`);
           return false;
         }
@@ -620,8 +919,22 @@ export default function TestCreatorStudio() {
           cameraRequired,
           randomization: { enabled: randomization, shuffleOrder: randomization },
           status: 'draft',
+          certification: {
+            enabled: certificationEnabled,
+            passingPercentage: Number(certPassingPercentage) || Number(passingScore) || 50,
+            templateId: certificateTemplateId || null,
+            certificateTitle: (certificateTitle || title || 'Certificate of Completion').trim(),
+            issuingOrganization: issuingOrganization.trim(),
+            description: certificateDescription.trim(),
+            signatoryName: signatoryName.trim(),
+            signatoryTitle: (signatoryTitle || 'Dean of Academic Affairs').trim(),
+          },
           questions: questions.map((q, idx) => ({
             questionText: q.statement || `Question ${idx + 1}`,
+            bankQuestionId: q.bankQuestionId || null,
+            questionBankId: q.questionBankId || null,
+            questionBankVersion: q.questionBankVersion || null,
+            difficulty: q.difficulty || 'MEDIUM',
             type: mapStudioTypeToBackend(q.questionType),
             options: (q.options || []).map((o) => ({ id: o.id, text: o.text || 'Option' })),
             correctAnswer:
@@ -634,12 +947,30 @@ export default function TestCreatorStudio() {
             codingConfig:
               q.questionType === 'CODING' || q.questionType === 'SQL'
                 ? {
+                    problemTitle: q.evaluationConfig?.problemTitle || '',
+                    problemDescription: q.evaluationConfig?.problemDescription || '',
+                    inputFormat: q.evaluationConfig?.inputFormat || '',
+                    outputFormat: q.evaluationConfig?.outputFormat || '',
+                    constraints: q.evaluationConfig?.constraints || '',
+                    sampleInput: q.evaluationConfig?.sampleInput || '',
+                    sampleOutput: q.evaluationConfig?.sampleOutput || '',
                     executionCategory: q.questionType === 'SQL' ? 'sql' : 'code',
-                    allowedLanguages: q.evaluationConfig?.allowedLanguages || ['python', 'javascript'],
-                    defaultLanguage: q.evaluationConfig?.defaultLanguage || 'python',
+                    allowedLanguages: q.evaluationConfig?.allowedLanguages || (q.questionType === 'SQL' ? ['sqlite'] : ['python', 'javascript']),
+                    defaultLanguage: q.evaluationConfig?.defaultLanguage || (q.questionType === 'SQL' ? 'sqlite' : 'python'),
                     sqlDialect: q.evaluationConfig?.sqlDialect || 'sqlite',
                     schemaDdl: q.evaluationConfig?.schemaDdl || '',
-                    testCases: q.evaluationConfig?.testCases || [],
+                    starterCode: q.evaluationConfig?.starterCode || {},
+                    cpuTimeLimitMs: Number(q.evaluationConfig?.cpuTimeLimitMs) || 2000,
+                    memoryLimitMb: Number(q.evaluationConfig?.memoryLimitMb) || 256,
+                    testCases: (q.evaluationConfig?.testCases || []).map((tc, tcIdx) => ({
+                      input: tc.input || '',
+                      expectedOutput: tc.expectedOutput?.trim() || 'PASS',
+                      isHidden: Boolean(tc.isHidden),
+                      isEnabled: tc.isEnabled !== false,
+                      weight: Number(tc.weight) || 1,
+                      description: tc.description || (tc.isHidden ? `Hidden Evaluation Case #${tcIdx + 1}` : `Public Sample Case #${tcIdx + 1}`),
+                      explanation: tc.explanation || '',
+                    })),
                   }
                 : undefined,
             fileUploadConfig:
@@ -649,19 +980,31 @@ export default function TestCreatorStudio() {
           })),
         };
 
-        if (editId) {
-          await assessmentService.updateAssessment(editId, payload);
+        let savedId = activeDraftId;
+        if (savedId) {
+          await assessmentService.updateAssessment(savedId, payload);
         } else {
-          await assessmentService.createAssessment(payload);
+          const res = await assessmentService.createAssessment(payload);
+          savedId = res.data?._id || res.data?.id || res._id || res.id;
+          if (savedId) {
+            setActiveDraftId(savedId);
+            setSearchParams((prev) => {
+              const updated = new URLSearchParams(prev);
+              updated.set('type', 'assessment');
+              updated.set('id', savedId);
+              return updated;
+            }, { replace: true });
+          }
         }
         toast.success(`Draft saved for "${title.trim()}".`);
       } else {
         // Mock Test payload
+        const activeSubjectId = subjectId || (subjects.length > 0 ? (subjects[0]._id || subjects[0].id) : undefined);
         const payload = {
           title: title.trim(),
           description: description.trim(),
           examination,
-          subjectId,
+          subjectId: activeSubjectId,
           topicIds: selectedTopicIds,
           durationMinutes: Number(durationMinutes) || 60,
           totalMarks: totalMarks || 100,
@@ -671,10 +1014,21 @@ export default function TestCreatorStudio() {
           negativeMarkingRatio: Number(negativeMarkingRatio) || 0.33,
         };
 
-        if (editId) {
-          await uapQuestionBankService.updateMockTest(editId, payload);
+        let savedId = activeDraftId;
+        if (savedId) {
+          await uapQuestionBankService.updateMockTest(savedId, payload);
         } else {
-          await uapQuestionBankService.createMockTest(payload);
+          const res = await uapQuestionBankService.createMockTest(payload);
+          savedId = res.data?._id || res.data?.id || res._id || res.id;
+          if (savedId) {
+            setActiveDraftId(savedId);
+            setSearchParams((prev) => {
+              const updated = new URLSearchParams(prev);
+              updated.set('type', 'mock');
+              updated.set('id', savedId);
+              return updated;
+            }, { replace: true });
+          }
         }
         toast.success(`Mock test draft saved for "${title.trim()}".`);
       }
@@ -705,8 +1059,22 @@ export default function TestCreatorStudio() {
           cameraRequired,
           randomization: { enabled: randomization, shuffleOrder: randomization },
           status: 'published',
+          certification: {
+            enabled: certificationEnabled,
+            passingPercentage: Number(certPassingPercentage) || Number(passingScore) || 50,
+            templateId: certificateTemplateId || null,
+            certificateTitle: (certificateTitle || title || 'Certificate of Completion').trim(),
+            issuingOrganization: issuingOrganization.trim(),
+            description: certificateDescription.trim(),
+            signatoryName: signatoryName.trim(),
+            signatoryTitle: (signatoryTitle || 'Dean of Academic Affairs').trim(),
+          },
           questions: questions.map((q, idx) => ({
             questionText: q.statement || `Question ${idx + 1}`,
+            bankQuestionId: q.bankQuestionId || null,
+            questionBankId: q.questionBankId || null,
+            questionBankVersion: q.questionBankVersion || null,
+            difficulty: q.difficulty || 'MEDIUM',
             type: mapStudioTypeToBackend(q.questionType),
             options: (q.options || []).map((o) => ({ id: o.id, text: o.text || 'Option' })),
             correctAnswer:
@@ -719,12 +1087,30 @@ export default function TestCreatorStudio() {
             codingConfig:
               q.questionType === 'CODING' || q.questionType === 'SQL'
                 ? {
+                    problemTitle: q.evaluationConfig?.problemTitle || '',
+                    problemDescription: q.evaluationConfig?.problemDescription || '',
+                    inputFormat: q.evaluationConfig?.inputFormat || '',
+                    outputFormat: q.evaluationConfig?.outputFormat || '',
+                    constraints: q.evaluationConfig?.constraints || '',
+                    sampleInput: q.evaluationConfig?.sampleInput || '',
+                    sampleOutput: q.evaluationConfig?.sampleOutput || '',
                     executionCategory: q.questionType === 'SQL' ? 'sql' : 'code',
-                    allowedLanguages: q.evaluationConfig?.allowedLanguages || ['python', 'javascript'],
-                    defaultLanguage: q.evaluationConfig?.defaultLanguage || 'python',
+                    allowedLanguages: q.evaluationConfig?.allowedLanguages || (q.questionType === 'SQL' ? ['sqlite'] : ['python', 'javascript']),
+                    defaultLanguage: q.evaluationConfig?.defaultLanguage || (q.questionType === 'SQL' ? 'sqlite' : 'python'),
                     sqlDialect: q.evaluationConfig?.sqlDialect || 'sqlite',
                     schemaDdl: q.evaluationConfig?.schemaDdl || '',
-                    testCases: q.evaluationConfig?.testCases || [],
+                    starterCode: q.evaluationConfig?.starterCode || {},
+                    cpuTimeLimitMs: Number(q.evaluationConfig?.cpuTimeLimitMs) || 2000,
+                    memoryLimitMb: Number(q.evaluationConfig?.memoryLimitMb) || 256,
+                    testCases: (q.evaluationConfig?.testCases || []).map((tc, tcIdx) => ({
+                      input: tc.input || '',
+                      expectedOutput: tc.expectedOutput?.trim() || 'PASS',
+                      isHidden: Boolean(tc.isHidden),
+                      isEnabled: tc.isEnabled !== false,
+                      weight: Number(tc.weight) || 1,
+                      description: tc.description || (tc.isHidden ? `Hidden Evaluation Case #${tcIdx + 1}` : `Public Sample Case #${tcIdx + 1}`),
+                      explanation: tc.explanation || '',
+                    })),
                   }
                 : undefined,
             fileUploadConfig:
@@ -734,8 +1120,9 @@ export default function TestCreatorStudio() {
           })),
         };
 
-        if (editId) {
-          await assessmentService.updateAssessment(editId, payload);
+        const targetId = activeDraftId;
+        if (targetId) {
+          await assessmentService.updateAssessment(targetId, payload);
         } else {
           await assessmentService.createAssessment(payload);
         }
@@ -743,11 +1130,12 @@ export default function TestCreatorStudio() {
         navigate('/instructor/assessments');
       } else {
         // Mock Test publish
+        const activeSubjectId = subjectId || (subjects.length > 0 ? (subjects[0]._id || subjects[0].id) : undefined);
         const payload = {
           title: title.trim(),
           description: description.trim(),
           examination,
-          subjectId,
+          subjectId: activeSubjectId,
           topicIds: selectedTopicIds,
           durationMinutes: Number(durationMinutes) || 60,
           totalMarks: totalMarks || 100,
@@ -757,7 +1145,7 @@ export default function TestCreatorStudio() {
           negativeMarkingRatio: Number(negativeMarkingRatio) || 0.33,
         };
 
-        let targetId = editId;
+        let targetId = activeDraftId;
         if (!targetId) {
           const createRes = await uapQuestionBankService.createMockTest(payload);
           targetId = createRes.data?._id || createRes.data?.id;
@@ -798,8 +1186,12 @@ export default function TestCreatorStudio() {
               <h1 className="text-xl sm:text-2xl font-bold font-display tracking-tight text-slate-900 dark:text-white">
                 Test Creator Studio
               </h1>
-              <Badge variant={testType === 'assessment' ? 'primary' : 'sage'} size="sm">
-                {testType === 'assessment' ? 'Course Assessment' : 'Mock Test'}
+              <Badge
+                variant={testType === 'assessment' ? 'primary' : 'sage'}
+                size="sm"
+                data-testid="badge-test-type"
+              >
+                {testTypeLabel}
               </Badge>
               <Badge variant={status === 'published' ? 'sage' : 'neutral'} size="sm">
                 {status === 'published' ? 'Published' : 'Draft'}
@@ -876,8 +1268,9 @@ export default function TestCreatorStudio() {
               </label>
               <select
                 value={testType}
-                onChange={(e) => setTestType(e.target.value)}
+                onChange={(e) => handleTestTypeChange(e.target.value)}
                 className="w-full p-2.5 text-xs rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:ring-1 focus:ring-brand-primary focus:outline-none"
+                data-testid="select-test-type"
               >
                 <option value="assessment">Course Assessment</option>
                 <option value="mock">Mock Test (Practice)</option>
@@ -1029,6 +1422,173 @@ export default function TestCreatorStudio() {
                   </label>
                 </div>
               </div>
+
+              {/* Certification Configuration */}
+              <div className="pt-4 border-t border-slate-100 dark:border-slate-800 space-y-3.5" data-testid="section-certification">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h3 className="text-xs font-bold text-slate-800 dark:text-slate-200">
+                      Certification
+                    </h3>
+                    <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
+                      Issue verifiable completion certificates to eligible students upon meeting criteria
+                    </p>
+                  </div>
+                  <label className="flex items-center gap-2 cursor-pointer bg-slate-50 dark:bg-slate-800/60 px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 hover:border-brand-primary transition">
+                    <input
+                      type="checkbox"
+                      checked={certificationEnabled}
+                      onChange={(e) => setCertificationEnabled(e.target.checked)}
+                      className="rounded text-brand-primary focus:ring-brand-primary w-4 h-4 cursor-pointer"
+                      data-testid="toggle-enable-certification"
+                    />
+                    <span className="text-xs font-semibold text-slate-800 dark:text-slate-200">
+                      Enable Certification
+                    </span>
+                  </label>
+                </div>
+
+                {certificationEnabled && (
+                  <div
+                    data-testid="panel-certification-config"
+                    className="p-4 rounded-xl border border-brand-primary/20 bg-brand-primary-light/10 dark:bg-brand-primary-dark/10 space-y-3.5"
+                  >
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3.5">
+                      {/* Certificate Title */}
+                      <div className="sm:col-span-2">
+                        <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                          Certificate Title <span className="text-rose-500">*</span>
+                        </label>
+                        <input
+                          type="text"
+                          value={certificateTitle}
+                          onChange={(e) => setCertificateTitle(e.target.value)}
+                          placeholder={title ? `Certificate of Excellence in ${title}` : 'e.g. Certificate of Competence'}
+                          className="w-full p-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800"
+                          data-testid="input-certificate-title"
+                        />
+                      </div>
+
+                      {/* Issuing Organization */}
+                      <div>
+                        <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                          Issuing Organization / Institution
+                        </label>
+                        <input
+                          type="text"
+                          value={issuingOrganization}
+                          onChange={(e) => setIssuingOrganization(e.target.value)}
+                          placeholder="e.g. Unified Assessment Platform"
+                          className="w-full p-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800"
+                          data-testid="input-issuing-org"
+                        />
+                      </div>
+
+                      {/* Certificate Description (Optional) */}
+                      <div className="sm:col-span-2">
+                        <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                          Certificate Description (Optional)
+                        </label>
+                        <input
+                          type="text"
+                          value={certificateDescription}
+                          onChange={(e) => setCertificateDescription(e.target.value)}
+                          placeholder="For successfully completing the assessment requirements and criteria"
+                          className="w-full p-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800"
+                          data-testid="input-certificate-desc"
+                        />
+                      </div>
+
+                      {/* Certificate Template */}
+                      <div>
+                        <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                          Certificate Template
+                        </label>
+                        <select
+                          value={certificateTemplateId || ''}
+                          onChange={(e) => setCertificateTemplateId(e.target.value || null)}
+                          className="w-full p-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800"
+                          data-testid="select-certificate-template"
+                        >
+                          <option value="">Default Institutional Template</option>
+                          {certificateTemplates.map((t) => (
+                            <option key={t._id || t.id} value={t._id || t.id}>
+                              {t.name || t.title} {t.isDefault ? '(Default)' : ''}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+
+                      {/* Signatory Name */}
+                      <div>
+                        <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                          Authorized Signatory Name
+                        </label>
+                        <input
+                          type="text"
+                          value={signatoryName}
+                          onChange={(e) => setSignatoryName(e.target.value)}
+                          placeholder="e.g. Dr. Jane Smith"
+                          className="w-full p-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800"
+                          data-testid="input-signatory-name"
+                        />
+                      </div>
+
+                      {/* Signatory Title */}
+                      <div>
+                        <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                          Signatory Title
+                        </label>
+                        <input
+                          type="text"
+                          value={signatoryTitle}
+                          onChange={(e) => setSignatoryTitle(e.target.value)}
+                          placeholder="e.g. Dean of Academic Affairs"
+                          className="w-full p-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800"
+                          data-testid="input-signatory-title"
+                        />
+                      </div>
+
+                      {/* Minimum Passing Score */}
+                      <div>
+                        <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                          Minimum Passing Score (%)
+                        </label>
+                        <input
+                          type="number"
+                          min="0"
+                          max="100"
+                          value={certPassingPercentage}
+                          onChange={(e) => setCertPassingPercentage(Number(e.target.value))}
+                          className="w-full p-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800"
+                          data-testid="input-cert-passing-score"
+                        />
+                      </div>
+                    </div>
+
+                    {/* Eligibility & Preview Action */}
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-2.5 border-t border-slate-200/60 dark:border-slate-800/60">
+                      <div className="flex items-center gap-2 text-xs text-slate-600 dark:text-slate-300">
+                        <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0" />
+                        <span>
+                          Issue Certificate on Successful Completion (Score ≥ <strong>{certPassingPercentage}%</strong>)
+                        </span>
+                      </div>
+
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        icon={Award}
+                        onClick={() => setIsCertPreviewOpen(true)}
+                        data-testid="btn-preview-certificate"
+                      >
+                        Preview Certificate
+                      </Button>
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
           )}
 
@@ -1152,15 +1712,27 @@ export default function TestCreatorStudio() {
             </Badge>
           </div>
 
-          <Button
-            variant="primary"
-            size="sm"
-            icon={Plus}
-            onClick={() => handleAddQuestion('SINGLE_MCQ')}
-            data-testid="btn-add-question-top"
-          >
-            Add Question
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              icon={Database}
+              onClick={() => setIsQuestionBankModalOpen(true)}
+              data-testid="btn-from-question-bank-top"
+              className="border-brand-primary text-brand-primary hover:bg-brand-primary/10"
+            >
+              From Question Bank
+            </Button>
+            <Button
+              variant="primary"
+              size="sm"
+              icon={Plus}
+              onClick={() => handleAddQuestion('SINGLE_MCQ')}
+              data-testid="btn-add-question-top"
+            >
+              Create New Question
+            </Button>
+          </div>
         </div>
 
         {/* Questions Cards List */}
@@ -1380,112 +1952,36 @@ export default function TestCreatorStudio() {
                       </div>
                     )}
 
-                    {/* 2. Coding Challenge */}
-                    {q.questionType === 'CODING' && (
-                      <div className="space-y-3 pt-1">
-                        <div className="flex items-center justify-between">
-                          <span className="text-xs font-bold text-slate-800 dark:text-slate-200">
-                            Test Cases (Public & Hidden)
-                          </span>
-                          <div className="flex items-center gap-2">
-                            <button
-                              type="button"
-                              onClick={() => handleAddTestCase(qIdx, false)}
-                              className="px-2 py-1 text-[11px] font-semibold rounded-lg border border-slate-200 dark:border-slate-700 text-brand-primary dark:text-brand-peach hover:bg-brand-primary/10 transition"
-                            >
-                              + Public Sample
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => handleAddTestCase(qIdx, true)}
-                              className="px-2 py-1 text-[11px] font-semibold rounded-lg border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition"
-                            >
-                              + Hidden Case
-                            </button>
-                          </div>
-                        </div>
-
-                        <div className="space-y-2">
-                          {(q.evaluationConfig?.testCases || []).map((tc, tcIdx) => (
-                            <div
-                              key={tcIdx}
-                              className={`p-3 rounded-xl border text-xs space-y-2 ${
-                                tc.isHidden
-                                  ? 'border-slate-300 dark:border-slate-700 bg-slate-100/50 dark:bg-slate-800/40'
-                                  : 'border-slate-200 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-800/20'
-                              }`}
-                            >
-                              <div className="flex items-center justify-between">
-                                <span
-                                  className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${
-                                    tc.isHidden
-                                      ? 'bg-slate-200 text-slate-800 dark:bg-slate-700 dark:text-slate-200'
-                                      : 'bg-brand-primary/10 text-brand-primary dark:text-brand-peach'
-                                  }`}
-                                >
-                                  {tc.isHidden ? 'HIDDEN EVALUATION CASE' : 'PUBLIC SAMPLE CASE'} #{tcIdx + 1}
-                                </span>
-                                <div className="flex items-center gap-1.5">
-                                  <label className="text-[11px] text-slate-500">Weight:</label>
-                                  <input
-                                    type="number"
-                                    min="1"
-                                    value={tc.weight || 1}
-                                    onChange={(e) => handleUpdateTestCase(qIdx, tcIdx, 'weight', Number(e.target.value))}
-                                    className="w-12 p-0.5 text-center rounded border border-slate-300 dark:border-slate-700 text-xs"
-                                  />
-                                  <button
-                                    type="button"
-                                    onClick={() => handleRemoveTestCase(qIdx, tcIdx)}
-                                    className="text-slate-400 hover:text-rose-500 p-1"
-                                  >
-                                    <Trash2 className="w-3 h-3" />
-                                  </button>
-                                </div>
-                              </div>
-
-                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                                <div>
-                                  <label className="text-[10px] text-slate-500 font-medium">Input (stdin):</label>
-                                  <textarea
-                                    rows={2}
-                                    value={tc.input || ''}
-                                    onChange={(e) => handleUpdateTestCase(qIdx, tcIdx, 'input', e.target.value)}
-                                    className="w-full p-1.5 rounded border border-slate-300 dark:border-slate-700 font-mono text-[11px] bg-white dark:bg-slate-800"
-                                  />
-                                </div>
-                                <div>
-                                  <label className="text-[10px] text-slate-500 font-medium">Expected Output (stdout):</label>
-                                  <textarea
-                                    rows={2}
-                                    value={tc.expectedOutput || ''}
-                                    onChange={(e) => handleUpdateTestCase(qIdx, tcIdx, 'expectedOutput', e.target.value)}
-                                    className="w-full p-1.5 rounded border border-slate-300 dark:border-slate-700 font-mono text-[11px] bg-white dark:bg-slate-800"
-                                  />
-                                </div>
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-
-                    {/* 3. SQL Query Challenge */}
-                    {q.questionType === 'SQL' && (
-                      <div className="space-y-3 pt-1">
-                        <span className="text-xs font-bold text-slate-800 dark:text-slate-200">
-                          SQL Database Setup & Test Script
-                        </span>
-                        <div>
-                          <label className="text-[10px] text-slate-500 font-medium">Schema DDL Setup Script:</label>
-                          <textarea
-                            rows={3}
-                            value={q.evaluationConfig?.schemaDdl || ''}
-                            onChange={(e) => updateEvaluationConfig(qIdx, 'schemaDdl', e.target.value)}
-                            placeholder="CREATE TABLE students (id INT PRIMARY KEY, name TEXT, gpa REAL); INSERT INTO students VALUES (1, 'Alice', 3.9);"
-                            className="w-full p-2 font-mono text-[11px] rounded-lg border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800"
-                          />
-                        </div>
+                    {/* 2. Coding Challenge & SQL Challenge with Full Faculty IDE & Test Cases */}
+                    {(q.questionType === 'CODING' || q.questionType === 'SQL') && (
+                      <div className="pt-1">
+                        <FacultyCodeIDE
+                          question={{
+                            ...q,
+                            type: q.questionType === 'SQL' ? 'sql' : 'code',
+                            questionText: q.statement || q.evaluationConfig?.problemDescription || q.evaluationConfig?.problemTitle || '',
+                            points: q.marks,
+                            codingConfig: {
+                              ...(q.evaluationConfig || {}),
+                              executionCategory: q.questionType === 'SQL' ? 'sql' : 'code',
+                              allowedLanguages: q.evaluationConfig?.allowedLanguages || (q.questionType === 'SQL' ? ['sqlite'] : ['python', 'javascript']),
+                              defaultLanguage: q.evaluationConfig?.defaultLanguage || (q.questionType === 'SQL' ? 'sqlite' : 'python'),
+                              testCases: (q.evaluationConfig?.testCases || []).map((tc, idx) => ({
+                                id: tc.id || `tc-${idx + 1}`,
+                                description: tc.description || (tc.isHidden ? `Hidden Evaluation Case #${idx + 1}` : `Public Sample Case #${idx + 1}`),
+                                input: tc.input || '',
+                                expectedOutput: tc.expectedOutput?.trim() || 'PASS',
+                                isHidden: Boolean(tc.isHidden),
+                                isEnabled: tc.isEnabled !== false,
+                                weight: Number(tc.weight) || 1,
+                                explanation: tc.explanation || '',
+                              })),
+                            },
+                          }}
+                          qIndex={qIdx}
+                          onUpdateQuestion={handleUpdateQuestionFromIDE}
+                          onUpdateCodingConfig={updateCodingConfig}
+                        />
                       </div>
                     )}
 
@@ -1555,17 +2051,26 @@ export default function TestCreatorStudio() {
           })}
         </div>
 
-        {/* Add Question Button at Bottom of Questions List */}
-        <div className="pt-2">
+        {/* Add Question Actions at Bottom of Questions List */}
+        <div className="pt-2 flex flex-wrap items-center gap-3">
           <Button
-            variant="outline"
+            variant="primary"
             size="md"
             icon={Plus}
             onClick={() => handleAddQuestion('SINGLE_MCQ')}
-            className="w-full justify-center border-dashed hover:border-brand-primary hover:bg-brand-primary/5"
             data-testid="btn-add-question-bottom"
           >
-            Add Question
+            Create New Question
+          </Button>
+          <Button
+            variant="outline"
+            size="md"
+            icon={Database}
+            onClick={() => setIsQuestionBankModalOpen(true)}
+            data-testid="btn-from-bank-bottom"
+            className="border-brand-primary text-brand-primary hover:bg-brand-primary/10"
+          >
+            From Question Bank
           </Button>
         </div>
       </div>
@@ -1662,28 +2167,124 @@ export default function TestCreatorStudio() {
                   </div>
                 )}
 
-                {/* Coding challenge preview: ONLY public cases shown, hidden cases are strictly hidden */}
-                {questions[previewQuestionIndex].questionType === 'CODING' && (
-                  <div className="space-y-3 pt-2">
-                    <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800/40 border border-slate-200 dark:border-slate-700 space-y-2">
-                      <span className="text-xs font-bold text-slate-800 dark:text-slate-200 block">
-                        Sample Public Test Cases
-                      </span>
-                      {(questions[previewQuestionIndex].evaluationConfig?.testCases || [])
-                        .filter((tc) => !tc.isHidden)
-                        .map((tc, tci) => (
-                          <div key={tci} className="text-xs font-mono p-2 rounded bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800">
-                            <div><strong className="text-slate-500">Input:</strong> {tc.input}</div>
-                            <div><strong className="text-slate-500">Expected:</strong> {tc.expectedOutput}</div>
-                          </div>
-                        ))}
-                    </div>
+                {/* Coding & SQL challenge preview using StudentCodeIDE */}
+                {(questions[previewQuestionIndex].questionType === 'CODING' ||
+                  questions[previewQuestionIndex].questionType === 'SQL') && (
+                  <div className="pt-2">
+                    <StudentCodeIDE
+                      question={{
+                        _id: questions[previewQuestionIndex].clientId,
+                        type: questions[previewQuestionIndex].questionType === 'SQL' ? 'sql' : 'code',
+                        questionText: questions[previewQuestionIndex].statement || questions[previewQuestionIndex].evaluationConfig?.problemDescription || questions[previewQuestionIndex].evaluationConfig?.problemTitle || '',
+                        codingConfig: {
+                          ...(questions[previewQuestionIndex].evaluationConfig || {}),
+                          // Hidden test cases are strictly filtered out
+                          testCases: (questions[previewQuestionIndex].evaluationConfig?.testCases || []).filter((tc) => !tc.isHidden),
+                        },
+                      }}
+                      activeLanguage={previewLang}
+                      onLanguageChange={setPreviewLang}
+                      code={previewCode}
+                      onCodeChange={setPreviewCode}
+                      onResetCode={() => {
+                        const activeQ = questions[previewQuestionIndex];
+                        const cfg = activeQ?.evaluationConfig || {};
+                        const def = (cfg.starterCode && cfg.starterCode[previewLang]) || '';
+                        setPreviewCode(def);
+                      }}
+                      onRunCode={handlePreviewRunCode}
+                      isExecuting={previewIsExecuting}
+                      executionResult={previewExecutionResult}
+                      customStdin={previewCustomStdin}
+                      onCustomStdinChange={setPreviewCustomStdin}
+                      showCustomStdin={previewShowCustomStdin}
+                      onToggleCustomStdin={() => setPreviewShowCustomStdin((prev) => !prev)}
+                      onClearOutput={() => setPreviewExecutionResult(null)}
+                    />
                   </div>
                 )}
               </div>
             )}
           </div>
         </Modal>
+      )}
+
+      {/* Question Bank Selection Drawer / Modal */}
+      <QuestionBankPickerModal
+        isOpen={isQuestionBankModalOpen}
+        onClose={() => setIsQuestionBankModalOpen(false)}
+        onSelectQuestions={handleImportFromQuestionBank}
+        existingQuestions={questions}
+      />
+
+      {/* Certificate Preview Modal */}
+      {isCertPreviewOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm"
+          data-testid="modal-certificate-preview"
+        >
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl max-w-2xl w-full p-6 sm:p-8 shadow-warm-lg space-y-6 relative overflow-hidden">
+            <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
+              <div className="flex items-center gap-2">
+                <Award className="w-5 h-5 text-amber-500" />
+                <h3 className="text-base font-bold text-slate-900 dark:text-white">
+                  Certificate Preview
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsCertPreviewOpen(false)}
+                className="p-1.5 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Certificate Frame Preview */}
+            <div className="p-8 sm:p-10 rounded-2xl border-4 border-double border-amber-600/40 bg-gradient-to-b from-amber-50/40 to-white dark:from-slate-900 dark:to-slate-800/80 text-center space-y-4 shadow-sm relative">
+              <div className="uppercase tracking-widest text-[11px] font-bold text-slate-500 dark:text-slate-400">
+                {issuingOrganization || 'Unified Assessment Platform'}
+              </div>
+              <h2 className="text-2xl sm:text-3xl font-display font-extrabold text-slate-900 dark:text-white tracking-tight">
+                {certificateTitle || (title ? `Certificate of Excellence in ${title}` : 'Certificate of Completion')}
+              </h2>
+              <div className="text-xs text-slate-400 uppercase tracking-widest">
+                This certificate is proudly awarded to
+              </div>
+              <div className="text-xl sm:text-2xl font-bold font-serif text-brand-primary dark:text-brand-peach border-b border-brand-primary/30 pb-2 inline-block px-8">
+                Jane Doe (Student)
+              </div>
+              <p className="text-xs text-slate-600 dark:text-slate-300 max-w-md mx-auto pt-1">
+                {certificateDescription || `For successfully completing the course assessment "${title || 'Sample Assessment'}" and meeting the qualification score threshold.`}
+              </p>
+
+              <div className="pt-6 flex items-end justify-between border-t border-slate-200 dark:border-slate-700 text-left text-xs">
+                <div>
+                  <div className="font-semibold text-slate-800 dark:text-slate-200">
+                    {signatoryName || 'Dr. Jane Smith'}
+                  </div>
+                  <div className="text-[11px] text-slate-500">
+                    {signatoryTitle || 'Dean of Academic Affairs'}
+                  </div>
+                </div>
+                <div className="text-right">
+                  <div className="text-[11px] text-slate-400 font-mono">
+                    ID: CERT-2026-PREVIEW
+                  </div>
+                  <div className="text-[10px] text-emerald-600 dark:text-emerald-400 font-semibold flex items-center gap-1 justify-end">
+                    <CheckCircle2 className="w-3.5 h-3.5" /> Verified Credential
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex justify-end">
+              <Button variant="outline" size="sm" onClick={() => setIsCertPreviewOpen(false)}>
+                Close Preview
+              </Button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

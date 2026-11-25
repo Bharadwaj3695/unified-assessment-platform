@@ -146,6 +146,22 @@ class AssessmentController {
       next(err);
     }
   }
+
+  // Attaches existing questions from Question Bank to an assessment
+  async addQuestionsFromBank(req, res, next) {
+    try {
+      const isAdmin = req.user.role === 'admin';
+      const result = await assessmentService.addQuestionsFromBank(
+        req.params.id,
+        req.user.id,
+        req.body.questionIds || [],
+        isAdmin
+      );
+      return successResponse(res, result.message, result);
+    } catch (err) {
+      next(err);
+    }
+  }
 }
 
 // Export singleton instance of AssessmentController

@@ -72,6 +72,12 @@ export const assessmentService = {
     const res = await api.get('/assessments/certificate-templates');
     return res.data;
   },
+
+  // Attaches selected Question Bank questions to an existing assessment
+  addQuestionsFromBank: async (assessmentId, questionIds) => {
+    const res = await api.post(`/assessments/${assessmentId}/questions/from-bank`, { questionIds });
+    return res.data;
+  },
 };
 
 // Export assessmentService as default export

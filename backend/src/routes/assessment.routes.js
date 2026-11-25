@@ -127,6 +127,14 @@ router.put(
   assessmentController.updateAssessment
 );
 
+// Attach questions from Question Bank (POST /api/assessments/:id/questions/from-bank)
+router.post(
+  '/:id/questions/from-bank',
+  authenticate,
+  authorize('instructor', 'admin'),
+  assessmentController.addQuestionsFromBank
+);
+
 // Delete or archive assessment endpoint (DELETE /api/assessments/:id) restricted to author instructor or admin
 router.delete(
   '/:id',

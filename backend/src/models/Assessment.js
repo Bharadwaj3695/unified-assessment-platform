@@ -240,6 +240,18 @@ const assessmentSchema = new mongoose.Schema(
         trim: true,
         default: 'Dean of Academic Affairs',
       },
+      // Issuing organization or institution name displayed on certificate
+      issuingOrganization: {
+        type: String,
+        trim: true,
+        default: 'Unified Assessment Platform',
+      },
+      // Optional description or achievement note on certificate
+      description: {
+        type: String,
+        trim: true,
+        default: '',
+      },
     },
   },
   {

@@ -1,16 +1,43 @@
-import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { BookOpen, Sliders, ArrowRight, CheckCircle2, Circle } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
+import {
+  BookOpen,
+  Sliders,
+  Sparkles,
+  Users,
+  CheckCircle2,
+  Circle,
+  ArrowRight,
+} from 'lucide-react';
 import Badge from '../../components/ui/Badge';
 import Button from '../../components/ui/Button';
 
 /**
  * Faculty Create Test Hub
- * Compact, concise, action-focused test type selector.
+ *
+ * Layout Blueprint:
+ * - Breadcrumb: Faculty Workspace / Create Test
+ * - Title: Create Test
+ * - Subtitle: Select test type
+ * - Primary Test Creation Card:
+ *   - Options: Course Assessment & Mock Test inside ONE shared card
+ *   - Both selectable with clear highlight
+ *   - One "Launch" button inside the same card
+ * - Interview Options:
+ *   - AI Mock Interview & Faculty Interview separately as "Coming Soon"
  */
 export default function CreateTest() {
   const navigate = useNavigate();
-  const [selectedTestType, setSelectedTestType] = useState('assessment');
+  const [searchParams] = useSearchParams();
+  const initialType = searchParams.get('type') === 'mock' ? 'mock' : 'assessment';
+  const [selectedTestType, setSelectedTestType] = useState(initialType);
+
+  useEffect(() => {
+    const type = searchParams.get('type');
+    if (type === 'mock' || type === 'assessment') {
+      setSelectedTestType(type);
+    }
+  }, [searchParams.get('type')]);
 
   const handleLaunch = () => {
     navigate(`/instructor/test-creator?type=${selectedTestType}`);
@@ -33,143 +60,174 @@ export default function CreateTest() {
         </p>
       </div>
 
-      {/* Two Selectable Cards Grid */}
+      {/* Primary Test Creation Card (Contains both Assessment & Mock Test) */}
       <div
-        data-testid="create-test-two-cards-grid"
-        className="grid grid-cols-1 md:grid-cols-2 gap-5"
+        data-testid="card-primary-test-creation"
+        className="rounded-2xl border border-surface-light-border dark:border-surface-dark-border bg-white dark:bg-surface-dark p-6 shadow-warm-xs space-y-6"
       >
-        {/* Card 1: Assessment */}
-        <div
-          data-testid="card-assessment"
-          onClick={() => setSelectedTestType('assessment')}
-          className={`cursor-pointer rounded-2xl border p-5 sm:p-6 transition-all shadow-warm-xs flex flex-col justify-between ${
-            selectedTestType === 'assessment'
-              ? 'border-brand-primary ring-2 ring-brand-primary/20 bg-brand-primary-light/20 dark:bg-brand-primary-dark/20'
-              : 'border-surface-light-border dark:border-surface-dark-border bg-white dark:bg-surface-dark hover:border-brand-primary/40'
-          }`}
-        >
-          <div>
-            <div className="flex items-start justify-between mb-4">
-              <div className="w-11 h-11 rounded-xl bg-brand-primary-light dark:bg-brand-primary-dark text-brand-primary flex items-center justify-center shadow-warm-xs">
-                <BookOpen className="w-5 h-5" />
-              </div>
-              <div className="flex items-center gap-2">
+        <div className="border-b border-slate-100 dark:border-slate-800 pb-3">
+          <h2 className="text-lg font-bold font-display text-slate-900 dark:text-white">
+            Select Test Type
+          </h2>
+          <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+            Choose the examination format to open in Test Creator Studio
+          </p>
+        </div>
+
+        {/* Selectable Options List */}
+        <div className="space-y-3">
+          {/* Option 1: Course Assessment */}
+          <div
+            data-testid="option-course-assessment"
+            onClick={() => setSelectedTestType('assessment')}
+            className={`cursor-pointer rounded-xl border p-4 sm:p-5 transition-all flex items-start gap-4 ${
+              selectedTestType === 'assessment'
+                ? 'border-brand-primary ring-2 ring-brand-primary/20 bg-brand-primary-light/20 dark:bg-brand-primary-dark/20'
+                : 'border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/30 hover:border-slate-300 dark:hover:border-slate-700'
+            }`}
+          >
+            <div className="pt-0.5">
+              {selectedTestType === 'assessment' ? (
+                <CheckCircle2 className="w-5 h-5 text-brand-primary shrink-0" />
+              ) : (
+                <Circle className="w-5 h-5 text-slate-400 dark:text-slate-600 shrink-0" />
+              )}
+            </div>
+
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="text-sm sm:text-base font-bold text-slate-900 dark:text-white">
+                  Course Assessment
+                </span>
                 <Badge variant="primary" size="sm">
                   Assessment
                 </Badge>
-                {selectedTestType === 'assessment' ? (
-                  <CheckCircle2 className="w-5 h-5 text-brand-primary" />
-                ) : (
-                  <Circle className="w-5 h-5 text-slate-300 dark:text-slate-600" />
-                )}
               </div>
+              <p className="text-xs text-slate-600 dark:text-slate-400 mt-1">
+                Classroom, course, and institutional examinations with scheduling, cohorts, and grading rules.
+              </p>
             </div>
 
-            <h2 className="text-lg sm:text-xl font-bold font-display tracking-tight text-slate-900 dark:text-white">
-              Assessment
-            </h2>
-            <p className="text-xs font-medium text-brand-primary dark:text-brand-peach mt-0.5">
-              Course assessment
-            </p>
-            <p className="text-xs text-slate-600 dark:text-slate-400 mt-2">
-              Classroom, course, and institutional examinations.
-            </p>
+            <div className="hidden sm:flex items-center justify-center w-9 h-9 rounded-xl bg-brand-primary-light dark:bg-brand-primary-dark text-brand-primary shrink-0">
+              <BookOpen className="w-4 h-4" />
+            </div>
           </div>
 
-          <div className="mt-5 pt-4 border-t border-slate-100 dark:border-slate-800 flex justify-end">
-            <Button
-              variant={selectedTestType === 'assessment' ? 'primary' : 'outline'}
-              size="sm"
-              onClick={(e) => {
-                e.stopPropagation();
-                setSelectedTestType('assessment');
-                navigate('/instructor/test-creator?type=assessment');
-              }}
-            >
-              Launch
-            </Button>
+          {/* Option 2: Mock Test */}
+          <div
+            data-testid="option-mock-test"
+            onClick={() => setSelectedTestType('mock')}
+            className={`cursor-pointer rounded-xl border p-4 sm:p-5 transition-all flex items-start gap-4 ${
+              selectedTestType === 'mock'
+                ? 'border-brand-sage ring-2 ring-brand-sage/20 bg-brand-sage-light/20 dark:bg-brand-sage-dark/20'
+                : 'border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/30 hover:border-slate-300 dark:hover:border-slate-700'
+            }`}
+          >
+            <div className="pt-0.5">
+              {selectedTestType === 'mock' ? (
+                <CheckCircle2 className="w-5 h-5 text-brand-sage shrink-0" />
+              ) : (
+                <Circle className="w-5 h-5 text-slate-400 dark:text-slate-600 shrink-0" />
+              )}
+            </div>
+
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="text-sm sm:text-base font-bold text-slate-900 dark:text-white">
+                  Mock Test
+                </span>
+                <Badge variant="sage" size="sm">
+                  Practice test
+                </Badge>
+              </div>
+              <p className="text-xs text-slate-600 dark:text-slate-400 mt-1">
+                Syllabus-calibrated practice examinations with blueprint distribution and negative marking.
+              </p>
+            </div>
+
+            <div className="hidden sm:flex items-center justify-center w-9 h-9 rounded-xl bg-brand-sage-light dark:bg-brand-sage-dark text-brand-sage shrink-0">
+              <Sliders className="w-4 h-4" />
+            </div>
           </div>
         </div>
 
-        {/* Card 2: Mock Test */}
-        <div
-          data-testid="card-mock-test"
-          onClick={() => setSelectedTestType('mock')}
-          className={`cursor-pointer rounded-2xl border p-5 sm:p-6 transition-all shadow-warm-xs flex flex-col justify-between ${
-            selectedTestType === 'mock'
-              ? 'border-brand-sage ring-2 ring-brand-sage/20 bg-brand-sage-light/20 dark:bg-brand-sage-dark/20'
-              : 'border-surface-light-border dark:border-surface-dark-border bg-white dark:bg-surface-dark hover:border-brand-sage/40'
-          }`}
-        >
-          <div>
-            <div className="flex items-start justify-between mb-4">
-              <div className="w-11 h-11 rounded-xl bg-brand-sage-light dark:bg-brand-sage-dark text-brand-sage flex items-center justify-center shadow-warm-xs">
-                <Sliders className="w-5 h-5" />
-              </div>
-              <div className="flex items-center gap-2">
-                <Badge variant="sage" size="sm">
-                  Mock Test
-                </Badge>
-                {selectedTestType === 'mock' ? (
-                  <CheckCircle2 className="w-5 h-5 text-brand-sage" />
-                ) : (
-                  <Circle className="w-5 h-5 text-slate-300 dark:text-slate-600" />
-                )}
-              </div>
-            </div>
-
-            <h2 className="text-lg sm:text-xl font-bold font-display tracking-tight text-slate-900 dark:text-white">
-              Mock Test
-            </h2>
-            <p className="text-xs font-medium text-brand-sage dark:text-emerald-400 mt-0.5">
-              Practice test
-            </p>
-            <p className="text-xs text-slate-600 dark:text-slate-400 mt-2">
-              Syllabus-calibrated practice examinations and blueprints.
-            </p>
+        {/* Launch Button inside the same card */}
+        <div className="pt-4 border-t border-slate-100 dark:border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="text-xs text-slate-500">
+            Selected format:{' '}
+            <span className="font-bold text-slate-800 dark:text-slate-200">
+              {selectedTestType === 'assessment' ? 'Course Assessment' : 'Mock Test'}
+            </span>
           </div>
-
-          <div className="mt-5 pt-4 border-t border-slate-100 dark:border-slate-800 flex justify-end">
-            <Button
-              variant={selectedTestType === 'mock' ? 'sage' : 'outline'}
-              size="sm"
-              onClick={(e) => {
-                e.stopPropagation();
-                setSelectedTestType('mock');
-                navigate('/instructor/test-creator?type=mock');
-              }}
-            >
-              Launch
-            </Button>
-          </div>
+          <Button
+            variant="primary"
+            size="md"
+            icon={ArrowRight}
+            onClick={handleLaunch}
+            className="w-full sm:w-auto px-8"
+            data-testid="btn-launch-creator"
+          >
+            Launch
+          </Button>
         </div>
       </div>
 
-      {/* Selected Action Bar */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-4 rounded-2xl border border-surface-light-border dark:border-surface-dark-border bg-white dark:bg-surface-dark shadow-warm-xs">
-        <div className="flex items-center gap-2.5">
-          <span className="text-xs font-semibold text-slate-600 dark:text-slate-400">
-            Selected Test Type:
-          </span>
-          <Badge
-            variant={selectedTestType === 'assessment' ? 'primary' : 'sage'}
-            size="md"
-            dot
-          >
-            {selectedTestType === 'assessment' ? 'Course assessment' : 'Practice test'}
-          </Badge>
+      {/* Interview Options (Coming Soon) */}
+      <div className="space-y-3">
+        <div className="flex items-center justify-between">
+          <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+            Interview Assessments
+          </h3>
+          <span className="text-[11px] text-slate-400">Phase 2 Preview</span>
         </div>
 
-        <Button
-          variant="primary"
-          size="md"
-          icon={ArrowRight}
-          iconPosition="right"
-          onClick={handleLaunch}
-          data-testid="btn-launch-creator"
-        >
-          Launch Test Creator
-        </Button>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          {/* Card: AI Mock Interview */}
+          <div
+            data-testid="card-interview-ai"
+            className="rounded-2xl border border-dashed border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/20 p-5 flex items-start gap-3.5 opacity-80"
+          >
+            <div className="w-10 h-10 rounded-xl bg-purple-50 dark:bg-purple-950/40 text-purple-600 dark:text-purple-400 flex items-center justify-center shrink-0">
+              <Sparkles className="w-5 h-5" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center justify-between gap-2 mb-1">
+                <h4 className="text-sm font-bold text-slate-800 dark:text-slate-200">
+                  AI Mock Interview
+                </h4>
+                <Badge variant="neutral" size="sm">
+                  Coming Soon
+                </Badge>
+              </div>
+              <p className="text-xs text-slate-500 dark:text-slate-400">
+                Automated conversational technical interviews with real-time rubric feedback.
+              </p>
+            </div>
+          </div>
+
+          {/* Card: Faculty Interview */}
+          <div
+            data-testid="card-interview-faculty"
+            className="rounded-2xl border border-dashed border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/20 p-5 flex items-start gap-3.5 opacity-80"
+          >
+            <div className="w-10 h-10 rounded-xl bg-blue-50 dark:bg-blue-950/40 text-blue-600 dark:text-blue-400 flex items-center justify-center shrink-0">
+              <Users className="w-5 h-5" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center justify-between gap-2 mb-1">
+                <h4 className="text-sm font-bold text-slate-800 dark:text-slate-200">
+                  Faculty Interview
+                </h4>
+                <Badge variant="neutral" size="sm">
+                  Coming Soon
+                </Badge>
+              </div>
+              <p className="text-xs text-slate-500 dark:text-slate-400">
+                Live one-on-one evaluative faculty interviews with structured assessment rubrics.
+              </p>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   );

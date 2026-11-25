@@ -211,6 +211,7 @@ const AppRoutes = () => {
             <Route path="create-test" element={<CreateTest />} />
             {/* Unified Test Creator Studio */}
             <Route path="test-creator" element={<TestCreatorStudio />} />
+            <Route path="test-creator/:id" element={<TestCreatorStudio />} />
             {/* Instructor assessments management list */}
             <Route path="assessments" element={<AssessmentsList />} />
             <Route path="tests" element={<AssessmentsList />} />
