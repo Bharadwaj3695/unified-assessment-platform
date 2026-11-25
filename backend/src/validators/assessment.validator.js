@@ -22,8 +22,8 @@ const createAssessmentValidator = [
   body('status').optional().isIn(['draft', 'published', 'archived']).withMessage('Status must be draft, published, or archived'),
   // Validate that questions if provided is an array
   body('questions').optional().isArray().withMessage('Questions must be an array'),
-  // Validate question prompt text within questions array
-  body('questions.*.questionText').optional().trim().notEmpty().withMessage('Question text is required'),
+  // Validate question prompt text within questions array (empty allowed for incomplete drafts; enforced on publish)
+  body('questions.*.questionText').optional({ nullable: true }).isString().withMessage('Question text must be a string'),
   // Validate allowed question type formats
   body('questions.*.type').optional().isIn(['mcq', 'multiple_choice', 'true_false', 'short_answer', 'long_answer', 'code', 'sql', 'file_upload']).withMessage('Invalid question type'),
   // Validate that points per question must be positive integer of at least 1
@@ -105,8 +105,8 @@ const updateAssessmentValidator = [
   body('assignedStudents.*').optional().isMongoId().withMessage('Each assigned student must be a valid User ID'),
   // Validate questions array if supplied
   body('questions').optional().isArray().withMessage('Questions must be an array'),
-  // Validate question prompt text within questions array
-  body('questions.*.questionText').optional().trim().notEmpty().withMessage('Question text is required'),
+  // Validate question prompt text within questions array (empty allowed for incomplete drafts; enforced on publish)
+  body('questions.*.questionText').optional({ nullable: true }).isString().withMessage('Question text must be a string'),
   // Validate allowed question type formats
   body('questions.*.type').optional().isIn(['mcq', 'multiple_choice', 'true_false', 'short_answer', 'long_answer', 'code', 'sql', 'file_upload']).withMessage('Invalid question type'),
   // Validate that points per question must be positive integer of at least 1

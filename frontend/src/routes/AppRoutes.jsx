@@ -50,6 +50,8 @@ import MockTestAnalytics from '../pages/student/MockTestAnalytics';
 import StudentProfile from '../pages/student/Profile';
 // Import the student certifications and earned credential awards page component
 import StudentCertifications from '../pages/student/Certifications';
+// Import the shared individual exam performance report page (Student & Faculty)
+import ExamPerformanceReport from '../pages/common/ExamPerformanceReport';
 // Import the instructor main dashboard page component
 import InstructorDashboard from '../pages/instructor/Dashboard';
 // Import the dedicated multi-paradigm test creation hub
@@ -188,6 +190,7 @@ const AppRoutes = () => {
             <Route path="results" element={<StudentDashboard />} />
             <Route path="results/:id" element={<StudentDashboard />} />
             <Route path="progress" element={<StudentDashboard />} />
+            <Route path="reports/:attemptType/:attemptId" element={<ExamPerformanceReport />} />
             {/* Student personal profile, credentials, and MFA settings */}
             <Route path="profile" element={<StudentProfile />} />
             {/* Default student index redirecting root /student path to /student/dashboard */}
@@ -225,6 +228,8 @@ const AppRoutes = () => {
             <Route path="evaluate/:id" element={<EvaluationStudio />} />
             {/* Mock test manual evaluation studio */}
             <Route path="mock-tests/evaluate/:attemptId" element={<MockTestEvaluationStudio />} />
+            {/* Individual student exam performance report */}
+            <Route path="reports/:attemptType/:attemptId" element={<ExamPerformanceReport />} />
             {/* Assessment metrics and cohort analytics breakdown by assessment ID */}
             <Route path="analytics/:id" element={<AssessmentAnalytics />} />
             {/* Centralized Question Bank Hub & Studio */}

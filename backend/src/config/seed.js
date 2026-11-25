@@ -1737,6 +1737,9 @@ const seedDatabase = async () => {
       passed: true,
       // Submission evaluation status
       status: 'evaluated',
+      evaluationStatus: 'completed',
+      resultStatus: 'passed',
+      finalScore: 95,
       // Submission start time (1 hour ago)
       startedAt: new Date(Date.now() - 3600000),
       // Submission delivery time (30 minutes ago)

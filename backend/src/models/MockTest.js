@@ -153,6 +153,19 @@ const mockTestSchema = new mongoose.Schema(
       default: 'DRAFT',
       index: true,
     },
+    draftStatus: {
+      type: String,
+      enum: ['READY', 'INCOMPLETE'],
+      default: 'READY',
+    },
+    isIncomplete: {
+      type: Boolean,
+      default: false,
+    },
+    draftQuestions: {
+      type: [mongoose.Schema.Types.Mixed],
+      default: [],
+    },
     publishedAt: {
       type: Date,
       default: null,

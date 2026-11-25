@@ -3,6 +3,7 @@ import { useParams, useNavigate, Link } from 'react-router-dom';
 import { toast } from 'react-toastify';
 import instructorService from '../../services/instructor.service';
 import submissionService from '../../services/submission.service';
+import analyticsService from '../../services/analytics.service';
 import sanitizeHtml from '../../utils/sanitize';
 import Card from '../../components/ui/Card';
 import Button from '../../components/ui/Button';
@@ -388,6 +389,29 @@ const EvaluationStudio = () => {
         </div>
 
         <div className="flex flex-wrap items-center gap-2.5 self-start sm:self-auto">
+          {submission.evaluationStatus === 'completed' && (
+            <>
+              <Link to={`/instructor/reports/assessment/${submissionId}`}>
+                <Button type="button" variant="outline" size="md" icon={FileText}>
+                  View Report
+                </Button>
+              </Link>
+              <Button
+                type="button"
+                variant="outline"
+                size="md"
+                icon={Download}
+                onClick={() =>
+                  analyticsService
+                    .downloadIndividualExamReportPdf('assessment', submissionId)
+                    .then(() => toast.success('Performance report PDF downloaded.'))
+                    .catch((err) => toast.error(err.message || 'Failed to download PDF'))
+                }
+              >
+                Download PDF
+              </Button>
+            </>
+          )}
           <Button
             type="button"
             variant="outline"

@@ -22,7 +22,10 @@ import {
   X,
   Award,
   RefreshCw,
+  FileText,
+  Download,
 } from 'lucide-react';
+import analyticsService from '../../services/analytics.service';
 
 const SubmissionsQueue = () => {
   const navigate = useNavigate();
@@ -309,14 +312,45 @@ const SubmissionsQueue = () => {
                     </TableCell>
 
                     <TableCell className="text-right">
-                      <Link to={`/instructor/evaluate/${subId}`}>
-                        <Button
-                          variant={isPending ? 'primary' : 'outline'}
-                          size="sm"
-                        >
-                          {isPending ? 'Evaluate' : 'Review'}
-                        </Button>
-                      </Link>
+                      <div className="flex items-center justify-end gap-1.5 flex-wrap">
+                        {!isPending && (
+                          <>
+                            <Link to={`/instructor/reports/assessment/${subId}`}>
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                icon={FileText}
+                                data-testid={`btn-faculty-view-report-${subId}`}
+                              >
+                                View Report
+                              </Button>
+                            </Link>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              icon={Download}
+                              onClick={() =>
+                                analyticsService
+                                  .downloadIndividualExamReportPdf('assessment', subId)
+                                  .then(() => toast.success('Performance report PDF downloaded.'))
+                                  .catch((err) => toast.error(err.message || 'Failed to download PDF'))
+                              }
+                              data-testid={`btn-faculty-download-pdf-${subId}`}
+                            >
+                              Download PDF
+                            </Button>
+                          </>
+                        )}
+                        <Link to={`/instructor/evaluate/${subId}`}>
+                          <Button
+                            variant={isPending ? 'primary' : 'outline'}
+                            size="sm"
+                          >
+                            {isPending ? 'Evaluate' : 'Review'}
+                          </Button>
+                        </Link>
+                      </div>
                     </TableCell>
                   </TableRow>
                 );

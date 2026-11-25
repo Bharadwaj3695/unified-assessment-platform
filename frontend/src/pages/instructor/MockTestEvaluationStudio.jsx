@@ -17,6 +17,7 @@ import {
 } from 'lucide-react';
 import { toast } from 'react-toastify';
 import uapQuestionBankService from '../../services/uapQuestionBank.service';
+import analyticsService from '../../services/analytics.service';
 
 export default function MockTestEvaluationStudio() {
   const { attemptId } = useParams();
@@ -256,6 +257,31 @@ export default function MockTestEvaluationStudio() {
         </button>
 
         <div className="flex items-center gap-2">
+          {isFinalized && (
+            <>
+              <button
+                type="button"
+                onClick={() => navigate(`/instructor/reports/mock_test/${attemptId}`)}
+                className="px-3 py-1.5 rounded-lg text-xs font-semibold border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center gap-1.5"
+              >
+                <FileText className="w-3.5 h-3.5" />
+                View Report
+              </button>
+              <button
+                type="button"
+                onClick={() =>
+                  analyticsService
+                    .downloadIndividualExamReportPdf('mock_test', attemptId)
+                    .then(() => toast.success('Performance report PDF downloaded.'))
+                    .catch((err) => toast.error(err.message || 'Failed to download PDF'))
+                }
+                className="px-3 py-1.5 rounded-lg text-xs font-semibold border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center gap-1.5"
+              >
+                <Download className="w-3.5 h-3.5" />
+                Download PDF
+              </button>
+            </>
+          )}
           <span
             className={`px-3 py-1 rounded-full text-xs font-bold ${
               isFinalized

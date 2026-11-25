@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { useNavigate, useSearchParams, useParams, Link } from 'react-router-dom';
 import {
   Save,
@@ -38,6 +38,11 @@ import QuestionBankPickerModal from '../../components/modals/QuestionBankPickerM
 import uapQuestionBankService from '../../services/uapQuestionBank.service';
 import { assessmentService } from '../../services/assessment.service';
 import instructorService from '../../services/instructor.service';
+import {
+  getQuestionStableId,
+  formatEmptyQuestionMessage,
+  validateQuestionStatements,
+} from '../../utils/questionValidation';
 
 // Supported Question Types aligned with Mock Bank Studio
 const QUESTION_TYPES = [
@@ -52,7 +57,6 @@ const QUESTION_TYPES = [
   { id: 'FILE_UPLOAD', label: 'Document / File Upload', icon: UploadCloud },
 ];
 
-const EXAM_CATEGORIES = ['GATE', 'Placement', 'Institutional', 'Competitive', 'Practice', 'General'];
 const DIFFICULTIES = ['EASY', 'MEDIUM', 'HARD'];
 const ASSESSMENT_CATEGORIES = ['Computer Science', 'Engineering', 'Mathematics', 'General'];
 
@@ -182,7 +186,7 @@ export default function TestCreatorStudio() {
   const [randomization, setRandomization] = useState(false);
 
   // Mock-specific fields
-  const [examination, setExamination] = useState('GATE');
+  const [examination, setExamination] = useState('');
   const [selectedTopicIds, setSelectedTopicIds] = useState([]);
   const [difficultyDistribution, setDifficultyDistribution] = useState({ easy: 30, medium: 50, hard: 20 });
   const [negativeMarking, setNegativeMarking] = useState(true);
@@ -211,6 +215,10 @@ export default function TestCreatorStudio() {
   const [isPublishing, setIsPublishing] = useState(false);
   const [isPreviewOpen, setIsPreviewOpen] = useState(false);
   const [previewQuestionIndex, setPreviewQuestionIndex] = useState(0);
+  const [isIncompleteDraft, setIsIncompleteDraft] = useState(false);
+  const [validationErrorsById, setValidationErrorsById] = useState({});
+  const questionCardRefs = useRef({});
+  const statementInputRefs = useRef({});
 
   // Student Preview IDE state
   const [previewCode, setPreviewCode] = useState('');
@@ -326,6 +334,7 @@ export default function TestCreatorStudio() {
           setSubjectId(asmt.subjectId?._id || asmt.subjectId || '');
           setDurationMinutes(asmt.durationMinutes || 60);
           setStatus((asmt.status || 'draft').toLowerCase());
+          setIsIncompleteDraft(Boolean(asmt.isIncomplete || asmt.draftStatus === 'incomplete'));
           setAssessmentCategory(asmt.category || 'General');
           setPassingScore(asmt.passingScore || 60);
           setAccessType(asmt.accessType || 'public');
@@ -343,17 +352,20 @@ export default function TestCreatorStudio() {
           }
           if (asmt.questions && asmt.questions.length > 0) {
             setQuestions(
-              asmt.questions.map((q, idx) => ({
-                clientId: `q_loaded_${idx}`,
+              asmt.questions.map((q) => ({
+                clientId: q.clientId || q._id?.toString() || q.id || generateClientId(),
                 bankQuestionId: q.bankQuestionId || null,
-                statement: q.questionText || q.statement || '',
+                statement: q.questionText ?? q.statement ?? '',
                 questionType: mapBackendTypeToStudio(q.type),
                 difficulty: q.difficulty || 'MEDIUM',
                 marks: q.points || 5,
                 negativeMarks: 0,
                 explanation: q.explanation || '',
                 isCollapsed: false,
-                options: q.options || [],
+                options: (q.options || []).map((o) => ({
+                  ...o,
+                  isCorrect: Boolean(o.isCorrect || (q.correctAnswer && o.id === q.correctAnswer)),
+                })),
                 answerKey: q.correctAnswer || 'opt_1',
                 evaluationConfig: {
                   allowedLanguages: q.codingConfig?.allowedLanguages || ['python', 'javascript'],
@@ -372,23 +384,25 @@ export default function TestCreatorStudio() {
           const mock = loadedData;
           setTitle(mock.title || '');
           setDescription(mock.description || '');
-          setExamination(mock.examination || 'GATE');
+          const loadedExam = mock.examination !== undefined && mock.examination !== null ? mock.examination : '';
+          setExamination(loadedExam);
           setSubjectId(mock.subjectId?._id || mock.subjectId || '');
           setSelectedTopicIds((mock.topicIds || []).map((t) => t._id || t));
           setDurationMinutes(mock.durationMinutes || 60);
           setStatus((mock.status || 'DRAFT').toLowerCase());
+          setIsIncompleteDraft(Boolean(mock.isIncomplete || mock.draftStatus === 'INCOMPLETE'));
           setDifficultyDistribution(mock.difficultyDistribution || { easy: 30, medium: 50, hard: 20 });
           setNegativeMarking(Boolean(mock.negativeMarking));
           setNegativeMarkingRatio(Number(mock.negativeMarkingRatio) || 0.33);
 
           if (mock.resolvedQuestions && mock.resolvedQuestions.length > 0) {
             setQuestions(
-              mock.resolvedQuestions.map((rq, idx) => {
+              mock.resolvedQuestions.map((rq) => {
                 const snap = rq.questionSnapshot || {};
                 return {
-                  clientId: `q_loaded_mock_${idx}`,
+                  clientId: rq.questionId?.toString() || rq._id?.toString() || snap._id?.toString() || generateClientId(),
                   bankQuestionId: rq.questionId || snap._id || null,
-                  statement: snap.statement || snap.questionText || '',
+                  statement: snap.statement ?? snap.questionText ?? '',
                   questionType: snap.questionType || (snap.type ? snap.type.toUpperCase() : 'SINGLE_MCQ'),
                   difficulty: snap.difficulty || 'MEDIUM',
                   marks: rq.marks || 5,
@@ -400,6 +414,14 @@ export default function TestCreatorStudio() {
                   evaluationConfig: snap.evaluationConfig || snap.codingConfig || {},
                 };
               })
+            );
+          } else if (Array.isArray(mock.draftQuestions) && mock.draftQuestions.length > 0) {
+            setQuestions(
+              mock.draftQuestions.map((dq) => ({
+                ...dq,
+                clientId: dq.clientId || dq._id?.toString() || dq.id || generateClientId(),
+                statement: dq.statement ?? dq.questionText ?? '',
+              }))
             );
           }
         }
@@ -418,6 +440,32 @@ export default function TestCreatorStudio() {
   const totalMarks = useMemo(() => {
     return questions.reduce((acc, q) => acc + (Number(q.marks) || 0), 0);
   }, [questions]);
+
+  // Derived active question validation errors keyed by stable question ID
+  const activeValidationErrors = useMemo(() => {
+    return questions
+      .map((q, idx) => {
+        const qId = getQuestionStableId(q, idx);
+        if (!validationErrorsById[qId]) return null;
+        const number = idx + 1;
+        return {
+          id: qId,
+          number,
+          message: formatEmptyQuestionMessage(number),
+        };
+      })
+      .filter(Boolean);
+  }, [questions, validationErrorsById]);
+
+  const clearQuestionValidationError = (questionId) => {
+    if (!questionId) return;
+    setValidationErrorsById((prev) => {
+      if (!prev[questionId]) return prev;
+      const next = { ...prev };
+      delete next[questionId];
+      return next;
+    });
+  };
 
   // Helper map from backend type to studio type
   const mapBackendTypeToStudio = (backendType) => {
@@ -520,6 +568,10 @@ export default function TestCreatorStudio() {
 
   // Update simple question field
   const updateQuestionField = (idx, field, value) => {
+    if (field === 'statement' && String(value ?? '').trim().length > 0) {
+      const targetId = getQuestionStableId(questions[idx], idx);
+      clearQuestionValidationError(targetId);
+    }
     setQuestions((prev) => {
       const updated = [...prev];
       updated[idx] = { ...updated[idx], [field]: value };
@@ -577,6 +629,10 @@ export default function TestCreatorStudio() {
       toast.warning('A test must have at least one question.');
       return;
     }
+    const removedId = getQuestionStableId(questions[idx], idx);
+    clearQuestionValidationError(removedId);
+    delete questionCardRefs.current[removedId];
+    delete statementInputRefs.current[removedId];
     setQuestions((prev) => prev.filter((_, i) => i !== idx));
     toast.info('Question removed.');
   };
@@ -759,6 +815,10 @@ export default function TestCreatorStudio() {
 
   // Faculty IDE Integration Handlers
   const handleUpdateQuestionFromIDE = (qIdx, field, val) => {
+    if ((field === 'statement' || field === 'questionText') && String(val ?? '').trim().length > 0) {
+      const targetId = getQuestionStableId(questions[qIdx], qIdx);
+      clearQuestionValidationError(targetId);
+    }
     setQuestions((prev) => {
       const updated = [...prev];
       const targetField = field === 'questionText' ? 'statement' : field;
@@ -855,6 +915,100 @@ export default function TestCreatorStudio() {
 
   // --- VALIDATION, SAVE DRAFT & PUBLISH ---
 
+  const scrollToInvalidQuestion = (questionId) => {
+    if (!questionId) return;
+    requestAnimationFrame(() => {
+      setTimeout(() => {
+        const cardEl = questionCardRefs.current[questionId];
+        if (cardEl && typeof cardEl.scrollIntoView === 'function') {
+          cardEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+        const inputEl = statementInputRefs.current[questionId];
+        if (inputEl && typeof inputEl.focus === 'function') {
+          inputEl.focus({ preventScroll: true });
+        }
+      }, 40);
+    });
+  };
+
+  const runStatementValidation = () => {
+    const result = validateQuestionStatements(questions);
+    if (!result.valid) {
+      setValidationErrorsById(result.errorsById);
+      const invalidIdSet = new Set(result.errors.map((e) => e.id));
+      setQuestions((prev) =>
+        prev.map((q, idx) =>
+          invalidIdSet.has(getQuestionStableId(q, idx)) ? { ...q, isCollapsed: false } : q
+        )
+      );
+      scrollToInvalidQuestion(result.firstInvalidId);
+    } else {
+      setValidationErrorsById({});
+    }
+    return result;
+  };
+
+  const handleOpenPreview = () => {
+    const result = runStatementValidation();
+    if (!result.valid) {
+      toast.error(result.summaryMessage);
+      return;
+    }
+    setPreviewQuestionIndex(0);
+    setIsPreviewOpen(true);
+  };
+
+  const buildAssessmentQuestionPayload = (q, idx) => ({
+    clientId: getQuestionStableId(q, idx),
+    questionText: q.statement ?? '',
+    bankQuestionId: q.bankQuestionId || null,
+    questionBankId: q.questionBankId || null,
+    questionBankVersion: q.questionBankVersion || null,
+    difficulty: q.difficulty || 'MEDIUM',
+    type: mapStudioTypeToBackend(q.questionType),
+    options: (q.options || []).map((o) => ({ id: o.id, text: o.text ?? '', isCorrect: Boolean(o.isCorrect) })),
+    correctAnswer:
+      q.questionType === 'TRUE_FALSE'
+        ? q.answerKey
+        : q.options?.find((o) => o.isCorrect)?.id || 'opt_1',
+    explanation: q.explanation || '',
+    points: Number(q.marks) || 5,
+    orderIndex: idx,
+    codingConfig:
+      q.questionType === 'CODING' || q.questionType === 'SQL'
+        ? {
+            problemTitle: q.evaluationConfig?.problemTitle || '',
+            problemDescription: q.evaluationConfig?.problemDescription || '',
+            inputFormat: q.evaluationConfig?.inputFormat || '',
+            outputFormat: q.evaluationConfig?.outputFormat || '',
+            constraints: q.evaluationConfig?.constraints || '',
+            sampleInput: q.evaluationConfig?.sampleInput || '',
+            sampleOutput: q.evaluationConfig?.sampleOutput || '',
+            executionCategory: q.questionType === 'SQL' ? 'sql' : 'code',
+            allowedLanguages: q.evaluationConfig?.allowedLanguages || (q.questionType === 'SQL' ? ['sqlite'] : ['python', 'javascript']),
+            defaultLanguage: q.evaluationConfig?.defaultLanguage || (q.questionType === 'SQL' ? 'sqlite' : 'python'),
+            sqlDialect: q.evaluationConfig?.sqlDialect || 'sqlite',
+            schemaDdl: q.evaluationConfig?.schemaDdl || '',
+            starterCode: q.evaluationConfig?.starterCode || {},
+            cpuTimeLimitMs: Number(q.evaluationConfig?.cpuTimeLimitMs) || 2000,
+            memoryLimitMb: Number(q.evaluationConfig?.memoryLimitMb) || 256,
+            testCases: (q.evaluationConfig?.testCases || []).map((tc, tcIdx) => ({
+              input: tc.input || '',
+              expectedOutput: tc.expectedOutput?.trim() || 'PASS',
+              isHidden: Boolean(tc.isHidden),
+              isEnabled: tc.isEnabled !== false,
+              weight: Number(tc.weight) || 1,
+              description: tc.description || (tc.isHidden ? `Hidden Evaluation Case #${tcIdx + 1}` : `Public Sample Case #${tcIdx + 1}`),
+              explanation: tc.explanation || '',
+            })),
+          }
+        : undefined,
+    fileUploadConfig:
+      q.questionType === 'FILE_UPLOAD'
+        ? q.evaluationConfig?.fileUploadConfig
+        : undefined,
+  });
+
   const validateTestForm = (isPublishingMode = false) => {
     if (!title.trim()) {
       toast.error('Please enter a test title.');
@@ -864,18 +1018,19 @@ export default function TestCreatorStudio() {
       toast.error('Please select a subject.');
       return false;
     }
+    if (isPublishingMode && testType === 'mock' && !String(examination ?? '').trim()) {
+      toast.error('Please enter a target examination.');
+      return false;
+    }
 
     if (isPublishingMode) {
+      const statementResult = runStatementValidation();
+      if (!statementResult.valid) {
+        toast.error(statementResult.summaryMessage);
+        return false;
+      }
       for (let i = 0; i < questions.length; i++) {
         const q = questions[i];
-        const qStatement =
-          q.statement?.trim() ||
-          q.evaluationConfig?.problemDescription?.trim() ||
-          q.evaluationConfig?.problemTitle?.trim();
-        if (!qStatement) {
-          toast.error(`Question #${i + 1} statement is empty.`);
-          return false;
-        }
         if (q.questionType === 'SINGLE_MCQ' || q.questionType === 'MULTI_SELECT') {
           const emptyOpts = (q.options || []).some((o) => !o.text.trim());
           if (emptyOpts) {
@@ -903,6 +1058,12 @@ export default function TestCreatorStudio() {
   const handleSaveDraft = async () => {
     if (!validateTestForm(false)) return;
 
+    const statementValidation = runStatementValidation();
+    const hasStatementErrors = !statementValidation.valid;
+    if (hasStatementErrors) {
+      toast.error(statementValidation.summaryMessage);
+    }
+
     try {
       setIsSaving(true);
       if (testType === 'assessment') {
@@ -919,6 +1080,8 @@ export default function TestCreatorStudio() {
           cameraRequired,
           randomization: { enabled: randomization, shuffleOrder: randomization },
           status: 'draft',
+          isIncomplete: hasStatementErrors,
+          draftStatus: hasStatementErrors ? 'incomplete' : 'ready',
           certification: {
             enabled: certificationEnabled,
             passingPercentage: Number(certPassingPercentage) || Number(passingScore) || 50,
@@ -929,55 +1092,7 @@ export default function TestCreatorStudio() {
             signatoryName: signatoryName.trim(),
             signatoryTitle: (signatoryTitle || 'Dean of Academic Affairs').trim(),
           },
-          questions: questions.map((q, idx) => ({
-            questionText: q.statement || `Question ${idx + 1}`,
-            bankQuestionId: q.bankQuestionId || null,
-            questionBankId: q.questionBankId || null,
-            questionBankVersion: q.questionBankVersion || null,
-            difficulty: q.difficulty || 'MEDIUM',
-            type: mapStudioTypeToBackend(q.questionType),
-            options: (q.options || []).map((o) => ({ id: o.id, text: o.text || 'Option' })),
-            correctAnswer:
-              q.questionType === 'TRUE_FALSE'
-                ? q.answerKey
-                : q.options?.find((o) => o.isCorrect)?.id || 'opt_1',
-            explanation: q.explanation || '',
-            points: Number(q.marks) || 5,
-            orderIndex: idx,
-            codingConfig:
-              q.questionType === 'CODING' || q.questionType === 'SQL'
-                ? {
-                    problemTitle: q.evaluationConfig?.problemTitle || '',
-                    problemDescription: q.evaluationConfig?.problemDescription || '',
-                    inputFormat: q.evaluationConfig?.inputFormat || '',
-                    outputFormat: q.evaluationConfig?.outputFormat || '',
-                    constraints: q.evaluationConfig?.constraints || '',
-                    sampleInput: q.evaluationConfig?.sampleInput || '',
-                    sampleOutput: q.evaluationConfig?.sampleOutput || '',
-                    executionCategory: q.questionType === 'SQL' ? 'sql' : 'code',
-                    allowedLanguages: q.evaluationConfig?.allowedLanguages || (q.questionType === 'SQL' ? ['sqlite'] : ['python', 'javascript']),
-                    defaultLanguage: q.evaluationConfig?.defaultLanguage || (q.questionType === 'SQL' ? 'sqlite' : 'python'),
-                    sqlDialect: q.evaluationConfig?.sqlDialect || 'sqlite',
-                    schemaDdl: q.evaluationConfig?.schemaDdl || '',
-                    starterCode: q.evaluationConfig?.starterCode || {},
-                    cpuTimeLimitMs: Number(q.evaluationConfig?.cpuTimeLimitMs) || 2000,
-                    memoryLimitMb: Number(q.evaluationConfig?.memoryLimitMb) || 256,
-                    testCases: (q.evaluationConfig?.testCases || []).map((tc, tcIdx) => ({
-                      input: tc.input || '',
-                      expectedOutput: tc.expectedOutput?.trim() || 'PASS',
-                      isHidden: Boolean(tc.isHidden),
-                      isEnabled: tc.isEnabled !== false,
-                      weight: Number(tc.weight) || 1,
-                      description: tc.description || (tc.isHidden ? `Hidden Evaluation Case #${tcIdx + 1}` : `Public Sample Case #${tcIdx + 1}`),
-                      explanation: tc.explanation || '',
-                    })),
-                  }
-                : undefined,
-            fileUploadConfig:
-              q.questionType === 'FILE_UPLOAD'
-                ? q.evaluationConfig?.fileUploadConfig
-                : undefined,
-          })),
+          questions: questions.map((q, idx) => buildAssessmentQuestionPayload(q, idx)),
         };
 
         let savedId = activeDraftId;
@@ -996,14 +1111,19 @@ export default function TestCreatorStudio() {
             }, { replace: true });
           }
         }
-        toast.success(`Draft saved for "${title.trim()}".`);
+        if (hasStatementErrors) {
+          toast.warning(`Draft saved for "${title.trim()}" (Incomplete).`);
+        } else {
+          toast.success(`Draft saved for "${title.trim()}".`);
+        }
       } else {
         // Mock Test payload
         const activeSubjectId = subjectId || (subjects.length > 0 ? (subjects[0]._id || subjects[0].id) : undefined);
+        const normalizedExam = String(examination ?? '').trim();
         const payload = {
           title: title.trim(),
           description: description.trim(),
-          examination,
+          examination: normalizedExam,
           subjectId: activeSubjectId,
           topicIds: selectedTopicIds,
           durationMinutes: Number(durationMinutes) || 60,
@@ -1012,6 +1132,12 @@ export default function TestCreatorStudio() {
           difficultyDistribution,
           negativeMarking,
           negativeMarkingRatio: Number(negativeMarkingRatio) || 0.33,
+          isIncomplete: hasStatementErrors,
+          draftStatus: hasStatementErrors ? 'INCOMPLETE' : 'READY',
+          draftQuestions: questions.map((q, idx) => ({
+            ...q,
+            clientId: getQuestionStableId(q, idx),
+          })),
         };
 
         let savedId = activeDraftId;
@@ -1030,9 +1156,15 @@ export default function TestCreatorStudio() {
             }, { replace: true });
           }
         }
-        toast.success(`Mock test draft saved for "${title.trim()}".`);
+        setExamination(normalizedExam);
+        if (hasStatementErrors) {
+          toast.warning(`Mock test draft saved for "${title.trim()}" (Incomplete).`);
+        } else {
+          toast.success(`Mock test draft saved for "${title.trim()}".`);
+        }
       }
       setStatus('draft');
+      setIsIncompleteDraft(hasStatementErrors);
     } catch (err) {
       toast.error('Failed to save draft: ' + (err.response?.data?.message || err.message));
     } finally {
@@ -1041,7 +1173,14 @@ export default function TestCreatorStudio() {
   };
 
   const handlePublish = async () => {
-    if (!validateTestForm(true)) return;
+    if (!validateTestForm(true)) {
+      const statementCheck = validateQuestionStatements(questions);
+      if (!statementCheck.valid) {
+        setStatus('draft');
+        setIsIncompleteDraft(true);
+      }
+      return;
+    }
 
     try {
       setIsPublishing(true);
@@ -1059,6 +1198,8 @@ export default function TestCreatorStudio() {
           cameraRequired,
           randomization: { enabled: randomization, shuffleOrder: randomization },
           status: 'published',
+          isIncomplete: false,
+          draftStatus: 'ready',
           certification: {
             enabled: certificationEnabled,
             passingPercentage: Number(certPassingPercentage) || Number(passingScore) || 50,
@@ -1069,55 +1210,7 @@ export default function TestCreatorStudio() {
             signatoryName: signatoryName.trim(),
             signatoryTitle: (signatoryTitle || 'Dean of Academic Affairs').trim(),
           },
-          questions: questions.map((q, idx) => ({
-            questionText: q.statement || `Question ${idx + 1}`,
-            bankQuestionId: q.bankQuestionId || null,
-            questionBankId: q.questionBankId || null,
-            questionBankVersion: q.questionBankVersion || null,
-            difficulty: q.difficulty || 'MEDIUM',
-            type: mapStudioTypeToBackend(q.questionType),
-            options: (q.options || []).map((o) => ({ id: o.id, text: o.text || 'Option' })),
-            correctAnswer:
-              q.questionType === 'TRUE_FALSE'
-                ? q.answerKey
-                : q.options?.find((o) => o.isCorrect)?.id || 'opt_1',
-            explanation: q.explanation || '',
-            points: Number(q.marks) || 5,
-            orderIndex: idx,
-            codingConfig:
-              q.questionType === 'CODING' || q.questionType === 'SQL'
-                ? {
-                    problemTitle: q.evaluationConfig?.problemTitle || '',
-                    problemDescription: q.evaluationConfig?.problemDescription || '',
-                    inputFormat: q.evaluationConfig?.inputFormat || '',
-                    outputFormat: q.evaluationConfig?.outputFormat || '',
-                    constraints: q.evaluationConfig?.constraints || '',
-                    sampleInput: q.evaluationConfig?.sampleInput || '',
-                    sampleOutput: q.evaluationConfig?.sampleOutput || '',
-                    executionCategory: q.questionType === 'SQL' ? 'sql' : 'code',
-                    allowedLanguages: q.evaluationConfig?.allowedLanguages || (q.questionType === 'SQL' ? ['sqlite'] : ['python', 'javascript']),
-                    defaultLanguage: q.evaluationConfig?.defaultLanguage || (q.questionType === 'SQL' ? 'sqlite' : 'python'),
-                    sqlDialect: q.evaluationConfig?.sqlDialect || 'sqlite',
-                    schemaDdl: q.evaluationConfig?.schemaDdl || '',
-                    starterCode: q.evaluationConfig?.starterCode || {},
-                    cpuTimeLimitMs: Number(q.evaluationConfig?.cpuTimeLimitMs) || 2000,
-                    memoryLimitMb: Number(q.evaluationConfig?.memoryLimitMb) || 256,
-                    testCases: (q.evaluationConfig?.testCases || []).map((tc, tcIdx) => ({
-                      input: tc.input || '',
-                      expectedOutput: tc.expectedOutput?.trim() || 'PASS',
-                      isHidden: Boolean(tc.isHidden),
-                      isEnabled: tc.isEnabled !== false,
-                      weight: Number(tc.weight) || 1,
-                      description: tc.description || (tc.isHidden ? `Hidden Evaluation Case #${tcIdx + 1}` : `Public Sample Case #${tcIdx + 1}`),
-                      explanation: tc.explanation || '',
-                    })),
-                  }
-                : undefined,
-            fileUploadConfig:
-              q.questionType === 'FILE_UPLOAD'
-                ? q.evaluationConfig?.fileUploadConfig
-                : undefined,
-          })),
+          questions: questions.map((q, idx) => buildAssessmentQuestionPayload(q, idx)),
         };
 
         const targetId = activeDraftId;
@@ -1126,15 +1219,17 @@ export default function TestCreatorStudio() {
         } else {
           await assessmentService.createAssessment(payload);
         }
+        setIsIncompleteDraft(false);
         toast.success(`Assessment "${title.trim()}" published live!`);
         navigate('/instructor/assessments');
       } else {
         // Mock Test publish
         const activeSubjectId = subjectId || (subjects.length > 0 ? (subjects[0]._id || subjects[0].id) : undefined);
+        const normalizedExam = String(examination ?? '').trim();
         const payload = {
           title: title.trim(),
           description: description.trim(),
-          examination,
+          examination: normalizedExam,
           subjectId: activeSubjectId,
           topicIds: selectedTopicIds,
           durationMinutes: Number(durationMinutes) || 60,
@@ -1143,6 +1238,12 @@ export default function TestCreatorStudio() {
           difficultyDistribution,
           negativeMarking,
           negativeMarkingRatio: Number(negativeMarkingRatio) || 0.33,
+          isIncomplete: false,
+          draftStatus: 'READY',
+          draftQuestions: questions.map((q, idx) => ({
+            ...q,
+            clientId: getQuestionStableId(q, idx),
+          })),
         };
 
         let targetId = activeDraftId;
@@ -1157,6 +1258,7 @@ export default function TestCreatorStudio() {
           await uapQuestionBankService.generateMockTestBlueprint(targetId);
           await uapQuestionBankService.publishMockTest(targetId);
         }
+        setIsIncompleteDraft(false);
         toast.success(`Mock Test "${title.trim()}" generated and published!`);
         navigate('/instructor/assessments');
       }
@@ -1193,9 +1295,14 @@ export default function TestCreatorStudio() {
               >
                 {testTypeLabel}
               </Badge>
-              <Badge variant={status === 'published' ? 'sage' : 'neutral'} size="sm">
+              <Badge variant={status === 'published' ? 'sage' : 'neutral'} size="sm" data-testid="badge-publication-status">
                 {status === 'published' ? 'Published' : 'Draft'}
               </Badge>
+              {status !== 'published' && isIncompleteDraft && (
+                <Badge variant="warning" size="sm" data-testid="badge-incomplete-status">
+                  Incomplete
+                </Badge>
+              )}
               <Badge variant="neutral" size="sm">
                 {questions.length} Question{questions.length !== 1 ? 's' : ''}
               </Badge>
@@ -1211,10 +1318,8 @@ export default function TestCreatorStudio() {
               variant="outline"
               size="sm"
               icon={Eye}
-              onClick={() => {
-                setPreviewQuestionIndex(0);
-                setIsPreviewOpen(true);
-              }}
+              onClick={handleOpenPreview}
+              data-testid="btn-student-preview"
             >
               Student Preview
             </Button>
@@ -1346,22 +1451,23 @@ export default function TestCreatorStudio() {
                   </select>
                 </>
               ) : (
-                <>
-                  <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                <div>
+                  <label
+                    htmlFor="target-examination-input"
+                    className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1"
+                  >
                     Target Examination
                   </label>
-                  <select
+                  <input
+                    id="target-examination-input"
+                    type="text"
                     value={examination}
                     onChange={(e) => setExamination(e.target.value)}
-                    className="w-full p-2.5 text-xs rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
-                  >
-                    {EXAM_CATEGORIES.map((ex) => (
-                      <option key={ex} value={ex}>
-                        {ex}
-                      </option>
-                    ))}
-                  </select>
-                </>
+                    placeholder="Enter examination name"
+                    data-testid="input-target-examination"
+                    className="w-full p-2.5 text-xs rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:ring-1 focus:ring-brand-primary focus:outline-none"
+                  />
+                </div>
               )}
             </div>
           </div>
@@ -1735,19 +1841,69 @@ export default function TestCreatorStudio() {
           </div>
         </div>
 
+        {/* Validation Error Summary Banner */}
+        {activeValidationErrors.length > 0 && (
+          <div
+            role="alert"
+            data-testid="question-validation-summary"
+            className="p-4 rounded-2xl border border-rose-300 dark:border-rose-800 bg-rose-50 dark:bg-rose-950/30 text-rose-900 dark:text-rose-200 space-y-2"
+          >
+            <div className="flex items-center gap-2 text-xs font-bold">
+              <AlertCircle className="w-4 h-4 text-rose-600 dark:text-rose-400 shrink-0" />
+              <span>
+                {activeValidationErrors.length === 1
+                  ? '1 question has an empty statement'
+                  : `${activeValidationErrors.length} questions have empty statements`}
+              </span>
+            </div>
+            <ul className="space-y-1 pl-6 list-disc text-xs">
+              {activeValidationErrors.map((err) => (
+                <li key={err.id}>
+                  <button
+                    type="button"
+                    onClick={() => scrollToInvalidQuestion(err.id)}
+                    className="text-left hover:underline font-medium cursor-pointer"
+                  >
+                    {err.message}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+
         {/* Questions Cards List */}
         <div className="space-y-4">
           {questions.map((q, qIdx) => {
             const isCollapsed = q.isCollapsed;
+            const qId = getQuestionStableId(q, qIdx);
+            const qErrorMessage = validationErrorsById[qId] ? formatEmptyQuestionMessage(qIdx + 1) : null;
+            const hasError = Boolean(qErrorMessage);
 
             return (
               <div
-                key={q.clientId}
+                key={qId}
+                ref={(el) => {
+                  if (el) questionCardRefs.current[qId] = el;
+                  else delete questionCardRefs.current[qId];
+                }}
                 data-testid={`question-card-${qIdx}`}
-                className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-warm-xs overflow-hidden transition-all"
+                data-question-id={qId}
+                data-invalid={hasError ? 'true' : 'false'}
+                className={`bg-white dark:bg-slate-900 rounded-2xl border shadow-warm-xs overflow-hidden transition-all ${
+                  hasError
+                    ? 'border-rose-500 dark:border-rose-500 ring-2 ring-rose-500/20'
+                    : 'border-slate-200 dark:border-slate-800'
+                }`}
               >
                 {/* Question Card Header */}
-                <div className="p-3.5 bg-slate-50/80 dark:bg-slate-800/50 border-b border-slate-200 dark:border-slate-800 flex flex-wrap items-center justify-between gap-2.5">
+                <div
+                  className={`p-3.5 border-b flex flex-wrap items-center justify-between gap-2.5 ${
+                    hasError
+                      ? 'bg-rose-50/70 dark:bg-rose-950/30 border-rose-200 dark:border-rose-900'
+                      : 'bg-slate-50/80 dark:bg-slate-800/50 border-slate-200 dark:border-slate-800'
+                  }`}
+                >
                   <div className="flex items-center gap-2.5 flex-wrap">
                     <button
                       type="button"
@@ -1761,6 +1917,12 @@ export default function TestCreatorStudio() {
                     <span className="font-bold text-xs text-slate-800 dark:text-white">
                       Question #{qIdx + 1}
                     </span>
+
+                    {hasError && (
+                      <Badge variant="danger" size="sm" data-testid={`question-error-badge-${qIdx}`}>
+                        Statement Required
+                      </Badge>
+                    )}
 
                     {/* Question Type Dropdown */}
                     <select
@@ -1868,12 +2030,32 @@ export default function TestCreatorStudio() {
                         Question Statement <span className="text-rose-500">*</span>
                       </label>
                       <textarea
+                        ref={(el) => {
+                          if (el) statementInputRefs.current[qId] = el;
+                          else delete statementInputRefs.current[qId];
+                        }}
                         rows={3}
                         value={q.statement}
                         onChange={(e) => updateQuestionField(qIdx, 'statement', e.target.value)}
                         placeholder="Enter question statement or instructions..."
-                        className="w-full p-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white text-xs focus:ring-1 focus:ring-brand-primary focus:outline-none"
+                        aria-invalid={hasError ? 'true' : 'false'}
+                        data-testid={`question-statement-input-${qIdx}`}
+                        className={`w-full p-2.5 rounded-xl border text-slate-900 dark:text-white text-xs focus:ring-1 focus:outline-none ${
+                          hasError
+                            ? 'border-rose-500 dark:border-rose-500 bg-rose-50/30 dark:bg-rose-950/20 focus:ring-rose-500'
+                            : 'border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 focus:ring-brand-primary'
+                        }`}
                       />
+                      {hasError && (
+                        <p
+                          role="alert"
+                          data-testid={`question-statement-error-${qIdx}`}
+                          className="mt-1.5 text-xs font-semibold text-rose-600 dark:text-rose-400 flex items-center gap-1.5"
+                        >
+                          <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                          <span>{qErrorMessage}</span>
+                        </p>
+                      )}
                     </div>
 
                     {/* --- TYPE-SPECIFIC FIELDS --- */}

@@ -44,7 +44,25 @@ class MockTestController {
       if (test.ownerFacultyId?._id?.toString() !== req.user.id && req.user.role !== 'admin') {
         return res.status(403).json({ success: false, message: 'Access denied' });
       }
-      Object.assign(test, req.body);
+      const { status: requestedStatus, ...rest } = req.body;
+      if (rest.examination !== undefined) {
+        rest.examination = rest.examination === null ? '' : String(rest.examination).trim();
+      }
+      Object.assign(test, rest);
+      if (Array.isArray(req.body.draftQuestions)) {
+        const hasEmpty = req.body.draftQuestions.some((q) => !String(q?.statement ?? q?.questionText ?? '').trim());
+        test.isIncomplete = Boolean(req.body.isIncomplete) || hasEmpty;
+        test.draftStatus = test.isIncomplete ? 'INCOMPLETE' : 'READY';
+      } else if (req.body.isIncomplete !== undefined) {
+        test.isIncomplete = Boolean(req.body.isIncomplete);
+        test.draftStatus = test.isIncomplete ? 'INCOMPLETE' : 'READY';
+      }
+      if (requestedStatus === 'PUBLISHED' && test.isIncomplete) {
+        return res.status(400).json({ success: false, message: 'Cannot publish an incomplete mock test draft.' });
+      }
+      if (requestedStatus && requestedStatus !== 'PUBLISHED') {
+        test.status = requestedStatus;
+      }
       await test.save();
       res.status(200).json({
         success: true,

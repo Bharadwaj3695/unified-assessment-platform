@@ -32,10 +32,19 @@ class MockTestService {
   async createMockTest(user, data) {
     const facultyId = user._id || user.id;
 
+    const draftQuestions = Array.isArray(data.draftQuestions) ? data.draftQuestions : [];
+    const hasEmptyDraftQuestions = draftQuestions.some((q) => !String(q?.statement ?? q?.questionText ?? '').trim());
+    const isIncomplete = Boolean(data.isIncomplete) || hasEmptyDraftQuestions;
+
     const mockTest = await MockTest.create({
       title: data.title,
       description: data.description || '',
-      examination: data.examination || 'GATE',
+      examination:
+        data.examination === undefined
+          ? 'GATE'
+          : data.examination === null
+            ? ''
+            : String(data.examination).trim(),
       subjectId: data.subjectId,
       topicIds: data.topicIds || [],
       durationMinutes: data.durationMinutes || 60,
@@ -50,6 +59,9 @@ class MockTestService {
       randomizationRules: data.randomizationRules || {},
       selectionMode: data.selectionMode || 'BLUEPRINT',
       blueprint: data.blueprint || { rules: [] },
+      draftQuestions,
+      draftStatus: isIncomplete ? 'INCOMPLETE' : 'READY',
+      isIncomplete,
       status: 'DRAFT',
       ownerFacultyId: facultyId,
     });
@@ -252,12 +264,40 @@ class MockTestService {
       throw err;
     }
 
+    if (!String(mockTest.examination || '').trim()) {
+      const err = new Error('Target examination is required before publishing.');
+      err.statusCode = 400;
+      throw err;
+    }
+
+    if (Array.isArray(mockTest.draftQuestions) && mockTest.draftQuestions.length > 0) {
+      const emptyNumbers = mockTest.draftQuestions
+        .map((q, idx) => (!String(q?.statement ?? q?.questionText ?? '').trim() ? idx + 1 : null))
+        .filter(Boolean);
+      if (emptyNumbers.length === 1) {
+        const err = new Error(`Question ${emptyNumbers[0]} is empty. Please enter the question statement.`);
+        err.statusCode = 400;
+        throw err;
+      }
+      if (emptyNumbers.length > 1) {
+        const err = new Error(`Questions ${emptyNumbers.map((n) => `Q${n}`).join(', ')} are empty. Please enter the question statement.`);
+        err.statusCode = 400;
+        throw err;
+      }
+    } else if (mockTest.isIncomplete) {
+      const err = new Error('Cannot publish an incomplete mock test draft.');
+      err.statusCode = 400;
+      throw err;
+    }
+
     if (!mockTest.resolvedQuestions || mockTest.resolvedQuestions.length === 0) {
       // Auto-generate if empty
       await this.generateFromBlueprint(id, user);
     }
 
     mockTest.status = 'PUBLISHED';
+    mockTest.isIncomplete = false;
+    mockTest.draftStatus = 'READY';
     mockTest.publishedAt = new Date();
     await mockTest.save();
 

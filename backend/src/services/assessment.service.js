@@ -101,12 +101,18 @@ class AssessmentService {
     }
 
     let totalPoints = 0;
+    const isPublishing = status === 'published';
+    if (isPublishing && Array.isArray(questions) && questions.length > 0) {
+      this.validateQuestionStatementsForPublish(questions);
+      questions.forEach((q, idx) => this.validateQuestionForPublish(q, idx));
+    }
     if (questions && questions.length > 0) {
-      if (status === 'published') {
-        questions.forEach((q, idx) => this.validateQuestionForPublish(q, idx));
-      }
       totalPoints = questions.reduce((sum, q) => sum + (parseInt(q.points, 10) || 5), 0);
     }
+
+    const hasEmptyQuestions = Array.isArray(questions) && questions.some((q) => !q.questionText || !String(q.questionText).trim());
+    const effectiveStatus = isPublishing ? 'published' : 'draft';
+    const isIncomplete = effectiveStatus === 'draft' ? hasEmptyQuestions : false;
 
     const assessment = await Assessment.create({
       title,
@@ -116,7 +122,9 @@ class AssessmentService {
       durationMinutes: durationMinutes || 60,
       totalPoints: totalPoints || 100,
       passingScore: passingScore || 60,
-      status: status === 'published' ? 'published' : 'draft',
+      status: effectiveStatus,
+      draftStatus: isIncomplete ? 'incomplete' : 'ready',
+      isIncomplete,
       scheduledAt,
       deadlineAt,
       allowReview: allowReview !== undefined ? allowReview : true,
@@ -131,7 +139,8 @@ class AssessmentService {
     if (questions && questions.length > 0) {
       const questionDocs = questions.map((q, idx) => ({
         assessmentId: assessment._id,
-        questionText: q.questionText,
+        clientId: q.clientId || null,
+        questionText: q.questionText ?? '',
         type: q.type || 'mcq',
         options: q.options || [],
         correctAnswer: q.correctAnswer ? String(q.correctAnswer).trim() : null,
@@ -232,6 +241,19 @@ class AssessmentService {
       };
     }
 
+    const targetStatus = fields.status !== undefined ? fields.status : assessment.status;
+    const isPublishing = targetStatus === 'published';
+
+    if (isPublishing) {
+      const questionsToValidate = Array.isArray(questions)
+        ? questions
+        : await Question.find({ assessmentId }).sort({ orderIndex: 1 }).lean();
+      if (Array.isArray(questionsToValidate) && questionsToValidate.length > 0) {
+        this.validateQuestionStatementsForPublish(questionsToValidate);
+        questionsToValidate.forEach((q, idx) => this.validateQuestionForPublish(q, idx));
+      }
+    }
+
     Object.assign(assessment, fields);
 
     if (accessType !== undefined) {
@@ -247,10 +269,6 @@ class AssessmentService {
     }
 
     if (questions && Array.isArray(questions)) {
-      const isPublishing = assessment.status === 'published' || fields.status === 'published';
-      if (isPublishing) {
-        questions.forEach((q, idx) => this.validateQuestionForPublish(q, idx));
-      }
       await Question.deleteMany({ assessmentId });
 
       let calculatedPoints = 0;
@@ -259,7 +277,8 @@ class AssessmentService {
         calculatedPoints += pts;
         return {
           assessmentId: assessment._id,
-          questionText: q.questionText,
+          clientId: q.clientId || null,
+          questionText: q.questionText ?? '',
           type: q.type || 'mcq',
           options: q.options || [],
           correctAnswer: q.correctAnswer ? String(q.correctAnswer).trim() : null,
@@ -279,6 +298,21 @@ class AssessmentService {
 
       await Question.insertMany(questionDocs);
       assessment.totalPoints = calculatedPoints;
+
+      const hasEmptyQuestions = questions.some((q) => !q.questionText || !String(q.questionText).trim());
+      if (assessment.status === 'published') {
+        assessment.isIncomplete = false;
+        assessment.draftStatus = 'ready';
+      } else {
+        assessment.isIncomplete = hasEmptyQuestions;
+        assessment.draftStatus = hasEmptyQuestions ? 'incomplete' : 'ready';
+      }
+    } else if (assessment.status === 'published') {
+      assessment.isIncomplete = false;
+      assessment.draftStatus = 'ready';
+    } else if (fields.isIncomplete !== undefined) {
+      assessment.isIncomplete = Boolean(fields.isIncomplete);
+      assessment.draftStatus = assessment.isIncomplete ? 'incomplete' : 'ready';
     }
 
     await assessment.save();
@@ -504,12 +538,36 @@ class AssessmentService {
   }
 
   /**
+   * Ensure all question statements are non-empty before publishing
+   */
+  validateQuestionStatementsForPublish(questions = []) {
+    const emptyNumbers = [];
+    questions.forEach((q, idx) => {
+      if (!q?.questionText || !String(q.questionText).trim()) {
+        emptyNumbers.push(idx + 1);
+      }
+    });
+    if (emptyNumbers.length === 1) {
+      const err = new Error(`Question ${emptyNumbers[0]} is empty. Please enter the question statement.`);
+      err.statusCode = 400;
+      throw err;
+    }
+    if (emptyNumbers.length > 1) {
+      const err = new Error(`Questions ${emptyNumbers.map((n) => `Q${n}`).join(', ')} are empty. Please enter the question statement.`);
+      err.statusCode = 400;
+      throw err;
+    }
+  }
+
+  /**
    * Validate a coding question before publication to ensure test cases and environments are consistent
    */
   validateQuestionForPublish(q, idx = 0) {
-    const qName = q.questionText ? `"${q.questionText.slice(0, 30)}..."` : `Question ${idx + 1}`;
-    if (!q.questionText || !q.questionText.trim()) {
-      const err = new Error(`Problem statement/question text is required for ${qName}`);
+    const qName = q.questionText && String(q.questionText).trim()
+      ? `"${String(q.questionText).trim().slice(0, 30)}..."`
+      : `Question ${idx + 1}`;
+    if (!q.questionText || !String(q.questionText).trim()) {
+      const err = new Error(`Question ${idx + 1} is empty. Please enter the question statement.`);
       err.statusCode = 400;
       throw err;
     }

@@ -153,7 +153,7 @@ export const studentNavigation = {
           // URL patterns matching progress view
           matchPatterns: ['/student/progress'],
           // Description of progress metrics
-          description: 'Track academic performance streaks, subject mastery, and score trends',
+          description: 'Review exam-wise performance, individual reports, and PDF scorecards',
         // Conclude student-progress item definition
         },
       // Conclude items array

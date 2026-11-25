@@ -116,6 +116,17 @@ const assessmentSchema = new mongoose.Schema(
       // Index for fast catalog filtering by status
       index: true,
     },
+    // Explicit draft readiness status ('ready' | 'incomplete')
+    draftStatus: {
+      type: String,
+      enum: ['ready', 'incomplete'],
+      default: 'ready',
+    },
+    // Explicit boolean flag marking incomplete drafts with missing question statements
+    isIncomplete: {
+      type: Boolean,
+      default: false,
+    },
     // Optional scheduled start timestamp before which students cannot start attempts or view questions
     scheduledAt: {
       // Date timestamp

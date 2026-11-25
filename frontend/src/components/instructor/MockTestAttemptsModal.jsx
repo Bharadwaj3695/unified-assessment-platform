@@ -1,8 +1,9 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { X, Award, User, CheckCircle2, Clock, AlertCircle, Loader2, ArrowRight } from 'lucide-react';
+import { X, Award, User, CheckCircle2, Clock, AlertCircle, Loader2, ArrowRight, FileText, Download } from 'lucide-react';
 import { toast } from 'react-toastify';
 import uapQuestionBankService from '../../services/uapQuestionBank.service';
+import analyticsService from '../../services/analytics.service';
 
 export default function MockTestAttemptsModal({ isOpen, onClose, mockTest }) {
   const navigate = useNavigate();
@@ -112,20 +113,50 @@ export default function MockTestAttemptsModal({ isOpen, onClose, mockTest }) {
                         </p>
                       </div>
 
-                      <button
-                        onClick={() => {
-                          onClose();
-                          navigate(`/instructor/mock-tests/evaluate/${attempt._id}`);
-                        }}
-                        className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1 transition ${
-                          isPendingManual
-                            ? 'bg-brand-primary hover:bg-brand-primary-hover text-white shadow-warm-xs'
-                            : 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-200'
-                        }`}
-                      >
-                        {isPendingManual ? 'Grade Submission' : 'Review Evaluation'}
-                        <ArrowRight className="w-3.5 h-3.5" />
-                      </button>
+                      <div className="flex items-center gap-2">
+                        {isFinalized && (
+                          <>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                onClose();
+                                navigate(`/instructor/reports/mock_test/${attempt._id}`);
+                              }}
+                              className="px-2.5 py-1.5 rounded-lg text-xs font-semibold border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center gap-1 transition"
+                            >
+                              <FileText className="w-3.5 h-3.5" />
+                              View Report
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                analyticsService
+                                  .downloadIndividualExamReportPdf('mock_test', attempt._id)
+                                  .then(() => toast.success('Performance report PDF downloaded.'))
+                                  .catch((err) => toast.error(err.message || 'Failed to download PDF'))
+                              }
+                              className="px-2.5 py-1.5 rounded-lg text-xs font-semibold border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center gap-1 transition"
+                            >
+                              <Download className="w-3.5 h-3.5" />
+                              Download PDF
+                            </button>
+                          </>
+                        )}
+                        <button
+                          onClick={() => {
+                            onClose();
+                            navigate(`/instructor/mock-tests/evaluate/${attempt._id}`);
+                          }}
+                          className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1 transition ${
+                            isPendingManual
+                              ? 'bg-brand-primary hover:bg-brand-primary-hover text-white shadow-warm-xs'
+                              : 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-200'
+                          }`}
+                        >
+                          {isPendingManual ? 'Grade Submission' : 'Review Evaluation'}
+                          <ArrowRight className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
                     </div>
                   </div>
                 );

@@ -21,6 +21,7 @@ import TableSkeleton from '../../components/ui/TableSkeleton';
 import StatCard from '../../components/common/StatCard';
 import PerformanceDonutChart from '../../components/charts/PerformanceDonutChart';
 import ScoreTrendChart from '../../components/charts/ScoreTrendChart';
+import StudentExamProgress from '../../components/student/StudentExamProgress';
 import { StudentHeroIllustration } from '../../components/illustrations';
 import {
   Table,
@@ -170,15 +171,21 @@ const StudentDashboard = () => {
       location.pathname.includes('/student/catalog') ||
       location.pathname.includes('/student/tests')
     ) return 'catalog';
+    if (location.pathname.includes('/student/progress')) return 'progress';
+    if (location.pathname.includes('/student/results')) return 'results';
     if (
       location.pathname.includes('/student/submissions') ||
-      location.pathname.includes('/student/attempts') ||
-      location.pathname.includes('/student/results') ||
-      location.pathname.includes('/student/progress')
+      location.pathname.includes('/student/attempts')
     ) return 'submissions';
     if (location.pathname.includes('/student/profile')) return 'profile';
     return 'dashboard';
   }, [location.pathname]);
+
+  useEffect(() => {
+    if (currentView === 'results' && (submissionStatusFilter === 'pending' || submissionStatusFilter === 'in_progress')) {
+      setSubmissionStatusFilter('all');
+    }
+  }, [currentView, submissionStatusFilter]);
 
   // Derive categories unconditionally to comply with React's Rules of Hooks
   const categories = useMemo(() => {
@@ -653,15 +660,25 @@ const StudentDashboard = () => {
     return { all, passed, failed, pending, inProgress };
   }, [submissions]);
 
-  // Submissions filtered by active status filter tab
+  // Submissions filtered by active status filter tab (My Results strictly excludes pending/in-progress)
   const filteredSubmissions = useMemo(() => {
-    if (submissionStatusFilter === 'all') return submissions;
-    return submissions.filter((sub) => {
+    const baseList =
+      currentView === 'results'
+        ? submissions.filter(
+            (sub) => sub.status === 'evaluated' && sub.evaluationStatus !== 'pending'
+          )
+        : submissions;
+
+    if (submissionStatusFilter === 'all') return baseList;
+    return baseList.filter((sub) => {
       if (submissionStatusFilter === 'in_progress') {
-        return sub.status === 'in_progress';
+        return currentView !== 'results' && sub.status === 'in_progress';
       }
       if (submissionStatusFilter === 'pending') {
-        return sub.status === 'submitted' || (sub.status !== 'in_progress' && sub.evaluationStatus === 'pending');
+        return (
+          currentView !== 'results' &&
+          (sub.status === 'submitted' || (sub.status !== 'in_progress' && sub.evaluationStatus === 'pending'))
+        );
       }
       if (submissionStatusFilter === 'passed') {
         return sub.status === 'evaluated' && sub.evaluationStatus !== 'pending' && Boolean(sub.passed);
@@ -671,7 +688,7 @@ const StudentDashboard = () => {
       }
       return true;
     });
-  }, [submissions, submissionStatusFilter]);
+  }, [submissions, submissionStatusFilter, currentView]);
 
   // Filtered assessments for Catalog - includes all eligible published assessments
   const filteredCatalog = useMemo(() => {
@@ -699,21 +716,28 @@ const StudentDashboard = () => {
         </Card>
       );
     }
-    if (currentView === 'submissions') {
+    if (currentView === 'submissions' || currentView === 'results') {
       return (
         <Card
           title={
-            location.pathname.includes('/student/attempts')
-              ? 'My Attempts'
-              : location.pathname.includes('/student/results')
+            currentView === 'results'
               ? 'My Results'
+              : location.pathname.includes('/student/attempts')
+              ? 'My Attempts'
               : 'Your Assessment Submissions & Results'
           }
-          subtitle="Chronological record of exam attempts, scores, and evaluation feedback"
+          subtitle={
+            currentView === 'results'
+              ? 'Finalized evaluated outcomes, official scores, and individual performance reports'
+              : 'Chronological record of exam attempts, scores, and evaluation feedback'
+          }
         >
           <TableSkeleton rows={5} columns={6} />
         </Card>
       );
+    }
+    if (currentView === 'progress') {
+      return <TableSkeleton rows={5} columns={8} />;
     }
     return <DashboardSkeleton />;
   }
@@ -1404,8 +1428,11 @@ const StudentDashboard = () => {
         </div>
       )}
 
-      {/* 5. Sub-View: DASHBOARD & SUBMISSIONS (Default or Submissions) */}
-      {(currentView === 'dashboard' || currentView === 'submissions') && (
+      {/* 5. Sub-View: PROGRESS (Exam-wise Performance & Reports) */}
+      {currentView === 'progress' && <StudentExamProgress />}
+
+      {/* 6. Sub-View: DASHBOARD, MY ATTEMPTS & MY RESULTS */}
+      {(currentView === 'dashboard' || currentView === 'submissions' || currentView === 'results') && (
         <>
           {/* Main Grid: Learning Cards & Academic Progress (Only in dashboard view) */}
           {currentView === 'dashboard' && (
@@ -1995,25 +2022,36 @@ const StudentDashboard = () => {
           {/* Submissions History Feed */}
           <Card
             title={
-              location.pathname.includes('/student/attempts')
-                ? 'My Attempts'
-                : location.pathname.includes('/student/results')
+              currentView === 'results'
                 ? 'My Results'
+                : location.pathname.includes('/student/attempts')
+                ? 'My Attempts'
                 : currentView === 'submissions'
                 ? 'Your Assessment Submissions & Results'
                 : 'Recent Submissions'
             }
-            subtitle="Chronological record of exam attempts, scores, and evaluation feedback"
+            subtitle={
+              currentView === 'results'
+                ? 'Finalized evaluated outcomes, official scores, and individual performance reports'
+                : 'Chronological record of exam attempts, scores, and evaluation feedback'
+            }
           >
             {/* Filter Tabs Toolbar */}
             <div className="flex items-center gap-1.5 overflow-x-auto pb-3 mb-4 border-b border-surface-light-border dark:border-surface-dark-border">
-              {[
-                { id: 'all', label: 'All', count: submissionCounts.all },
-                { id: 'passed', label: 'Passed', count: submissionCounts.passed },
-                { id: 'failed', label: 'Failed', count: submissionCounts.failed },
-                { id: 'pending', label: 'Pending Review', count: submissionCounts.pending },
-                { id: 'in_progress', label: 'In Progress', count: submissionCounts.inProgress },
-              ].map((tab) => (
+              {(currentView === 'results'
+                ? [
+                    { id: 'all', label: 'All', count: submissionCounts.passed + submissionCounts.failed },
+                    { id: 'passed', label: 'Passed', count: submissionCounts.passed },
+                    { id: 'failed', label: 'Failed', count: submissionCounts.failed },
+                  ]
+                : [
+                    { id: 'all', label: 'All', count: submissionCounts.all },
+                    { id: 'passed', label: 'Passed', count: submissionCounts.passed },
+                    { id: 'failed', label: 'Failed', count: submissionCounts.failed },
+                    { id: 'pending', label: 'Pending Review', count: submissionCounts.pending },
+                    { id: 'in_progress', label: 'In Progress', count: submissionCounts.inProgress },
+                  ]
+              ).map((tab) => (
                 <button
                   key={tab.id}
                   type="button"
@@ -2048,10 +2086,12 @@ const StudentDashboard = () => {
             ) : filteredSubmissions.length === 0 ? (
               <div className="py-12 flex flex-col items-center justify-center text-center p-6 text-slate-400">
                 <p className="font-semibold text-slate-700 dark:text-slate-300 text-sm mb-1">
-                  No Submissions in this Category
+                  {currentView === 'results' ? 'No Finalized Results Yet' : 'No Submissions in this Category'}
                 </p>
                 <p className="text-xs text-slate-500 max-w-sm">
-                  There are no assessment attempts currently marked as {submissionStatusFilter.replace('_', ' ')}.
+                  {currentView === 'results'
+                    ? 'Finalized assessment outcomes will appear here once grading is complete.'
+                    : `There are no assessment attempts currently marked as ${submissionStatusFilter.replace('_', ' ')}.`}
                 </p>
               </div>
             ) : (
@@ -2179,13 +2219,37 @@ const StudentDashboard = () => {
                         <TableCell className="text-right">
                           <div className="flex items-center justify-end space-x-2">
                             {sub.status === 'evaluated' && !isPending && (
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                onClick={() => openFeedbackModal(sub._id || sub.id)}
-                              >
-                                View Feedback
-                              </Button>
+                              <>
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => openFeedbackModal(sub._id || sub.id)}
+                                >
+                                  View Feedback
+                                </Button>
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => navigate(`/student/reports/assessment/${sub._id || sub.id}`)}
+                                  data-testid={`btn-report-${sub._id || sub.id}`}
+                                >
+                                  View Report
+                                </Button>
+                                {currentView === 'results' && (
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={() =>
+                                      analyticsService
+                                        .downloadIndividualExamReportPdf('assessment', sub._id || sub.id)
+                                        .catch((err) => toast.error(err.message || 'Failed to download PDF'))
+                                    }
+                                    data-testid={`btn-pdf-${sub._id || sub.id}`}
+                                  >
+                                    Download PDF
+                                  </Button>
+                                )}
+                              </>
                             )}
                             {sub.status === 'evaluated' && !isPending && !sub.passed && (() => {
                               const asmtId = (

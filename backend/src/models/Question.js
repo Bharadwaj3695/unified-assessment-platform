@@ -106,6 +106,11 @@ const questionSchema = new mongoose.Schema(
       default: null,
       index: true,
     },
+    // Optional stable client-assigned question identifier preserved across draft saves
+    clientId: {
+      type: String,
+      default: null,
+    },
     // The prompt or question text presented to students
     questionText: {
       type: String,
@@ -135,7 +140,7 @@ const questionSchema = new mongoose.Schema(
         // Unique option identifier (e.g. 'opt_1', 'A')
         id: { type: String, required: true },
         // Text display label for this choice option
-        text: { type: String, required: true },
+        text: { type: String, default: '' },
         // Flag for correct option in question bank
         isCorrect: { type: Boolean, default: false },
         // Explanation for this option
@@ -380,7 +385,7 @@ questionSchema.pre('validate', function (next) {
   } else if (this.questionText && !this.statement) {
     this.statement = this.questionText;
   }
-  if (!this.questionText && !this.statement) {
+  if (this.status === 'PUBLISHED' && !String(this.questionText || '').trim() && !String(this.statement || '').trim()) {
     return next(new Error('Question prompt is required'));
   }
   if (this.questionType && !this.type) {

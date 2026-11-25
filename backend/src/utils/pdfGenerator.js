@@ -380,6 +380,297 @@ class PdfGenerator {
   }
 
   /**
+   * Wrap long text into bounded lines for A4 portrait report layout.
+   */
+  wrapTextLines(text, maxChars = 88) {
+    const clean = String(text || '')
+      .replace(/[^\x20-\x7E\r\n]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+    if (!clean) return [];
+    const words = clean.split(' ');
+    const lines = [];
+    let current = '';
+    for (const w of words) {
+      if (!current) {
+        current = w.length > maxChars ? w.slice(0, maxChars) : w;
+      } else if (current.length + 1 + w.length <= maxChars) {
+        current += ` ${w}`;
+      } else {
+        lines.push(current);
+        current = w.length > maxChars ? w.slice(0, maxChars) : w;
+      }
+    }
+    if (current) lines.push(current);
+    return lines;
+  }
+
+  /**
+   * Generate an ISO 32000-1 (PDF 1.4) Individual Exam Performance Report PDF buffer
+   * from an authoritative finalized exam report payload.
+   */
+  async generateExamReportPdf(report) {
+    const { width, height } = this.PAGE_SIZES.A4;
+    const marginX = 48;
+    const contentWidth = width - marginX * 2;
+    const topY = height - 48;
+    const bottomY = 54;
+
+    const meta = report?.meta || {};
+    const student = report?.student || {};
+    const outcome = report?.outcome || {};
+    const counts = report?.counts || {};
+    const feedback = report?.feedback || {};
+    const topicBreakdown = Array.isArray(report?.topicBreakdown) ? report.topicBreakdown : [];
+    const questionBreakdown = Array.isArray(report?.questionBreakdown) ? report.questionBreakdown : [];
+
+    const pages = [];
+    let stream = '';
+    let y = topY;
+
+    const drawPageChrome = (pageNum) => {
+      let s = '';
+      // Top header rule & banner
+      s += '0.878 0.365 0.220 rg\n';
+      s += `${marginX} ${height - 32} ${contentWidth} 3 re f\n`;
+      if (pageNum === 1) {
+        s += 'BT\n/F2 16 Tf\n0.12 0.16 0.22 rg\n';
+        s += `${marginX} ${height - 56} Td\n(${this.escapePdfString('Unified Assessment Platform')}) Tj\nET\n`;
+        s += 'BT\n/F1 10 Tf\n0.39 0.45 0.55 rg\n';
+        s += `${marginX} ${height - 72} Td\n(${this.escapePdfString('Individual Exam Performance Report')}) Tj\nET\n`;
+      } else {
+        s += 'BT\n/F2 10 Tf\n0.39 0.45 0.55 rg\n';
+        s += `${marginX} ${height - 52} Td\n(${this.escapePdfString(`${meta.examName || 'Exam'} - Performance Report (cont.)`)}) Tj\nET\n`;
+      }
+      return s;
+    };
+
+    const startPage = () => {
+      const pageNum = pages.length + 1;
+      stream = drawPageChrome(pageNum);
+      y = pageNum === 1 ? height - 96 : height - 74;
+    };
+
+    const ensureSpace = (needed) => {
+      if (y - needed < bottomY) {
+        pages.push(stream);
+        startPage();
+      }
+    };
+
+    const writeText = (text, { font = 'F1', size = 10, x = marginX, color = '0.15 0.18 0.24', lineStep = 14 } = {}) => {
+      ensureSpace(lineStep);
+      stream += `BT\n/${font} ${size} Tf\n${color} rg\n${x} ${y} Td\n(${this.escapePdfString(text)}) Tj\nET\n`;
+      y -= lineStep;
+    };
+
+    const drawSectionHeading = (title) => {
+      ensureSpace(26);
+      y -= 6;
+      stream += '0.93 0.94 0.96 rg\n';
+      stream += `${marginX} ${y - 4} ${contentWidth} 18 re f\n`;
+      stream += `BT\n/F2 10.5 Tf\n0.12 0.16 0.22 rg\n${marginX + 6} ${y + 1} Td\n(${this.escapePdfString(title)}) Tj\nET\n`;
+      y -= 20;
+    };
+
+    startPage();
+
+    // Exam & Student Details
+    drawSectionHeading('Examination & Candidate Summary');
+    const examTypeDisplay = meta.examinationTag
+      ? `${meta.examTypeLabel || 'Mock Test'} (${meta.examinationTag})`
+      : (meta.examTypeLabel || 'Assessment');
+    const dateText = meta.evaluatedAt
+      ? new Date(meta.evaluatedAt).toISOString().split('T')[0]
+      : (meta.submittedAt ? new Date(meta.submittedAt).toISOString().split('T')[0] : 'N/A');
+
+    writeText(`Exam Name: ${meta.examName || 'Examination'}`, { font: 'F2', size: 10.5 });
+    writeText(`Type: ${examTypeDisplay}   |   Subject: ${meta.subject || 'General'}   |   Evaluated Date: ${dateText}`, { size: 9.5, color: '0.35 0.42 0.52' });
+    writeText(
+      `Student: ${student.name || 'Student'}${student.studentId ? ` (ID: ${student.studentId})` : ''}${student.department ? `   |   Department: ${student.department}` : ''}`,
+      { size: 9.5, color: '0.25 0.30 0.38' }
+    );
+
+    // Outcome Summary
+    drawSectionHeading('Final Evaluation Outcome');
+    const resultColor = outcome.passed ? '0.06 0.50 0.32' : '0.75 0.15 0.20';
+    writeText(
+      `Result: ${outcome.resultLabel || (outcome.passed ? 'Passed' : 'Failed')}   |   Score: ${outcome.score ?? 0} / ${outcome.totalMarks ?? 0}   |   Percentage: ${outcome.percentage ?? 0}%   |   Passing Threshold: ${outcome.passingThreshold ?? 60}%`,
+      { font: 'F2', size: 10, color: resultColor }
+    );
+    if (outcome.grade) {
+      writeText(
+        `Grade: ${outcome.grade}${outcome.gradeLabel ? ` (${outcome.gradeLabel})` : ''}`,
+        { font: 'F2', size: 9.5, color: '0.25 0.30 0.38' }
+      );
+    }
+    writeText(
+      `Answer Breakdown: Correct ${counts.correct ?? 0}   |   Incorrect ${counts.incorrect ?? 0}   |   Unanswered ${counts.unanswered ?? 0}   |   Total Questions ${counts.totalQuestions ?? questionBreakdown.length}`,
+      { size: 9.5, color: '0.35 0.42 0.52' }
+    );
+
+    // Faculty Feedback
+    if (feedback.generalFeedback || feedback.outcomeFeedback || feedback.evaluatorName) {
+      drawSectionHeading('Faculty Feedback & Remarks');
+      if (feedback.evaluatorName) {
+        writeText(`Evaluated By: ${feedback.evaluatorName}`, { font: 'F2', size: 9.5 });
+      }
+      if (feedback.generalFeedback) {
+        for (const line of this.wrapTextLines(feedback.generalFeedback, 90)) {
+          writeText(line, { size: 9.5, lineStep: 13 });
+        }
+      }
+      if (feedback.outcomeFeedback) {
+        for (const line of this.wrapTextLines(feedback.outcomeFeedback, 90)) {
+          writeText(line, { size: 9.5, color: '0.35 0.42 0.52', lineStep: 13 });
+        }
+      }
+    }
+
+    // Topic-Wise Breakdown (only when real topic data exists)
+    if (topicBreakdown.length > 0) {
+      drawSectionHeading('Topic-Wise Performance');
+      for (const topic of topicBreakdown) {
+        writeText(
+          `- ${topic.topicName}: ${topic.correctCount}/${topic.totalQuestions} correct (${topic.accuracyPercentage}%)`,
+          { size: 9.5, lineStep: 13 }
+        );
+      }
+    }
+
+    // Question-Wise Performance
+    if (questionBreakdown.length > 0) {
+      drawSectionHeading('Question-Wise Performance');
+      for (const q of questionBreakdown) {
+        const headerLine = `Q${q.questionNumber} [${String(q.status || '').toUpperCase()}] ${q.marksAwarded}/${q.maxMarks} marks (${q.questionType || 'Question'})`;
+        writeText(headerLine, { font: 'F2', size: 9.5, lineStep: 13 });
+        const promptLines = this.wrapTextLines(q.prompt || '', 88).slice(0, 3);
+        for (const line of promptLines) {
+          writeText(line, { x: marginX + 10, size: 9, color: '0.30 0.35 0.42', lineStep: 12 });
+        }
+        if (q.codingDetails && q.codingDetails.executionResult) {
+          const er = q.codingDetails.executionResult;
+          const summary = `Code/SQL (${q.codingDetails.language || 'runtime'}): Verdict=${er.verdict || 'N/A'}${
+            typeof er.passedCount === 'number' && typeof er.totalCount === 'number'
+              ? `, Test Cases=${er.passedCount}/${er.totalCount}`
+              : ''
+          }`;
+          writeText(summary, { x: marginX + 10, size: 8.5, color: '0.25 0.35 0.48', lineStep: 12 });
+        }
+        if (q.feedback) {
+          for (const line of this.wrapTextLines(`Remark: ${q.feedback}`, 86)) {
+            writeText(line, { x: marginX + 10, size: 8.5, color: '0.45 0.30 0.12', lineStep: 12 });
+          }
+        }
+        y -= 3;
+      }
+    }
+
+    // AI Integration Disclaimer
+    drawSectionHeading('AI Performance Analysis (Integration Status)');
+    for (const line of this.wrapTextLines(
+      report?.aiPredictor?.disclaimer ||
+        'AI Performance Analysis is not yet operational. Official scores and pass/fail outcomes are determined solely by faculty and automated evaluation.',
+      90
+    )) {
+      writeText(line, { size: 8.5, color: '0.40 0.45 0.52', lineStep: 12 });
+    }
+
+    pages.push(stream);
+    return this.buildMultiPagePdfDocument(width, height, pages);
+  }
+
+  /**
+   * Constructs a multi-page PDF 1.4 document from an array of page content streams.
+   */
+  buildMultiPagePdfDocument(width, height, pageStreams) {
+    const pages = Array.isArray(pageStreams) && pageStreams.length > 0 ? pageStreams : [''];
+    const objects = [];
+    const totalPages = pages.length;
+
+    // 1: Catalog, 2: Pages, 3..3+N-1: Page objects, next N: Stream objects, last 3: Fonts
+    const firstPageObjNum = 3;
+    const firstStreamObjNum = firstPageObjNum + totalPages;
+    const fontF1Num = firstStreamObjNum + totalPages;
+    const fontF2Num = fontF1Num + 1;
+    const fontF3Num = fontF1Num + 2;
+
+    const kidsRefs = [];
+    for (let i = 0; i < totalPages; i++) {
+      kidsRefs.push(`${firstPageObjNum + i} 0 R`);
+    }
+
+    objects.push({
+      num: 1,
+      body: `1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n`,
+    });
+    objects.push({
+      num: 2,
+      body: `2 0 obj\n<< /Type /Pages /Kids [${kidsRefs.join(' ')}] /Count ${totalPages} >>\nendobj\n`,
+    });
+
+    for (let i = 0; i < totalPages; i++) {
+      const pageObjNum = firstPageObjNum + i;
+      const streamObjNum = firstStreamObjNum + i;
+      objects.push({
+        num: pageObjNum,
+        body: `${pageObjNum} 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${width} ${height}] /Contents ${streamObjNum} 0 R /Resources << /Font << /F1 ${fontF1Num} 0 R /F2 ${fontF2Num} 0 R /F3 ${fontF3Num} 0 R >> >> >>\nendobj\n`,
+      });
+    }
+
+    for (let i = 0; i < totalPages; i++) {
+      const streamObjNum = firstStreamObjNum + i;
+      const footer = `\nBT\n/F1 8 Tf\n0.5 0.55 0.6 rg\n48 28 Td\n(${this.escapePdfString(`Unified Assessment Platform  |  Page ${i + 1} of ${totalPages}`)}) Tj\nET\n`;
+      const fullStream = `${pages[i]}${footer}`;
+      const streamLength = Buffer.byteLength(fullStream, 'utf-8');
+      objects.push({
+        num: streamObjNum,
+        body: `${streamObjNum} 0 obj\n<< /Length ${streamLength} >>\nstream\n${fullStream}\nendstream\nendobj\n`,
+      });
+    }
+
+    objects.push({
+      num: fontF1Num,
+      body: `${fontF1Num} 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>\nendobj\n`,
+    });
+    objects.push({
+      num: fontF2Num,
+      body: `${fontF2Num} 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>\nendobj\n`,
+    });
+    objects.push({
+      num: fontF3Num,
+      body: `${fontF3Num} 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Oblique /Encoding /WinAnsiEncoding >>\nendobj\n`,
+    });
+
+    const pdfHeader = '%PDF-1.4\n%\xE2\xE3\xCF\xD3\n';
+    let offset = Buffer.byteLength(pdfHeader, 'utf-8');
+    const xrefOffsets = [];
+    let pdfBody = '';
+
+    for (const obj of objects) {
+      xrefOffsets[obj.num] = offset;
+      pdfBody += obj.body;
+      offset += Buffer.byteLength(obj.body, 'utf-8');
+    }
+
+    const startXref = offset;
+    let xref = `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n`;
+    for (let i = 1; i <= objects.length; i++) {
+      const pos = String(xrefOffsets[i]).padStart(10, '0');
+      xref += `${pos} 00000 n \n`;
+    }
+
+    const trailer = `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${startXref}\n%%EOF\n`;
+
+    return Buffer.concat([
+      Buffer.from(pdfHeader, 'utf-8'),
+      Buffer.from(pdfBody, 'utf-8'),
+      Buffer.from(xref, 'utf-8'),
+      Buffer.from(trailer, 'utf-8'),
+    ]);
+  }
+
+  /**
    * Constructs the complete PDF 1.4 document including cross-reference table and trailer.
    */
   buildPdfDocument(width, height, contentStream) {

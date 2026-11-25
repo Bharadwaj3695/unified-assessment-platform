@@ -324,13 +324,20 @@ const AssessmentsList = () => {
 
                     {/* Status Badge */}
                     <TableCell>
-                      <Badge
-                        variant={isPublished ? 'sage' : isDraft ? 'peach' : 'neutral'}
-                        size="sm"
-                        dot
-                      >
-                        {asmt.status}
-                      </Badge>
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <Badge
+                          variant={isPublished ? 'sage' : isDraft ? 'peach' : 'neutral'}
+                          size="sm"
+                          dot
+                        >
+                          {asmt.status}
+                        </Badge>
+                        {isDraft && (asmt.isIncomplete || asmt.draftStatus === 'incomplete') && (
+                          <Badge variant="warning" size="sm">
+                            Incomplete
+                          </Badge>
+                        )}
+                      </div>
                     </TableCell>
 
                     {/* Access Type Badge */}

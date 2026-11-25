@@ -34,6 +34,38 @@ router.get(
   analyticsController.getStudentStreak
 );
 
+// Query exam-wise progress for a student (GET /api/analytics/student/exam-progress)
+router.get(
+  '/student/exam-progress',
+  authenticate,
+  authorize('student', 'instructor', 'admin'),
+  analyticsController.getStudentExamProgress
+);
+
+// Query integration-ready AI performance analysis contract (GET /api/analytics/student/ai-predictor)
+router.get(
+  '/student/ai-predictor',
+  authenticate,
+  authorize('student', 'instructor', 'admin'),
+  analyticsController.getStudentAiPredictor
+);
+
+// Individual finalized exam performance report JSON (GET /api/analytics/reports/:attemptType/:attemptId)
+router.get(
+  '/reports/:attemptType/:attemptId',
+  authenticate,
+  authorize('student', 'instructor', 'admin'),
+  analyticsController.getIndividualExamReport
+);
+
+// Individual finalized exam performance report PDF (GET /api/analytics/reports/:attemptType/:attemptId/pdf)
+router.get(
+  '/reports/:attemptType/:attemptId/pdf',
+  authenticate,
+  authorize('student', 'instructor', 'admin'),
+  analyticsController.downloadIndividualExamReportPdf
+);
+
 // Leaderboard (All authenticated roles)
 // Retrieve top performing students leaderboard across platform assessments (GET /api/analytics/leaderboard)
 router.get(

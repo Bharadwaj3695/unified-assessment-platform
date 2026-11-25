@@ -7,7 +7,7 @@ export default function MockTestBlueprintModal({ isOpen, onClose, subjects = [],
   const [formData, setFormData] = useState({
     title: '',
     description: '',
-    examination: 'GATE',
+    examination: '',
     subjectId: subjects[0]?._id || '',
     topicIds: [],
     durationMinutes: 60,
@@ -51,6 +51,10 @@ export default function MockTestBlueprintModal({ isOpen, onClose, subjects = [],
       toast.error('Please enter a mock test title.');
       return;
     }
+    if (!String(formData.examination || '').trim()) {
+      toast.error('Please enter a target examination.');
+      return;
+    }
     if (!formData.subjectId) {
       toast.error('Please select a subject.');
       return;
@@ -59,7 +63,10 @@ export default function MockTestBlueprintModal({ isOpen, onClose, subjects = [],
     try {
       setSubmitting(true);
       // Create Mock Test
-      const createRes = await uapQuestionBankService.createMockTest(formData);
+      const createRes = await uapQuestionBankService.createMockTest({
+        ...formData,
+        examination: String(formData.examination).trim(),
+      });
       const testId = createRes.data._id || createRes.data.id;
 
       // Auto-generate question selection from blueprint
@@ -116,14 +123,19 @@ export default function MockTestBlueprintModal({ isOpen, onClose, subjects = [],
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
-              <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+              <label
+                htmlFor="blueprint-target-examination"
+                className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1"
+              >
                 Target Examination
               </label>
               <input
+                id="blueprint-target-examination"
                 type="text"
                 value={formData.examination}
                 onChange={(e) => setFormData((prev) => ({ ...prev, examination: e.target.value }))}
-                placeholder="e.g. GATE, Placement, Institutional"
+                placeholder="Enter examination name"
+                data-testid="blueprint-input-target-examination"
                 className="w-full p-2.5 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800"
               />
             </div>
