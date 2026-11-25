@@ -54,6 +54,8 @@ import StudentCertifications from '../pages/student/Certifications';
 import InstructorDashboard from '../pages/instructor/Dashboard';
 // Import the dedicated multi-paradigm test creation hub
 import CreateTest from '../pages/instructor/CreateTest';
+// Import the unified Test Creator Studio
+import TestCreatorStudio from '../pages/instructor/TestCreatorStudio';
 // Import the consolidated Question Bank Hub and Question Studio
 import QuestionBankHub from '../pages/instructor/QuestionBankHub';
 import QuestionStudio from '../pages/instructor/QuestionStudio';
@@ -207,13 +209,15 @@ const AppRoutes = () => {
             <Route path="dashboard" element={<InstructorDashboard />} />
             {/* Dedicated Create Test paradigm selector */}
             <Route path="create-test" element={<CreateTest />} />
+            {/* Unified Test Creator Studio */}
+            <Route path="test-creator" element={<TestCreatorStudio />} />
             {/* Instructor assessments management list */}
             <Route path="assessments" element={<AssessmentsList />} />
             <Route path="tests" element={<AssessmentsList />} />
             {/* Assessment creation builder screen */}
-            <Route path="create" element={<AssessmentBuilder />} />
+            <Route path="create" element={<TestCreatorStudio />} />
             {/* Assessment editing builder screen by ID */}
-            <Route path="edit/:id" element={<AssessmentBuilder />} />
+            <Route path="edit/:id" element={<TestCreatorStudio />} />
             {/* Student exam submissions queue for grading */}
             <Route path="submissions" element={<SubmissionsQueue />} />
             {/* Detailed submission grading and evaluation studio by attempt ID */}

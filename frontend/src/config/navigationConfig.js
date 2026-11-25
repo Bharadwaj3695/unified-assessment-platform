@@ -81,53 +81,80 @@ export const studentNavigation = {
       collapsible: true,
       // Array of navigation items for assessment and certification
       items: [
-        // Navigation item linking to assessment exam catalog (My Assessments)
+        // Navigation item linking to Available Tests
         {
           // Unique item identifier
-          id: 'student-assessments',
+          id: 'student-tests',
           // Display label in navigation menu
-          name: 'My Assessments',
+          name: 'Available Tests',
           // Target URL path to assessment catalog
-          path: '/student/catalog',
+          path: '/student/tests',
           // Lucide icon representing courses and examinations
           icon: BookOpen,
           // URL prefix patterns matching catalog, active exam attempt, and legacy aliases
-          matchPatterns: ['/student/catalog', '/student/attempt', '/student/assessments'],
+          matchPatterns: [
+            '/student/tests',
+            '/student/catalog',
+            '/student/attempt',
+            '/student/assessments',
+            '/student/mock-tests',
+            '/student/mock-test',
+          ],
           // Description of assessment section contents
           description: 'Browse available course exams, quizzes, and timed tests',
-        // Conclude student-assessments item definition
+        // Conclude student-tests item definition
         },
-        // Navigation item linking to student certifications
+        // Navigation item linking to My Attempts
         {
           // Unique item identifier
-          id: 'student-certifications',
+          id: 'student-attempts',
           // Display label in navigation menu
-          name: 'My Certifications',
-          // Target URL path to student certifications
-          path: '/student/certifications',
-          // Lucide icon representing accredited awards and certificates
-          icon: Award,
-          // URL prefix patterns matching student certification routes
-          matchPatterns: ['/student/certifications', '/student/my-certifications'],
-          // Description of certifications section contents
-          description: 'View and download earned course certificates and accredited credentials',
-        // Conclude student-certifications item definition
-        },
-        // Navigation item linking to exam submissions history
-        {
-          // Unique item identifier
-          id: 'student-submissions',
-          // Display label in navigation menu
-          name: 'Submissions',
-          // Target URL path to submissions list
-          path: '/student/submissions',
-          // Lucide icon representing graded files and evaluations
+          name: 'My Attempts',
+          // Target URL path to attempts list
+          path: '/student/attempts',
+          // Lucide icon representing attempts and submissions
           icon: FileCheck2,
-          // URL patterns matching submission history view
-          matchPatterns: ['/student/submissions'],
-          // Description of submission history features
-          description: 'Review submitted attempts, evaluated scores, and instructor feedback',
-        // Conclude student-submissions item definition
+          // URL patterns matching attempts and submissions view
+          matchPatterns: ['/student/attempts', '/student/submissions'],
+          // Description of attempts section contents
+          description: 'Review in-progress and submitted exam attempts',
+        // Conclude student-attempts item definition
+        },
+        // Navigation item linking to My Results
+        {
+          // Unique item identifier
+          id: 'student-results',
+          // Display label in navigation menu
+          name: 'My Results',
+          // Target URL path to results and certifications
+          path: '/student/results',
+          // Lucide icon representing accredited awards and results
+          icon: Award,
+          // URL prefix patterns matching student results and certification routes
+          matchPatterns: [
+            '/student/results',
+            '/student/certifications',
+            '/student/my-certifications',
+          ],
+          // Description of results section contents
+          description: 'View evaluation scores, feedback, and earned course certificates',
+        // Conclude student-results item definition
+        },
+        // Navigation item linking to student progress trajectory
+        {
+          // Unique item identifier
+          id: 'student-progress',
+          // Display label in navigation menu
+          name: 'Progress',
+          // Target URL path to progress view
+          path: '/student/progress',
+          // Lucide icon representing telemetry and growth
+          icon: Activity,
+          // URL patterns matching progress view
+          matchPatterns: ['/student/progress'],
+          // Description of progress metrics
+          description: 'Track academic performance streaks, subject mastery, and score trends',
+        // Conclude student-progress item definition
         },
       // Conclude items array
       ],
@@ -206,52 +233,49 @@ export const instructorNavigation = {
       ],
     // Conclude instructor-workspace section
     },
-    // Assessments and content authoring section
+    // Tests and content authoring section
     {
       // Unique section identifier
       id: 'instructor-assessments-section',
       // Section header title text
-      title: 'Assessments & Content',
+      title: 'Tests & Content',
       // Flag allowing the section to be collapsed
       collapsible: true,
-      // Array of navigation items for assessments management
+      // Array of navigation items for assessments and test management
       items: [
-        // Navigation item linking to assessment list
+        // Navigation item linking to My Tests list
         {
           // Unique item identifier
-          id: 'instructor-assessments',
+          id: 'instructor-tests',
           // Display label in navigation menu
-          name: 'My Assessments',
-          // Target URL path for assessment list
-          path: '/instructor/assessments',
+          name: 'My Tests',
+          // Target URL path for tests list
+          path: '/instructor/tests',
           // Lucide book icon
           icon: BookOpen,
-          // URL patterns covering assessments list, editing, and analytics views
+          // URL patterns covering tests list, legacy assessments, editing, and analytics views
           matchPatterns: [
-            // Matches assessments list view
+            '/instructor/tests',
             '/instructor/assessments',
-            // Matches assessment builder edit mode
             '/instructor/edit',
-            // Matches assessment analytics report
             '/instructor/analytics',
-          // Conclude matchPatterns array
           ],
-          // Description of assessments management features
-          description: 'Manage, edit, publish, and inspect analytics for course assessments',
-        // Conclude instructor-assessments item definition
+          // Description of tests management features
+          description: 'Manage, edit, publish, and inspect analytics for course assessments and tests',
+        // Conclude instructor-tests item definition
         },
-        // Navigation item linking to assessment creation builder
+        // Navigation item linking to Create Test paradigm hub
         {
           // Unique item identifier
           id: 'instructor-create',
           // Display label in navigation menu
-          name: 'Create Assessment',
-          // Target URL path for assessment creation
-          path: '/instructor/create',
+          name: 'Create Test',
+          // Target URL path for test creation hub
+          path: '/instructor/create-test',
           // Lucide plus icon for new item creation
           icon: PlusCircle,
-          // URL patterns matching assessment builder create mode
-          matchPatterns: ['/instructor/create'],
+          // URL patterns matching test creation hub and builder create mode
+          matchPatterns: ['/instructor/create-test', '/instructor/create', '/instructor/test-creator'],
           // Description of assessment creation builder
           description: 'Compose new examinations, configure rules, and set grading rubrics',
         // Conclude instructor-create item definition
@@ -261,36 +285,22 @@ export const instructorNavigation = {
           // Unique item identifier
           id: 'instructor-question-bank',
           // Display label in navigation menu
-          name: 'Mock Bank',
-          // Target URL path to question bank
+          name: 'Question Bank',
+          // Target URL path to question bank hub
           path: '/instructor/question-bank',
           // Lucide database icon
           icon: Database,
-          // URL patterns matching question bank management
+          // URL patterns matching question bank management, studio, and imports
           matchPatterns: [
             '/instructor/question-bank',
-            '/instructor/question-studio',
             '/instructor/question-bank-hub',
+            '/instructor/mock-bank',
+            '/instructor/question-studio',
+            '/instructor/question-import',
           ],
           // Description of question bank repository
-          description: 'Reusable question repository categorized by discipline and difficulty',
+          description: 'Reusable question repository, mock bank blueprints, and bulk imports',
         // Conclude instructor-question-bank item definition
-        },
-        // Navigation item linking to question bulk import tool
-        {
-          // Unique item identifier
-          id: 'instructor-question-import',
-          // Display label in navigation menu
-          name: 'Import Questions',
-          // Target URL path to question import
-          path: '/instructor/question-import',
-          // Lucide cloud upload icon
-          icon: UploadCloud,
-          // URL patterns matching question bulk import views
-          matchPatterns: ['/instructor/question-import'],
-          // Description of question bulk import utility
-          description: 'Bulk import questions from formatted documents or structured spreadsheets',
-        // Conclude instructor-question-import item definition
         },
       // Conclude items array
       ],

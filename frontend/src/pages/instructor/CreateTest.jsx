@@ -1,288 +1,176 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import {
-  BookOpen,
-  Sliders,
-  Sparkles,
-  Users,
-  ArrowRight,
-  Lock,
-  CheckCircle2,
-  Clock,
-  Shield,
-  FileCheck2,
-  Database,
-  Layers,
-  HelpCircle,
-} from 'lucide-react';
-import Card from '../../components/ui/Card';
+import { BookOpen, Sliders, ArrowRight, CheckCircle2, Circle } from 'lucide-react';
 import Badge from '../../components/ui/Badge';
 import Button from '../../components/ui/Button';
-import MockTestBlueprintModal from '../../components/instructor/MockTestBlueprintModal';
-import uapQuestionBankService from '../../services/uapQuestionBank.service';
 
 /**
- * Dedicated Create Test Entry Point
- * Displays 4 testing paradigm cards:
- * 1. Assessment (Course/Classroom timed exam) -> launches AssessmentBuilder
- * 2. Mock Test (Practice blueprint exam) -> launches MockTestBlueprintModal
- * 3. AI Mock Interview (Coming soon placeholder)
- * 4. Faculty Interview (Coming soon placeholder)
+ * Faculty Create Test Hub
+ * Compact, concise, action-focused test type selector.
  */
 export default function CreateTest() {
   const navigate = useNavigate();
-  const [isMockModalOpen, setIsMockModalOpen] = useState(false);
-  const [subjects, setSubjects] = useState([]);
-  const [loadingSubjects, setLoadingSubjects] = useState(false);
+  const [selectedTestType, setSelectedTestType] = useState('assessment');
 
-  useEffect(() => {
-    async function fetchSubjects() {
-      try {
-        setLoadingSubjects(true);
-        const res = await uapQuestionBankService.getSubjects();
-        setSubjects(res.data || []);
-      } catch (_err) {
-        setSubjects([]);
-      } finally {
-        setLoadingSubjects(false);
-      }
-    }
-    fetchSubjects();
-  }, []);
+  const handleLaunch = () => {
+    navigate(`/instructor/test-creator?type=${selectedTestType}`);
+  };
 
   return (
-    <div className="space-y-6 pb-12">
+    <div className="space-y-6 pb-12 max-w-5xl mx-auto" data-testid="faculty-create-test-hub">
       {/* Page Header */}
-      <div className="rounded-3xl border border-surface-light-border dark:border-surface-dark-border bg-gradient-to-r from-[#FFF4EB] via-white to-[#EEF6F4] dark:from-[#241712] dark:via-surface-dark dark:to-[#132822] p-6 lg:p-8 shadow-warm-xs">
-        <div className="max-w-2xl">
-          <div className="flex items-center space-x-2 mb-2">
-            <Badge variant="sage" size="sm" dot>
-              Faculty Workspace
-            </Badge>
-            <span className="text-xs font-semibold text-slate-400 dark:text-slate-500">
-              · Test Creation Hub
-            </span>
-          </div>
-          <h1 className="text-2xl sm:text-3xl lg:text-4xl font-bold font-display tracking-tight text-slate-900 dark:text-slate-100">
-            Create Test & Examination
-          </h1>
-          <p className="mt-2 text-sm text-slate-600 dark:text-slate-300 leading-relaxed">
-            Select the testing paradigm for your curriculum. Author structured course assessments,
-            generate syllabus-calibrated mock blueprints, or plan live oral examinations.
-          </p>
+      <div className="rounded-2xl border border-surface-light-border dark:border-surface-dark-border bg-white dark:bg-surface-dark p-6 shadow-warm-xs">
+        <div className="flex items-center space-x-2 mb-2 text-xs font-semibold text-slate-500 dark:text-slate-400">
+          <span>Faculty Workspace</span>
+          <span>/</span>
+          <span className="text-brand-primary dark:text-brand-peach">Create Test</span>
         </div>
+        <h1 className="text-2xl sm:text-3xl font-bold font-display tracking-tight text-slate-900 dark:text-slate-100">
+          Create Test
+        </h1>
+        <p className="mt-1 text-sm text-slate-600 dark:text-slate-400">
+          Select test type
+        </p>
       </div>
 
-      {/* 4 Central Cards Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        {/* Card 1: Course Assessment */}
-        <div className="rounded-2xl border border-surface-light-border dark:border-surface-dark-border bg-white dark:bg-surface-dark p-6 shadow-warm-xs hover:shadow-warm-md hover:border-brand-peach/60 transition-all flex flex-col justify-between">
+      {/* Two Selectable Cards Grid */}
+      <div
+        data-testid="create-test-two-cards-grid"
+        className="grid grid-cols-1 md:grid-cols-2 gap-5"
+      >
+        {/* Card 1: Assessment */}
+        <div
+          data-testid="card-assessment"
+          onClick={() => setSelectedTestType('assessment')}
+          className={`cursor-pointer rounded-2xl border p-5 sm:p-6 transition-all shadow-warm-xs flex flex-col justify-between ${
+            selectedTestType === 'assessment'
+              ? 'border-brand-primary ring-2 ring-brand-primary/20 bg-brand-primary-light/20 dark:bg-brand-primary-dark/20'
+              : 'border-surface-light-border dark:border-surface-dark-border bg-white dark:bg-surface-dark hover:border-brand-primary/40'
+          }`}
+        >
           <div>
             <div className="flex items-start justify-between mb-4">
-              <div className="w-12 h-12 rounded-xl bg-brand-primary-light dark:bg-brand-primary-dark text-brand-primary flex items-center justify-center shadow-warm-xs">
-                <BookOpen className="w-6 h-6" />
+              <div className="w-11 h-11 rounded-xl bg-brand-primary-light dark:bg-brand-primary-dark text-brand-primary flex items-center justify-center shadow-warm-xs">
+                <BookOpen className="w-5 h-5" />
               </div>
-              <Badge variant="sage" size="sm" dot>
-                Available
-              </Badge>
+              <div className="flex items-center gap-2">
+                <Badge variant="primary" size="sm">
+                  Assessment
+                </Badge>
+                {selectedTestType === 'assessment' ? (
+                  <CheckCircle2 className="w-5 h-5 text-brand-primary" />
+                ) : (
+                  <Circle className="w-5 h-5 text-slate-300 dark:text-slate-600" />
+                )}
+              </div>
             </div>
 
-            <h2 className="text-xl font-bold font-display text-slate-900 dark:text-white">
-              Course Assessment
+            <h2 className="text-lg sm:text-xl font-bold font-display tracking-tight text-slate-900 dark:text-white">
+              Assessment
             </h2>
-            <p className="text-xs text-slate-500 dark:text-slate-400 mt-1.5 leading-relaxed">
-              Classroom, course, and institutional examinations. Configure multiple-choice questions,
-              programming challenges, SQL sandboxes, subjective essays, and file submissions.
+            <p className="text-xs font-medium text-brand-primary dark:text-brand-peach mt-0.5">
+              Course assessment
             </p>
-
-            <div className="mt-4 pt-4 border-t border-slate-100 dark:border-slate-800 space-y-2">
-              <div className="flex items-center text-xs text-slate-600 dark:text-slate-400">
-                <Clock className="w-4 h-4 mr-2 text-slate-400" />
-                <span>Strict time windows & auto-submission</span>
-              </div>
-              <div className="flex items-center text-xs text-slate-600 dark:text-slate-400">
-                <Shield className="w-4 h-4 mr-2 text-slate-400" />
-                <span>Online proctoring & camera monitoring</span>
-              </div>
-              <div className="flex items-center text-xs text-slate-600 dark:text-slate-400">
-                <FileCheck2 className="w-4 h-4 mr-2 text-slate-400" />
-                <span>Automated test suites & faculty grading studio</span>
-              </div>
-            </div>
+            <p className="text-xs text-slate-600 dark:text-slate-400 mt-2">
+              Classroom, course, and institutional examinations.
+            </p>
           </div>
 
-          <div className="mt-6 pt-4 border-t border-slate-100 dark:border-slate-800">
+          <div className="mt-5 pt-4 border-t border-slate-100 dark:border-slate-800 flex justify-end">
             <Button
-              variant="primary"
-              size="md"
-              className="w-full justify-center"
-              icon={ArrowRight}
-              iconPosition="right"
-              onClick={() => navigate('/instructor/create')}
+              variant={selectedTestType === 'assessment' ? 'primary' : 'outline'}
+              size="sm"
+              onClick={(e) => {
+                e.stopPropagation();
+                setSelectedTestType('assessment');
+                navigate('/instructor/test-creator?type=assessment');
+              }}
             >
-              Create Assessment
+              Launch
             </Button>
           </div>
         </div>
 
         {/* Card 2: Mock Test */}
-        <div className="rounded-2xl border border-surface-light-border dark:border-surface-dark-border bg-white dark:bg-surface-dark p-6 shadow-warm-xs hover:shadow-warm-md hover:border-brand-sage/60 transition-all flex flex-col justify-between">
+        <div
+          data-testid="card-mock-test"
+          onClick={() => setSelectedTestType('mock')}
+          className={`cursor-pointer rounded-2xl border p-5 sm:p-6 transition-all shadow-warm-xs flex flex-col justify-between ${
+            selectedTestType === 'mock'
+              ? 'border-brand-sage ring-2 ring-brand-sage/20 bg-brand-sage-light/20 dark:bg-brand-sage-dark/20'
+              : 'border-surface-light-border dark:border-surface-dark-border bg-white dark:bg-surface-dark hover:border-brand-sage/40'
+          }`}
+        >
           <div>
             <div className="flex items-start justify-between mb-4">
-              <div className="w-12 h-12 rounded-xl bg-brand-sage-light dark:bg-brand-sage-dark text-brand-sage flex items-center justify-center shadow-warm-xs">
-                <Sliders className="w-6 h-6" />
+              <div className="w-11 h-11 rounded-xl bg-brand-sage-light dark:bg-brand-sage-dark text-brand-sage flex items-center justify-center shadow-warm-xs">
+                <Sliders className="w-5 h-5" />
               </div>
-              <Badge variant="sage" size="sm" dot>
-                Available
-              </Badge>
+              <div className="flex items-center gap-2">
+                <Badge variant="sage" size="sm">
+                  Mock Test
+                </Badge>
+                {selectedTestType === 'mock' ? (
+                  <CheckCircle2 className="w-5 h-5 text-brand-sage" />
+                ) : (
+                  <Circle className="w-5 h-5 text-slate-300 dark:text-slate-600" />
+                )}
+              </div>
             </div>
 
-            <h2 className="text-xl font-bold font-display text-slate-900 dark:text-white">
-              Mock Test & Blueprint
+            <h2 className="text-lg sm:text-xl font-bold font-display tracking-tight text-slate-900 dark:text-white">
+              Mock Test
             </h2>
-            <p className="text-xs text-slate-500 dark:text-slate-400 mt-1.5 leading-relaxed">
-              Practice exams, syllabus-calibrated blueprints, and immutable question snapshot
-              resolution drawn from the centralized Mock Bank repository.
+            <p className="text-xs font-medium text-brand-sage dark:text-emerald-400 mt-0.5">
+              Practice test
             </p>
-
-            <div className="mt-4 pt-4 border-t border-slate-100 dark:border-slate-800 space-y-2">
-              <div className="flex items-center text-xs text-slate-600 dark:text-slate-400">
-                <Database className="w-4 h-4 mr-2 text-slate-400" />
-                <span>Blueprint rules across subjects & topics</span>
-              </div>
-              <div className="flex items-center text-xs text-slate-600 dark:text-slate-400">
-                <Layers className="w-4 h-4 mr-2 text-slate-400" />
-                <span>Difficulty distribution (Easy, Medium, Hard)</span>
-              </div>
-              <div className="flex items-center text-xs text-slate-600 dark:text-slate-400">
-                <CheckCircle2 className="w-4 h-4 mr-2 text-slate-400" />
-                <span>Locked question version snapshots on publish</span>
-              </div>
-            </div>
-          </div>
-
-          <div className="mt-6 pt-4 border-t border-slate-100 dark:border-slate-800">
-            <Button
-              variant="secondary"
-              size="md"
-              className="w-full justify-center"
-              icon={ArrowRight}
-              iconPosition="right"
-              onClick={() => setIsMockModalOpen(true)}
-            >
-              Create Mock Test
-            </Button>
-          </div>
-        </div>
-
-        {/* Card 3: AI Mock Interview */}
-        <div className="rounded-2xl border border-surface-light-border dark:border-surface-dark-border bg-slate-50/70 dark:bg-surface-dark/40 p-6 shadow-warm-xs flex flex-col justify-between opacity-85">
-          <div>
-            <div className="flex items-start justify-between mb-4">
-              <div className="w-12 h-12 rounded-xl bg-slate-200 dark:bg-slate-800 text-slate-500 dark:text-slate-400 flex items-center justify-center">
-                <Sparkles className="w-6 h-6" />
-              </div>
-              <Badge variant="neutral" size="sm">
-                Coming Soon
-              </Badge>
-            </div>
-
-            <h2 className="text-xl font-bold font-display text-slate-700 dark:text-slate-300">
-              AI Mock Interview
-            </h2>
-            <p className="text-xs text-slate-500 dark:text-slate-400 mt-1.5 leading-relaxed">
-              Autonomous AI-led technical and behavioral interview simulations. Generates real-time
-              follow-up questions, speech assessment, and competency scorecards.
+            <p className="text-xs text-slate-600 dark:text-slate-400 mt-2">
+              Syllabus-calibrated practice examinations and blueprints.
             </p>
-
-            <div className="mt-4 pt-4 border-t border-slate-200/60 dark:border-slate-800/60 space-y-2">
-              <div className="flex items-center text-xs text-slate-400">
-                <Lock className="w-4 h-4 mr-2" />
-                <span>Audio voice conversation & speech recognition</span>
-              </div>
-              <div className="flex items-center text-xs text-slate-400">
-                <Lock className="w-4 h-4 mr-2" />
-                <span>Adaptive domain-specific follow-up questions</span>
-              </div>
-              <div className="flex items-center text-xs text-slate-400">
-                <Lock className="w-4 h-4 mr-2" />
-                <span>Multi-parameter communication & technical grading</span>
-              </div>
-            </div>
           </div>
 
-          <div className="mt-6 pt-4 border-t border-slate-200/60 dark:border-slate-800/60">
+          <div className="mt-5 pt-4 border-t border-slate-100 dark:border-slate-800 flex justify-end">
             <Button
-              variant="outline"
-              size="md"
-              className="w-full justify-center opacity-60 cursor-not-allowed"
-              disabled
+              variant={selectedTestType === 'mock' ? 'sage' : 'outline'}
+              size="sm"
+              onClick={(e) => {
+                e.stopPropagation();
+                setSelectedTestType('mock');
+                navigate('/instructor/test-creator?type=mock');
+              }}
             >
-              Coming Soon
-            </Button>
-          </div>
-        </div>
-
-        {/* Card 4: Faculty Interview */}
-        <div className="rounded-2xl border border-surface-light-border dark:border-surface-dark-border bg-slate-50/70 dark:bg-surface-dark/40 p-6 shadow-warm-xs flex flex-col justify-between opacity-85">
-          <div>
-            <div className="flex items-start justify-between mb-4">
-              <div className="w-12 h-12 rounded-xl bg-slate-200 dark:bg-slate-800 text-slate-500 dark:text-slate-400 flex items-center justify-center">
-                <Users className="w-6 h-6" />
-              </div>
-              <Badge variant="neutral" size="sm">
-                Coming Soon
-              </Badge>
-            </div>
-
-            <h2 className="text-xl font-bold font-display text-slate-700 dark:text-slate-300">
-              Faculty Face-to-Face Viva
-            </h2>
-            <p className="text-xs text-slate-500 dark:text-slate-400 mt-1.5 leading-relaxed">
-              Faculty-led live 1-on-1 student oral examinations, capstone defense sessions,
-              and synchronized rubric evaluation workflows.
-            </p>
-
-            <div className="mt-4 pt-4 border-t border-slate-200/60 dark:border-slate-800/60 space-y-2">
-              <div className="flex items-center text-xs text-slate-400">
-                <Lock className="w-4 h-4 mr-2" />
-                <span>Live video conferencing & student identity check</span>
-              </div>
-              <div className="flex items-center text-xs text-slate-400">
-                <Lock className="w-4 h-4 mr-2" />
-                <span>Instant oral viva rubric score submission</span>
-              </div>
-              <div className="flex items-center text-xs text-slate-400">
-                <Lock className="w-4 h-4 mr-2" />
-                <span>Multi-faculty panel score normalization</span>
-              </div>
-            </div>
-          </div>
-
-          <div className="mt-6 pt-4 border-t border-slate-200/60 dark:border-slate-800/60">
-            <Button
-              variant="outline"
-              size="md"
-              className="w-full justify-center opacity-60 cursor-not-allowed"
-              disabled
-            >
-              Coming Soon
+              Launch
             </Button>
           </div>
         </div>
       </div>
 
-      {/* Modal for Mock Test Blueprint creation */}
-      {isMockModalOpen && (
-        <MockTestBlueprintModal
-          isOpen={isMockModalOpen}
-          onClose={() => setIsMockModalOpen(false)}
-          subjects={subjects}
-          onCreated={() => {
-            navigate('/instructor/assessments');
-          }}
-        />
-      )}
+      {/* Selected Action Bar */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-4 rounded-2xl border border-surface-light-border dark:border-surface-dark-border bg-white dark:bg-surface-dark shadow-warm-xs">
+        <div className="flex items-center gap-2.5">
+          <span className="text-xs font-semibold text-slate-600 dark:text-slate-400">
+            Selected Test Type:
+          </span>
+          <Badge
+            variant={selectedTestType === 'assessment' ? 'primary' : 'sage'}
+            size="md"
+            dot
+          >
+            {selectedTestType === 'assessment' ? 'Course assessment' : 'Practice test'}
+          </Badge>
+        </div>
+
+        <Button
+          variant="primary"
+          size="md"
+          icon={ArrowRight}
+          iconPosition="right"
+          onClick={handleLaunch}
+          data-testid="btn-launch-creator"
+        >
+          Launch Test Creator
+        </Button>
+      </div>
     </div>
   );
 }

@@ -150,12 +150,12 @@ const AssessmentsList = () => {
         <div>
           <div className="flex items-center space-x-2 mb-1">
             <Badge variant="sage" size="sm" dot>
-              My Assessments
+              {location.pathname.includes('/instructor/tests') ? 'My Tests' : 'My Assessments'}
             </Badge>
             <span className="text-xs text-slate-400">· Question Banks & Examinations</span>
           </div>
           <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-slate-900 dark:text-slate-100">
-            Course Assessments
+            {location.pathname.includes('/instructor/tests') ? 'My Tests & Course Assessments' : 'Course Assessments'}
           </h1>
           <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
             Author, configure, publish, and monitor your academic examinations and quizzes.

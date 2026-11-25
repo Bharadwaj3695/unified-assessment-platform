@@ -166,8 +166,16 @@ const StudentDashboard = () => {
 
   // Determine sub-view based on current route
   const currentView = useMemo(() => {
-    if (location.pathname.includes('/student/catalog')) return 'catalog';
-    if (location.pathname.includes('/student/submissions')) return 'submissions';
+    if (
+      location.pathname.includes('/student/catalog') ||
+      location.pathname.includes('/student/tests')
+    ) return 'catalog';
+    if (
+      location.pathname.includes('/student/submissions') ||
+      location.pathname.includes('/student/attempts') ||
+      location.pathname.includes('/student/results') ||
+      location.pathname.includes('/student/progress')
+    ) return 'submissions';
     if (location.pathname.includes('/student/profile')) return 'profile';
     return 'dashboard';
   }, [location.pathname]);
@@ -684,7 +692,7 @@ const StudentDashboard = () => {
     if (currentView === 'catalog') {
       return (
         <Card
-          title="Assessment Catalog"
+          title={location.pathname.includes('/student/tests') ? 'Available Tests' : 'Assessment Catalog'}
           subtitle="Browse all course examinations and quizzes available to your account"
         >
           <CardSkeleton count={6} />
@@ -694,7 +702,13 @@ const StudentDashboard = () => {
     if (currentView === 'submissions') {
       return (
         <Card
-          title="Your Assessment Submissions & Results"
+          title={
+            location.pathname.includes('/student/attempts')
+              ? 'My Attempts'
+              : location.pathname.includes('/student/results')
+              ? 'My Results'
+              : 'Your Assessment Submissions & Results'
+          }
           subtitle="Chronological record of exam attempts, scores, and evaluation feedback"
         >
           <TableSkeleton rows={5} columns={6} />
@@ -867,7 +881,7 @@ const StudentDashboard = () => {
       {/* 3. Sub-View: CATALOG / MY ASSESSMENTS */}
       {currentView === 'catalog' && (
         <Card
-          title="My Assessments"
+          title={location.pathname.includes('/student/tests') ? 'Available Tests' : 'My Assessments'}
           subtitle="Authoritative course examinations, timed tests, and reassignment requests"
           action={
             <div className="flex items-center space-x-1 border border-surface-light-border dark:border-surface-dark-border rounded-xl p-1 bg-slate-50 dark:bg-surface-dark-muted">
@@ -1980,7 +1994,15 @@ const StudentDashboard = () => {
 
           {/* Submissions History Feed */}
           <Card
-            title={currentView === 'submissions' ? 'Your Assessment Submissions & Results' : 'Recent Submissions'}
+            title={
+              location.pathname.includes('/student/attempts')
+                ? 'My Attempts'
+                : location.pathname.includes('/student/results')
+                ? 'My Results'
+                : currentView === 'submissions'
+                ? 'Your Assessment Submissions & Results'
+                : 'Recent Submissions'
+            }
             subtitle="Chronological record of exam attempts, scores, and evaluation feedback"
           >
             {/* Filter Tabs Toolbar */}

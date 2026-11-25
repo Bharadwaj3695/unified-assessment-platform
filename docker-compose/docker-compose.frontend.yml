@@ -13,12 +13,17 @@ services:
     container_name: uap-frontend
     restart: unless-stopped
     ports:
-      - "5173:5173"
+      - "80:80"
+      - "5173:80"
     environment:
       VITE_API_URL: http://localhost:5000/api
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:80/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
     volumes:
-      - ../frontend:/app
-      - /app/node_modules
+      - ../frontend/dist:/usr/share/nginx/html:ro
     networks:
       - uap-public-net
 
