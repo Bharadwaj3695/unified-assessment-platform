@@ -6,6 +6,8 @@ import {
   BookOpen,
   // Icon for submissions and evaluated exams
   FileCheck2,
+  // Icon for finalized result documents
+  FileText,
   // Icon for certificates, credentials, and achievements
   Award,
   // Icon for user profile and personal settings
@@ -126,19 +128,35 @@ export const studentNavigation = {
           id: 'student-results',
           // Display label in navigation menu
           name: 'My Results',
-          // Target URL path to results and certifications
+          // Target URL path to finalized results
           path: '/student/results',
           // Lucide icon representing accredited awards and results
+          icon: FileText,
+          // URL prefix patterns matching student results route
+          matchPatterns: ['/student/results'],
+          // Description of results section contents
+          description: 'View finalized exam scores, pass/fail outcomes, and reports',
+        // Conclude student-results item definition
+        },
+        // Navigation item linking to My Certificates
+        {
+          // Unique item identifier
+          id: 'student-certificates',
+          // Display label in navigation menu
+          name: 'My Certificates',
+          // Target URL path to earned certificates
+          path: '/student/certificates',
+          // Lucide icon representing earned certificates
           icon: Award,
-          // URL prefix patterns matching student results and certification routes
+          // URL prefix patterns matching student certificates routes
           matchPatterns: [
-            '/student/results',
+            '/student/certificates',
             '/student/certifications',
             '/student/my-certifications',
           ],
-          // Description of results section contents
-          description: 'View evaluation scores, feedback, and earned course certificates',
-        // Conclude student-results item definition
+          // Description of certificates section contents
+          description: 'View and download earned certificates in PDF, PNG, and JPG',
+        // Conclude student-certificates item definition
         },
         // Navigation item linking to student progress trajectory
         {

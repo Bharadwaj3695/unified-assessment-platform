@@ -30,6 +30,10 @@ export const submissionService = {
     const res = await api.get('/submissions/student');
     return res.data;
   },
+  getStudentSubmissionsPaginated: async (params = {}) => {
+    const res = await api.get('/submissions/student', { params });
+    return res;
+  },
   getSubmissionById: async (submissionId) => {
     const res = await api.get(`/submissions/${submissionId}`);
     return res.data;

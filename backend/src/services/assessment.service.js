@@ -3,6 +3,7 @@ const { Assessment, Question, User, Notification } = require('../models');
 const emailService = require('./email.service');
 const executionClient = require('./executionClient.service');
 const { validateGradingScheme, DEFAULT_GRADING_SCHEME } = require('../utils/gradingScheme');
+const { parsePaginationParams, resolvePageBounds, buildSortSpec } = require('../utils/pagination');
 
 class AssessmentService {
   async validateAssignedStudents(assignedStudents) {
@@ -338,8 +339,22 @@ class AssessmentService {
     return this.getAssessmentById(assessmentId, { id: instructorId, role: isAdmin ? 'admin' : 'instructor' });
   }
 
-  async getAssessments({ role, userId, status, category, search, dateFilter, page = 1, limit = 10, includePast = false }) {
+  async getAssessments({
+    role,
+    userId,
+    status,
+    category,
+    accessType,
+    search,
+    dateFilter,
+    sortBy,
+    sortOrder,
+    page = 1,
+    limit = 10,
+    includePast = false,
+  }) {
     const query = {};
+    const andConditions = [];
 
     if (dateFilter) {
       const now = new Date();
@@ -366,21 +381,31 @@ class AssessmentService {
         { accessType: { $exists: false } },
         { accessType: 'restricted', assignedStudents: { $in: [userObjId, userId.toString()] } },
       ];
-      if (includePast) {
-        query.$and = [{ $or: accessConditions }];
-      } else {
-        const deadlineConditions = [
-          { deadlineAt: null },
-          { deadlineAt: { $exists: false } },
-          { deadlineAt: { $gt: new Date() } },
-        ];
-        query.$and = [{ $or: accessConditions }, { $or: deadlineConditions }];
+      andConditions.push({ $or: accessConditions });
+      if (!includePast) {
+        andConditions.push({
+          $or: [
+            { deadlineAt: null },
+            { deadlineAt: { $exists: false } },
+            { deadlineAt: { $gt: new Date() } },
+          ],
+        });
       }
     } else if (role === 'instructor') {
       query.instructorId = userId;
-      if (status) query.status = status;
-    } else if (status) {
+      if (status && status !== 'all') query.status = status;
+    } else if (status && status !== 'all') {
       query.status = status;
+    }
+
+    if (accessType && accessType !== 'all') {
+      if (accessType === 'public') {
+        andConditions.push({
+          $or: [{ accessType: 'public' }, { accessType: { $exists: false } }],
+        });
+      } else {
+        query.accessType = accessType;
+      }
     }
 
     if (category && category.trim() !== '' && category.trim() !== 'All') {
@@ -390,36 +415,45 @@ class AssessmentService {
 
     if (search && search.trim() !== '') {
       const escapedSearch = search.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-      const searchCondition = [
-        { title: { $regex: escapedSearch, $options: 'i' } },
-        { description: { $regex: escapedSearch, $options: 'i' } },
-        { category: { $regex: escapedSearch, $options: 'i' } },
-      ];
-      if (query.$and) {
-        query.$and.push({ $or: searchCondition });
-      } else if (query.$or) {
-        query.$and = [{ $or: query.$or }, { $or: searchCondition }];
-        delete query.$or;
-      } else {
-        query.$or = searchCondition;
-      }
+      andConditions.push({
+        $or: [
+          { title: { $regex: escapedSearch, $options: 'i' } },
+          { description: { $regex: escapedSearch, $options: 'i' } },
+          { category: { $regex: escapedSearch, $options: 'i' } },
+        ],
+      });
     }
 
-    const parsedLimit = parseInt(limit, 10);
-    const limitNum = isNaN(parsedLimit) || parsedLimit <= 0 ? 10 : parsedLimit;
-    const parsedPage = parseInt(page, 10);
-    const pageNum = isNaN(parsedPage) || parsedPage <= 0 ? 1 : parsedPage;
-    const skip = (pageNum - 1) * limitNum;
+    if (andConditions.length > 0) {
+      query.$and = andConditions;
+    }
 
+    const { page: requestedPage, limit: parsedLimit } = parsePaginationParams({ page, limit }, 10, 200);
     const total = await Assessment.countDocuments(query);
+    const { page: pageNum, limit: limitNum, skip } = resolvePageBounds(requestedPage, parsedLimit, total);
+
+    const sortSpec = buildSortSpec(
+      sortBy,
+      sortOrder,
+      {
+        createdAt: 'createdAt',
+        updatedAt: 'updatedAt',
+        title: 'title',
+        durationMinutes: 'durationMinutes',
+        totalPoints: 'totalPoints',
+      },
+      'createdAt',
+      -1
+    );
+
     const assessments = await Assessment.find(query)
       .populate('instructorId', 'name email avatar')
       .populate('questions', 'id points type')
-      .sort({ createdAt: -1 })
+      .sort(sortSpec)
       .skip(skip)
       .limit(limitNum);
 
-    return { total, assessments };
+    return { total, page: pageNum, limit: limitNum, assessments };
   }
 
   async getAssessmentById(id, requestingUser = null) {
@@ -570,6 +604,29 @@ class AssessmentService {
       const err = new Error(`Question ${idx + 1} is empty. Please enter the question statement.`);
       err.statusCode = 400;
       throw err;
+    }
+
+    if (q.type === 'mcq' || q.type === 'multi_select') {
+      const opts = Array.isArray(q.options) ? q.options : [];
+      if (opts.length < 2) {
+        const err = new Error(`Question ${idx + 1} must have at least 2 answer options before publishing.`);
+        err.statusCode = 400;
+        throw err;
+      }
+      for (let i = 0; i < opts.length; i++) {
+        if (!opts[i]?.text || !String(opts[i].text).trim()) {
+          const letter = String.fromCharCode(65 + i);
+          const err = new Error(`Question ${idx + 1}: Option ${letter} is empty. Please enter the answer option.`);
+          err.statusCode = 400;
+          throw err;
+        }
+      }
+      const hasCorrect = opts.some((o) => Boolean(o?.isCorrect)) || Boolean(q.correctAnswer && String(q.correctAnswer).trim());
+      if (!hasCorrect) {
+        const err = new Error(`Question ${idx + 1} must have at least one correct answer selected before publishing.`);
+        err.statusCode = 400;
+        throw err;
+      }
     }
 
     if (q.type === 'code' || q.type === 'sql') {

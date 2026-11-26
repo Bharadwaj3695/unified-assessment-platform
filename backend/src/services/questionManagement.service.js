@@ -1,10 +1,11 @@
 const mongoose = require('mongoose');
-const { Question, QuestionVersion, Subject, Topic, AuditLog } = require('../models');
+const { Question, QuestionVersion, QuestionBank, Subject, Topic, AuditLog } = require('../models');
 const { validateQuestionObject } = require('../validators/question.validator');
 const {
   serializeQuestionForFaculty,
   serializeQuestionForStudent,
 } = require('../utils/questionSerializer');
+const { parsePaginationParams, resolvePageBounds, buildSortSpec } = require('../utils/pagination');
 
 class QuestionManagementService {
   /**
@@ -92,14 +93,17 @@ class QuestionManagementService {
    */
   async getQuestions(query = {}, user) {
     const filter = { assessmentId: null };
+    const andConditions = [];
 
     // Search dimensions
     if (query.subjectId) {
       if (mongoose.isValidObjectId(query.subjectId)) {
-        filter.$or = [
-          { subjectId: query.subjectId },
-          { subject: { $regex: query.subjectId, $options: 'i' } },
-        ];
+        andConditions.push({
+          $or: [
+            { subjectId: query.subjectId },
+            { subject: { $regex: query.subjectId, $options: 'i' } },
+          ],
+        });
       } else {
         filter.subject = { $regex: query.subjectId, $options: 'i' };
       }
@@ -109,10 +113,12 @@ class QuestionManagementService {
     }
     if (query.topicId) {
       if (mongoose.isValidObjectId(query.topicId)) {
-        filter.$or = [
-          { topicIds: query.topicId },
-          { topics: { $regex: query.topicId, $options: 'i' } },
-        ];
+        andConditions.push({
+          $or: [
+            { topicIds: query.topicId },
+            { topics: { $regex: query.topicId, $options: 'i' } },
+          ],
+        });
       } else {
         filter.topics = { $regex: query.topicId, $options: 'i' };
       }
@@ -141,15 +147,30 @@ class QuestionManagementService {
     if (query.facultyId) {
       filter.ownerFacultyId = query.facultyId;
     }
-    if (query.search) {
-      filter.$or = [
-        { statement: { $regex: query.search, $options: 'i' } },
-        { questionText: { $regex: query.search, $options: 'i' } },
-        { questionCode: { $regex: query.search, $options: 'i' } },
-        { conceptTags: { $regex: query.search, $options: 'i' } },
-        { subject: { $regex: query.search, $options: 'i' } },
-        { topics: { $regex: query.search, $options: 'i' } },
-      ];
+
+    const bankId = query.bankId || query.questionBankId;
+    if (bankId && mongoose.isValidObjectId(bankId)) {
+      const bankDoc = await QuestionBank.findById(bankId).select('questionIds').lean();
+      const bankQuestionIds = Array.isArray(bankDoc?.questionIds) ? bankDoc.questionIds : [];
+      filter._id = { $in: bankQuestionIds };
+    }
+
+    if (query.search && String(query.search).trim()) {
+      const escapedSearch = String(query.search).trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      andConditions.push({
+        $or: [
+          { statement: { $regex: escapedSearch, $options: 'i' } },
+          { questionText: { $regex: escapedSearch, $options: 'i' } },
+          { questionCode: { $regex: escapedSearch, $options: 'i' } },
+          { conceptTags: { $regex: escapedSearch, $options: 'i' } },
+          { subject: { $regex: escapedSearch, $options: 'i' } },
+          { topics: { $regex: escapedSearch, $options: 'i' } },
+        ],
+      });
+    }
+
+    if (andConditions.length > 0) {
+      filter.$and = andConditions;
     }
 
     // Role-based visibility
@@ -157,20 +178,31 @@ class QuestionManagementService {
       filter.status = 'PUBLISHED';
     }
 
-    const page = Math.max(1, parseInt(query.page, 10) || 1);
-    const limit = Math.min(100, Math.max(1, parseInt(query.limit, 10) || 20));
-    const skip = (page - 1) * limit;
+    const { page: requestedPage, limit: parsedLimit } = parsePaginationParams(query, 20, 100);
+    const total = await Question.countDocuments(filter);
+    const { page, limit, totalPages, skip } = resolvePageBounds(requestedPage, parsedLimit, total);
 
-    const [questions, total] = await Promise.all([
-      Question.find(filter)
-        .populate('subjectId', 'name code')
-        .populate('topicIds', 'name code')
-        .populate('ownerFacultyId', 'fullName email')
-        .sort({ createdAt: -1 })
-        .skip(skip)
-        .limit(limit),
-      Question.countDocuments(filter),
-    ]);
+    const sortSpec = buildSortSpec(
+      query.sortBy,
+      query.sortOrder,
+      {
+        createdAt: 'createdAt',
+        updatedAt: 'updatedAt',
+        difficulty: 'difficulty',
+        marks: 'marks',
+        questionCode: 'questionCode',
+      },
+      'createdAt',
+      -1
+    );
+
+    const questions = await Question.find(filter)
+      .populate('subjectId', 'name code')
+      .populate('topicIds', 'name code')
+      .populate('ownerFacultyId', 'fullName email')
+      .sort(sortSpec)
+      .skip(skip)
+      .limit(limit);
 
     const serialized = questions.map((q) =>
       user.role === 'student' ? serializeQuestionForStudent(q) : serializeQuestionForFaculty(q)
@@ -181,7 +213,7 @@ class QuestionManagementService {
       total,
       page,
       limit,
-      totalPages: Math.ceil(total / limit) || 1,
+      totalPages,
     };
   }
 

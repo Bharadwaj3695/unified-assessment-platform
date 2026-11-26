@@ -1,8 +1,9 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { toast } from 'react-toastify';
 import instructorService from '../../services/instructor.service';
 import { useRefresh } from '../../hooks/useRefresh';
+import useDebounce from '../../hooks/useDebounce';
 import Card from '../../components/ui/Card';
 import Badge from '../../components/ui/Badge';
 import Button from '../../components/ui/Button';
@@ -10,6 +11,8 @@ import Spinner from '../../components/ui/Spinner';
 import EmptyState from '../../components/ui/EmptyState';
 import ErrorState from '../../components/ui/ErrorState';
 import TableSkeleton from '../../components/ui/TableSkeleton';
+import Pagination, { PaginationJumpLink } from '../../components/ui/Pagination';
+import { DEFAULT_PAGE_SIZE, normalizePagination } from '../../utils/pagination';
 import {
   Table,
   TableHead,
@@ -34,14 +37,30 @@ const SubmissionsQueue = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState(null);
 
-  // Filters
+  // Filters & Pagination
   const [searchTerm, setSearchTerm] = useState('');
+  const debouncedSearch = useDebounce(searchTerm, 300);
   const [statusFilter, setStatusFilter] = useState('all');
+  const [sortBy, setSortBy] = useState('createdAt');
+  const [sortOrder, setSortOrder] = useState('desc');
+  const [page, setPage] = useState(1);
+  const [limit, setLimit] = useState(DEFAULT_PAGE_SIZE);
+  const [pagination, setPagination] = useState({
+    page: 1,
+    limit: DEFAULT_PAGE_SIZE,
+    total: 0,
+    totalPages: 1,
+  });
+  const listTopRef = useRef(null);
+  const paginationRef = useRef(null);
 
   useEffect(() => {
     const params = new URLSearchParams(location.search);
     const q = params.get('search');
-    if (q) setSearchTerm(q);
+    if (q !== null) {
+      setSearchTerm(q);
+      setPage(1);
+    }
   }, [location.search]);
 
   const loadSubmissions = useCallback(async (isManual = false) => {
@@ -50,16 +69,26 @@ const SubmissionsQueue = () => {
         setIsLoading(true);
       }
       setError(null);
-      const res = await instructorService.getInstructorSubmissions({ limit: 100 });
+      const params = {
+        page,
+        limit,
+        sortBy,
+        sortOrder,
+      };
+      if (statusFilter !== 'all') params.status = statusFilter;
+      if (debouncedSearch.trim()) params.search = debouncedSearch.trim();
+
+      const res = await instructorService.getInstructorSubmissions(params);
       const list = res.data || res.submissions || [];
       setSubmissions(list);
+      setPagination(normalizePagination(res.pagination, { page, limit, total: list.length }));
     } catch (err) {
       setError(err.message || 'Failed to retrieve instructor submissions.');
       throw err;
     } finally {
       setIsLoading(false);
     }
-  }, []);
+  }, [page, limit, statusFilter, debouncedSearch, sortBy, sortOrder]);
 
   const { isRefreshing, refresh: handleRefresh } = useRefresh(
     () => loadSubmissions(true),
@@ -70,28 +99,7 @@ const SubmissionsQueue = () => {
     loadSubmissions(false).catch(() => {});
   }, [loadSubmissions]);
 
-  const filteredSubmissions = submissions.filter((sub) => {
-    const isPending = sub.status === 'submitted' || sub.evaluationStatus === 'pending';
-    const isEvaluated = sub.status === 'evaluated' || sub.evaluationStatus === 'completed';
-    const isCertified = Boolean(sub.certificate);
-
-    if (statusFilter === 'pending' && !isPending) return false;
-    if (statusFilter === 'evaluated' && !isEvaluated) return false;
-    if (statusFilter === 'certified' && !isCertified) return false;
-
-    if (searchTerm.trim()) {
-      const term = searchTerm.toLowerCase().trim();
-      const matchStudent =
-        sub.student?.name?.toLowerCase().includes(term) ||
-        sub.student?.email?.toLowerCase().includes(term) ||
-        sub.student?.studentId?.toLowerCase().includes(term);
-      const matchAsmt = sub.assessment?.title?.toLowerCase().includes(term);
-      const matchCert = sub.certificate?.certificateId?.toLowerCase().includes(term);
-      if (!matchStudent && !matchAsmt && !matchCert) return false;
-    }
-
-    return true;
-  });
+  const filteredSubmissions = submissions;
 
   return (
     <div className="space-y-6">
@@ -113,7 +121,7 @@ const SubmissionsQueue = () => {
         </div>
 
         {/* Filter Controls */}
-        <div className="flex flex-wrap items-center gap-2">
+        <div ref={listTopRef} className="flex flex-wrap items-center gap-2">
           <div className="flex flex-wrap items-center gap-1 bg-[#FFF9F2] dark:bg-[#12161F] border border-[#EBE3D8] dark:border-[#2D3748] p-1 rounded-xl">
             {[
               { id: 'all', label: 'All' },
@@ -124,7 +132,10 @@ const SubmissionsQueue = () => {
               <button
                 key={tab.id}
                 type="button"
-                onClick={() => setStatusFilter(tab.id)}
+                onClick={() => {
+                  setStatusFilter(tab.id);
+                  setPage(1);
+                }}
                 className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
                   statusFilter === tab.id
                     ? 'bg-[#E05D38] text-white shadow-warm-xs'
@@ -135,6 +146,30 @@ const SubmissionsQueue = () => {
               </button>
             ))}
           </div>
+
+          <select
+            value={`${sortBy}:${sortOrder}`}
+            onChange={(e) => {
+              const [nextSort, nextDir] = e.target.value.split(':');
+              setSortBy(nextSort);
+              setSortOrder(nextDir);
+              setPage(1);
+            }}
+            aria-label="Sort submissions"
+            className="px-2.5 py-1.5 text-xs bg-[#FFF9F2] dark:bg-[#12161F] border border-[#EBE3D8] dark:border-[#2D3748] rounded-xl text-[#1F2937] dark:text-[#F9FAFB]"
+          >
+            <option value="createdAt:desc">Newest First</option>
+            <option value="createdAt:asc">Oldest First</option>
+            <option value="percentage:desc">Highest Score</option>
+            <option value="percentage:asc">Lowest Score</option>
+          </select>
+
+          <PaginationJumpLink
+            currentPage={pagination.page}
+            totalPages={pagination.totalPages}
+            totalItems={pagination.total}
+            targetRef={paginationRef}
+          />
 
           <Button
             type="button"
@@ -156,7 +191,10 @@ const SubmissionsQueue = () => {
               <span>Filter: &ldquo;{searchTerm}&rdquo;</span>
               <button
                 type="button"
-                onClick={() => setSearchTerm('')}
+                onClick={() => {
+                  setSearchTerm('');
+                  setPage(1);
+                }}
                 className="hover:text-red-600 transition-colors cursor-pointer ml-1"
                 title="Clear search filter"
               >
@@ -357,6 +395,23 @@ const SubmissionsQueue = () => {
               })}
             </TableBody>
           </Table>
+        )}
+        {filteredSubmissions.length > 0 && (
+          <Pagination
+            containerRef={paginationRef}
+            scrollTargetRef={listTopRef}
+            currentPage={pagination.page}
+            totalPages={pagination.totalPages}
+            totalItems={pagination.total}
+            pageSize={limit}
+            onPageChange={(nextPage) => setPage(nextPage)}
+            onPageSizeChange={(nextLimit) => {
+              setLimit(nextLimit);
+              setPage(1);
+            }}
+            itemLabel="submissions"
+            testIdPrefix="submissions-pagination"
+          />
         )}
       </Card>
       )}

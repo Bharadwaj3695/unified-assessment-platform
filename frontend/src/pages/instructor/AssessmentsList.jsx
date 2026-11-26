@@ -1,8 +1,9 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { toast } from 'react-toastify';
 import assessmentService from '../../services/assessment.service';
 import { useRefresh } from '../../hooks/useRefresh';
+import useDebounce from '../../hooks/useDebounce';
 import Card from '../../components/ui/Card';
 import Badge from '../../components/ui/Badge';
 import Button from '../../components/ui/Button';
@@ -11,6 +12,8 @@ import Spinner from '../../components/ui/Spinner';
 import EmptyState from '../../components/ui/EmptyState';
 import ErrorState from '../../components/ui/ErrorState';
 import TableSkeleton from '../../components/ui/TableSkeleton';
+import Pagination, { PaginationJumpLink } from '../../components/ui/Pagination';
+import { DEFAULT_PAGE_SIZE, normalizePagination } from '../../utils/pagination';
 import {
   Table,
   TableHead,
@@ -20,19 +23,20 @@ import {
   TableCell,
 } from '../../components/ui/Table';
 import {
-PlusCircle,
+  PlusCircle,
   Clock,
-Globe,
+  Globe,
   Lock,
   Edit,
   Trash2,
   Eye,
   Send,
-AlertTriangle,
+  AlertTriangle,
   Users,
   X,
   RefreshCw,
-  BarChart2} from 'lucide-react';
+  BarChart2,
+} from 'lucide-react';
 
 const AssessmentsList = () => {
   const navigate = useNavigate();
@@ -41,16 +45,32 @@ const AssessmentsList = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState(null);
 
-  // Filters
+  // Filters & Pagination
   const [searchTerm, setSearchTerm] = useState('');
+  const debouncedSearch = useDebounce(searchTerm, 300);
   const [statusFilter, setStatusFilter] = useState('all');
   const [accessFilter, setAccessFilter] = useState('all');
   const [dateFilter, setDateFilter] = useState('all');
+  const [sortBy, setSortBy] = useState('createdAt');
+  const [sortOrder, setSortOrder] = useState('desc');
+  const [page, setPage] = useState(1);
+  const [limit, setLimit] = useState(DEFAULT_PAGE_SIZE);
+  const [pagination, setPagination] = useState({
+    page: 1,
+    limit: DEFAULT_PAGE_SIZE,
+    total: 0,
+    totalPages: 1,
+  });
+  const listTopRef = useRef(null);
+  const paginationRef = useRef(null);
 
   useEffect(() => {
     const params = new URLSearchParams(location.search);
     const q = params.get('search');
-    if (q) setSearchTerm(q);
+    if (q !== null) {
+      setSearchTerm(q);
+      setPage(1);
+    }
   }, [location.search]);
 
   // Modals
@@ -64,16 +84,33 @@ const AssessmentsList = () => {
         setIsLoading(true);
       }
       setError(null);
-      const res = await assessmentService.getAssessments({ limit: 100 });
+      const params = {
+        page,
+        limit,
+        sortBy,
+        sortOrder,
+      };
+      if (statusFilter !== 'all') params.status = statusFilter;
+      if (accessFilter !== 'all') params.accessType = accessFilter;
+      if (dateFilter !== 'all') params.dateFilter = dateFilter;
+      if (debouncedSearch.trim()) params.search = debouncedSearch.trim();
+
+      const res = await assessmentService.getAssessments(params);
       const list = res.data || res.assessments || [];
       setAssessments(list);
+      const norm = normalizePagination(res.pagination, {
+        page,
+        limit,
+        total: list.length,
+      });
+      setPagination(norm);
     } catch (err) {
       setError(err.message || 'Failed to retrieve assessments.');
       throw err;
     } finally {
       setIsLoading(false);
     }
-  }, []);
+  }, [page, limit, statusFilter, accessFilter, dateFilter, debouncedSearch, sortBy, sortOrder]);
 
   const { isRefreshing, refresh: handleRefresh } = useRefresh(
     () => loadAssessments(true),
@@ -84,26 +121,7 @@ const AssessmentsList = () => {
     loadAssessments(false).catch(() => {});
   }, [loadAssessments]);
 
-  // Filter assessments
-  const filteredAssessments = assessments.filter((asmt) => {
-    if (statusFilter !== 'all' && asmt.status !== statusFilter) return false;
-    if (accessFilter !== 'all' && asmt.accessType !== accessFilter) return false;
-    if (dateFilter !== 'all') {
-      const createdAt = asmt.createdAt ? new Date(asmt.createdAt).getTime() : 0;
-      const now = Date.now();
-      if (dateFilter === 'recent' && now - createdAt > 48 * 60 * 60 * 1000) return false;
-      if (dateFilter === 'last_week' && now - createdAt > 7 * 24 * 60 * 60 * 1000) return false;
-      if (dateFilter === 'last_month' && now - createdAt > 30 * 24 * 60 * 60 * 1000) return false;
-    }
-    if (searchTerm.trim()) {
-      const term = searchTerm.toLowerCase();
-      const matchTitle = asmt.title?.toLowerCase().includes(term);
-      const matchCategory = asmt.category?.toLowerCase().includes(term);
-      const matchDesc = asmt.description?.toLowerCase().includes(term);
-      if (!matchTitle && !matchCategory && !matchDesc) return false;
-    }
-    return true;
-  });
+  const filteredAssessments = assessments;
 
   const handleDelete = async () => {
     if (!deleteModal.assessment) return;
@@ -170,9 +188,12 @@ const AssessmentsList = () => {
       </div>
 
       {/* Filter and Control Bar */}
-      <div className="p-4 rounded-2xl border border-[#EBE3D8] dark:border-[#2D3748] bg-white dark:bg-[#1A202C] flex flex-col md:flex-row md:items-center justify-between gap-3 shadow-warm-xs">
+      <div
+        ref={listTopRef}
+        className="p-4 rounded-2xl border border-[#EBE3D8] dark:border-[#2D3748] bg-white dark:bg-[#1A202C] flex flex-col lg:flex-row lg:items-center justify-between gap-3 shadow-warm-xs"
+      >
         {/* Status Tabs */}
-        <div className="flex items-center space-x-1.5 overflow-x-auto pb-1 md:pb-0">
+        <div className="flex items-center space-x-1.5 overflow-x-auto pb-1 lg:pb-0">
           {[
             { id: 'all', label: 'All Status' },
             { id: 'published', label: 'Published' },
@@ -182,7 +203,10 @@ const AssessmentsList = () => {
             <button
               key={tab.id}
               type="button"
-              onClick={() => setStatusFilter(tab.id)}
+              onClick={() => {
+                setStatusFilter(tab.id);
+                setPage(1);
+              }}
               className={`px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition-all cursor-pointer ${
                 statusFilter === tab.id
                   ? 'bg-[#E05D38] text-white shadow-warm-xs'
@@ -198,7 +222,11 @@ const AssessmentsList = () => {
         <div className="flex flex-wrap items-center gap-2">
           <select
             value={accessFilter}
-            onChange={(e) => setAccessFilter(e.target.value)}
+            onChange={(e) => {
+              setAccessFilter(e.target.value);
+              setPage(1);
+            }}
+            aria-label="Filter by access type"
             className="px-3 py-1.5 text-xs bg-[#FFF9F2] dark:bg-[#12161F] border border-[#EBE3D8] dark:border-[#2D3748] rounded-xl text-[#1F2937] dark:text-[#F9FAFB] focus:outline-none focus:border-[#E05D38] focus:ring-2 focus:ring-[#E05D38]/20 transition-all"
           >
             <option value="all">All Access Types</option>
@@ -208,7 +236,11 @@ const AssessmentsList = () => {
 
           <select
             value={dateFilter}
-            onChange={(e) => setDateFilter(e.target.value)}
+            onChange={(e) => {
+              setDateFilter(e.target.value);
+              setPage(1);
+            }}
+            aria-label="Filter by date"
             className="px-3 py-1.5 text-xs bg-[#FFF9F2] dark:bg-[#12161F] border border-[#EBE3D8] dark:border-[#2D3748] rounded-xl text-[#1F2937] dark:text-[#F9FAFB] focus:outline-none focus:border-[#E05D38] focus:ring-2 focus:ring-[#E05D38]/20 transition-all"
           >
             <option value="all">All Dates</option>
@@ -216,6 +248,30 @@ const AssessmentsList = () => {
             <option value="last_week">Last Week</option>
             <option value="last_month">Last Month</option>
           </select>
+
+          <select
+            value={`${sortBy}:${sortOrder}`}
+            onChange={(e) => {
+              const [nextSort, nextDir] = e.target.value.split(':');
+              setSortBy(nextSort);
+              setSortOrder(nextDir);
+              setPage(1);
+            }}
+            aria-label="Sort assessments"
+            className="px-3 py-1.5 text-xs bg-[#FFF9F2] dark:bg-[#12161F] border border-[#EBE3D8] dark:border-[#2D3748] rounded-xl text-[#1F2937] dark:text-[#F9FAFB] focus:outline-none focus:border-[#E05D38] focus:ring-2 focus:ring-[#E05D38]/20 transition-all"
+          >
+            <option value="createdAt:desc">Newest First</option>
+            <option value="createdAt:asc">Oldest First</option>
+            <option value="title:asc">Title (A–Z)</option>
+            <option value="updatedAt:desc">Recently Modified</option>
+          </select>
+
+          <PaginationJumpLink
+            currentPage={pagination.page}
+            totalPages={pagination.totalPages}
+            totalItems={pagination.total}
+            targetRef={paginationRef}
+          />
 
           <Button
             type="button"
@@ -237,7 +293,10 @@ const AssessmentsList = () => {
               <span>Filter: &ldquo;{searchTerm}&rdquo;</span>
               <button
                 type="button"
-                onClick={() => setSearchTerm('')}
+                onClick={() => {
+                  setSearchTerm('');
+                  setPage(1);
+                }}
                 className="hover:text-red-600 transition-colors cursor-pointer ml-1"
                 title="Clear search filter"
               >
@@ -272,13 +331,14 @@ const AssessmentsList = () => {
                 ? 'Clear Filters'
                 : 'Create First Assessment'
             }
-            onAction={
+                  onAction={
               searchTerm || statusFilter !== 'all' || accessFilter !== 'all' || dateFilter !== 'all'
                 ? () => {
                     setSearchTerm('');
                     setStatusFilter('all');
                     setAccessFilter('all');
                     setDateFilter('all');
+                    setPage(1);
                   }
                 : () => navigate('/instructor/create')
             }
@@ -438,6 +498,23 @@ const AssessmentsList = () => {
               })}
             </TableBody>
           </Table>
+        )}
+        {filteredAssessments.length > 0 && (
+          <Pagination
+            containerRef={paginationRef}
+            scrollTargetRef={listTopRef}
+            currentPage={pagination.page}
+            totalPages={pagination.totalPages}
+            totalItems={pagination.total}
+            pageSize={limit}
+            onPageChange={(nextPage) => setPage(nextPage)}
+            onPageSizeChange={(nextLimit) => {
+              setLimit(nextLimit);
+              setPage(1);
+            }}
+            itemLabel="assessments"
+            testIdPrefix="assessments-pagination"
+          />
         )}
       </Card>
       )}

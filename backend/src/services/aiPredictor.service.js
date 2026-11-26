@@ -51,10 +51,10 @@ class AiPredictorService {
       status: 'NOT_IMPLEMENTED',
       isOperational: false,
       isEstimateOnly: true,
-      label: 'AI Performance Analysis',
-      badge: 'Integration Ready · Not Operational',
+      label: 'Performance Analysis',
+      badge: 'Coming Soon · Not Available',
       disclaimer:
-        'AI Performance Analysis is an estimate-only integration point and is not yet operational. Future predictions will never modify official scores, pass/fail outcomes, or certification.',
+        'Performance Analysis is coming soon and is not currently available. Future estimates will never modify official scores, pass/fail outcomes, or certification.',
       minimumEvaluatedRequired: MIN_EVALUATED_EXAMS_FOR_ANALYSIS,
       evaluatedHistoryCount: finalizedOnly.length,
       hasSufficientHistory: finalizedOnly.length >= MIN_EVALUATED_EXAMS_FOR_ANALYSIS,

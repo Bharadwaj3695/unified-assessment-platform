@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { toast } from 'react-toastify';
 import analyticsService from '../../services/analytics.service';
@@ -12,6 +12,8 @@ import ErrorState from '../../components/ui/ErrorState';
 import DashboardSkeleton from '../../components/ui/DashboardSkeleton';
 import StatCard from '../../components/common/StatCard';
 import ScoreDistributionChart from '../../components/charts/ScoreDistributionChart';
+import Pagination from '../../components/ui/Pagination';
+import { DEFAULT_PAGE_SIZE, paginateArray } from '../../utils/pagination';
 import {
   Table,
   TableHead,
@@ -42,6 +44,9 @@ const AssessmentAnalytics = () => {
   const [questionData, setQuestionData] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [subPage, setSubPage] = useState(1);
+  const [subLimit, setSubLimit] = useState(DEFAULT_PAGE_SIZE);
+  const submissionsListRef = useRef(null);
 
   const loadAnalytics = useCallback(async (isManual = false) => {
     try {
@@ -388,6 +393,7 @@ const AssessmentAnalytics = () => {
       </Card>
 
       {/* Student Submissions List */}
+      <div ref={submissionsListRef}>
       <Card
         title="Student Submissions & Results"
         subtitle="Individual examination attempt outcomes for this assessment"
@@ -397,66 +403,86 @@ const AssessmentAnalytics = () => {
             title="No Student Submissions Yet"
             description="When enrolled students complete and submit their attempts, their results will appear here."
           />
-        ) : (
-          <Table>
-            <TableHead>
-              <TableRow>
-                <TableHeader>Student</TableHeader>
-                <TableHeader>Submitted Date</TableHeader>
-                <TableHeader>Score</TableHeader>
-                <TableHeader>Result</TableHeader>
-                <TableHeader>Status</TableHeader>
-                <TableHeader className="text-right">Action</TableHeader>
-              </TableRow>
-            </TableHead>
-            <TableBody>
-              {studentSubmissions.map((sub) => (
-                <TableRow key={sub.id}>
-                  <TableCell>
-                    <div>
-                      <span className="font-bold text-slate-900 dark:text-slate-100 block">
-                        {sub.studentName}
-                      </span>
-                      <span className="text-xs text-slate-400">{sub.studentCode}</span>
-                    </div>
-                  </TableCell>
-                  <TableCell className="text-xs text-slate-500 dark:text-slate-400">
-                    {sub.submittedAt ? new Date(sub.submittedAt).toLocaleDateString() : '—'}
-                  </TableCell>
-                  <TableCell className="text-xs font-bold text-slate-800 dark:text-slate-200">
-                    {sub.score} / {sub.totalPoints} ({sub.percentage}%)
-                  </TableCell>
-                  <TableCell>
-                    <Badge variant={sub.passed ? 'success' : 'danger'} size="sm">
-                      {sub.passed ? 'Passed' : 'Failed'}
-                    </Badge>
-                  </TableCell>
-                  <TableCell>
-                    <Badge
-                      variant={
-                        sub.evaluationStatus === 'completed'
-                          ? 'success'
-                          : 'warning'
-                      }
-                      size="sm"
-                      dot
-                    >
-                      {sub.evaluationStatus === 'completed' ? 'Evaluated' : 'Pending Evaluation'}
-                    </Badge>
-                  </TableCell>
-                  <TableCell className="text-right">
-                    <Link to={`/instructor/submissions`}>
-                      <Button variant="outline" size="sm">
-                        Review
-                      </Button>
-                    </Link>
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        )}
+        ) : (() => {
+          const pagedSubs = paginateArray(studentSubmissions, subPage, subLimit);
+          return (
+            <>
+              <Table>
+                <TableHead>
+                  <TableRow>
+                    <TableHeader>Student</TableHeader>
+                    <TableHeader>Submitted Date</TableHeader>
+                    <TableHeader>Score</TableHeader>
+                    <TableHeader>Result</TableHeader>
+                    <TableHeader>Status</TableHeader>
+                    <TableHeader className="text-right">Action</TableHeader>
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {pagedSubs.items.map((sub) => (
+                    <TableRow key={sub.id}>
+                      <TableCell>
+                        <div>
+                          <span className="font-bold text-slate-900 dark:text-slate-100 block">
+                            {sub.studentName}
+                          </span>
+                          <span className="text-xs text-slate-400">{sub.studentCode}</span>
+                        </div>
+                      </TableCell>
+                      <TableCell className="text-xs text-slate-500 dark:text-slate-400">
+                        {sub.submittedAt ? new Date(sub.submittedAt).toLocaleDateString() : '—'}
+                      </TableCell>
+                      <TableCell className="text-xs font-bold text-slate-800 dark:text-slate-200">
+                        {sub.score} / {sub.totalPoints} ({sub.percentage}%)
+                      </TableCell>
+                      <TableCell>
+                        <Badge variant={sub.passed ? 'success' : 'danger'} size="sm">
+                          {sub.passed ? 'Passed' : 'Failed'}
+                        </Badge>
+                      </TableCell>
+                      <TableCell>
+                        <Badge
+                          variant={
+                            sub.evaluationStatus === 'completed'
+                              ? 'success'
+                              : 'warning'
+                          }
+                          size="sm"
+                          dot
+                        >
+                          {sub.evaluationStatus === 'completed' ? 'Evaluated' : 'Pending Evaluation'}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <Link to={`/instructor/submissions`}>
+                          <Button variant="outline" size="sm">
+                            Review
+                          </Button>
+                        </Link>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+              <Pagination
+                scrollTargetRef={submissionsListRef}
+                currentPage={pagedSubs.pagination.page}
+                totalPages={pagedSubs.pagination.totalPages}
+                totalItems={pagedSubs.pagination.total}
+                pageSize={subLimit}
+                onPageChange={(nextPage) => setSubPage(nextPage)}
+                onPageSizeChange={(nextLimit) => {
+                  setSubLimit(nextLimit);
+                  setSubPage(1);
+                }}
+                itemLabel="submissions"
+                testIdPrefix="analytics-submissions-pagination"
+              />
+            </>
+          );
+        })()}
       </Card>
+      </div>
 
       {/* Pedagogical Diagnostics Section */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">

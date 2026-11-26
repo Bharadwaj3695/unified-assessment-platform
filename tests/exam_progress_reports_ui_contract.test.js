@@ -17,6 +17,9 @@ test('Exam-wise Progress, My Results, My Attempts, and Individual Reports UI Con
   const progressSrc = readRel('frontend/src/components/student/StudentExamProgress.jsx');
   const reportSrc = readRel('frontend/src/pages/common/ExamPerformanceReport.jsx');
   const routesSrc = readRel('frontend/src/routes/AppRoutes.jsx');
+  const navSrc = readRel('frontend/src/config/navigationConfig.js');
+  const certsSrc = readRel('frontend/src/pages/student/Certifications.jsx');
+  const certSvcSrc = readRel('frontend/src/services/certificate.service.js');
   const queueSrc = readRel('frontend/src/pages/instructor/SubmissionsQueue.jsx');
   const evalStudioSrc = readRel('frontend/src/pages/instructor/EvaluationStudio.jsx');
   const mockModalSrc = readRel('frontend/src/components/instructor/MockTestAttemptsModal.jsx');
@@ -37,14 +40,23 @@ test('Exam-wise Progress, My Results, My Attempts, and Individual Reports UI Con
     assert.match(dashboardSrc, /currentView === 'results'\s*\?\s*submissions\.filter/);
   });
 
-  await t.test('StudentExamProgress focuses on exam-wise performance, pending separation, and non-operational AI contract', () => {
+  await t.test('StudentExamProgress focuses on exam-wise performance, pending separation, and Coming Soon AI contract', () => {
     assert.match(progressSrc, /Exam Performance/);
     assert.match(progressSrc, /View Report/);
     assert.match(progressSrc, /Download PDF/);
     assert.match(progressSrc, /Pending Evaluation/);
     assert.match(progressSrc, /Report available after evaluation/);
-    assert.match(progressSrc, /AI Performance Analysis/);
-    assert.match(progressSrc, /Integration Ready/);
+    assert.match(progressSrc, /Performance Analysis/);
+    assert.match(progressSrc, /Coming Soon/);
+  });
+
+  await t.test('My Certificates navigation, dedicated page, empty state, and PDF/PNG/JPG downloads exist', () => {
+    assert.match(navSrc, /name:\s*'My Certificates'/);
+    assert.match(navSrc, /path:\s*'\/student\/certificates'/);
+    assert.match(routesSrc, /path="certificates" element=\{<StudentCertifications \/>\}/);
+    assert.match(certsSrc, /No certificates earned yet\./);
+    assert.match(certsSrc, /\['pdf', 'png', 'jpg'\]/);
+    assert.match(certSvcSrc, /format = 'pdf'/);
   });
 
   await t.test('ExamPerformanceReport handles pending 409 state, question/topic sections, PDF download, and AI disclaimer', () => {
@@ -52,7 +64,7 @@ test('Exam-wise Progress, My Results, My Attempts, and Individual Reports UI Con
     assert.match(reportSrc, /Download PDF/);
     assert.match(reportSrc, /Question-Wise Performance/);
     assert.match(reportSrc, /Faculty Feedback & Grading Remarks/);
-    assert.match(reportSrc, /AI Performance Analysis/);
+    assert.match(reportSrc, /Performance Analysis/);
   });
 
   await t.test('Faculty workflows expose View Report and Download PDF only for finalized evaluations', () => {

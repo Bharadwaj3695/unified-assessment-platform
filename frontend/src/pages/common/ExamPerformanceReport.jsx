@@ -129,7 +129,7 @@ export default function ExamPerformanceReport() {
     );
   }
 
-  const { meta, student, outcome, counts, questionBreakdown = [], topicBreakdown = [], feedback, aiPredictor } = report;
+  const { meta, student, outcome, certification, counts, questionBreakdown = [], topicBreakdown = [], feedback, Predictor } = report;
   const evaluatedDate = meta.evaluatedAt
     ? new Date(meta.evaluatedAt).toLocaleDateString()
     : meta.submittedAt
@@ -161,6 +161,19 @@ export default function ExamPerformanceReport() {
             <Badge variant={outcome.passed ? 'success' : 'danger'} size="sm">
               {outcome.resultLabel}
             </Badge>
+            <Badge variant="neutral" size="sm">
+              {outcome.evaluationStatus || meta.evaluationStatus || 'Evaluated'}
+            </Badge>
+            {certification?.enabled && (
+              <Badge variant={certification.issued ? 'success' : certification.eligible ? 'warning' : 'neutral'} size="sm">
+                <Award className="w-3 h-3 mr-1 inline" />
+                {certification.issued
+                  ? `Certificate Issued (${certification.certificateId})`
+                  : certification.eligible
+                  ? 'Certificate Eligible'
+                  : 'Certificate: Not Eligible'}
+              </Badge>
+            )}
           </div>
           <h1 className="text-2xl font-bold text-slate-900 dark:text-slate-100" data-testid="report-exam-name">
             {meta.examName}
@@ -398,20 +411,20 @@ export default function ExamPerformanceReport() {
         )}
       </Card>
 
-      {/* AI Performance Analysis (Integration-Ready Placeholder) */}
+      {/* Performance Analysis (Integration-Ready Placeholder) */}
       <Card
-        title="AI Performance Analysis"
+        title="Performance Analysis"
         action={
           <Badge variant="neutral" size="sm">
             <Sparkles className="w-3 h-3 mr-1 inline" />
-            Estimate · Not Yet Operational
+            {Predictor?.badge || 'Coming Soon · Not Available'}
           </Badge>
         }
       >
         <div className="space-y-2 text-xs text-slate-600 dark:text-slate-300" data-testid="report-ai-placeholder">
-          <p>{aiPredictor?.disclaimer}</p>
+          <p>{Predictor?.disclaimer}</p>
           <p className="text-[11px] text-slate-500">
-            Status: <strong>Integration Ready ({aiPredictor?.status || 'NOT_IMPLEMENTED'})</strong> · Historical evaluated records available: <strong>{aiPredictor?.evaluatedHistoryCount ?? 1}</strong>
+            Status: <strong>{Predictor?.isOperational ? 'Operational' : 'Coming Soon / Not Available'}</strong>
           </p>
         </div>
       </Card>

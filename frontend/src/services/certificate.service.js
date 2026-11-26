@@ -14,6 +14,11 @@ export const certificateService = {
     return res.data?.data || res.data;
   },
 
+  getMyCertificatesPaginated: async (params = {}) => {
+    const res = await api.get('/certificates/mine', { params });
+    return res;
+  },
+
   /**
    * Retrieves a single certificate by its unique MongoDB or public certificate ID.
    */
@@ -23,10 +28,12 @@ export const certificateService = {
   },
 
   /**
-   * Triggers download action for an authorized certificate, saving the PDF file locally.
+   * Triggers download action for an authorized certificate in PDF, PNG, or JPG format.
    */
-  downloadCertificate: async (id, fallbackFilename = 'certificate.pdf') => {
+  downloadCertificate: async (id, fallbackFilename = 'certificate.pdf', format = 'pdf') => {
+    const normFormat = String(format || 'pdf').toLowerCase().trim();
     const res = await api.get(`/certificates/${id}/download`, {
+      params: normFormat !== 'pdf' ? { format: normFormat } : undefined,
       responseType: 'blob',
     });
 
@@ -38,7 +45,13 @@ export const certificateService = {
       filename = match[1];
     }
 
-    const blob = new Blob([res.data], { type: 'application/pdf' });
+    const mimeMap = {
+      pdf: 'application/pdf',
+      png: 'image/png',
+      jpg: 'image/jpeg',
+      jpeg: 'image/jpeg',
+    };
+    const blob = new Blob([res.data], { type: mimeMap[normFormat] || 'application/pdf' });
     const url = window.URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;

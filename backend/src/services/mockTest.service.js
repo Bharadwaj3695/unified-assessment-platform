@@ -1,7 +1,8 @@
-const { MockTest, MockTestAttempt, Question, QuestionVersion, Subject, Topic, AuditLog } = require('../models');
+const { MockTest, MockTestAttempt, Question, QuestionVersion, Subject, Topic, AuditLog, User } = require('../models');
 const { serializeQuestionForStudent, serializeQuestionForFaculty } = require('../utils/questionSerializer');
 const executionClient = require('./executionClient.service');
 const storageService = require('./storage.service');
+const { parsePaginationParams, resolvePageBounds, buildSortSpec } = require('../utils/pagination');
 
 function parseBooleanToken(val) {
   if (typeof val === 'boolean') return val;
@@ -93,17 +94,48 @@ class MockTestService {
     if (query.examination) {
       filter.examination = query.examination;
     }
-    if (query.search) {
+    if (query.search && String(query.search).trim()) {
+      const escapedSearch = String(query.search).trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
       filter.$or = [
-        { title: { $regex: query.search, $options: 'i' } },
-        { description: { $regex: query.search, $options: 'i' } },
+        { title: { $regex: escapedSearch, $options: 'i' } },
+        { description: { $regex: escapedSearch, $options: 'i' } },
+        { examination: { $regex: escapedSearch, $options: 'i' } },
       ];
     }
 
-    return MockTest.find(filter)
+    const sortSpec = buildSortSpec(
+      query.sortBy,
+      query.sortOrder,
+      {
+        createdAt: 'createdAt',
+        title: 'title',
+        durationMinutes: 'durationMinutes',
+        totalMarks: 'totalMarks',
+      },
+      'createdAt',
+      -1
+    );
+
+    const hasPagination = query.page !== undefined || query.limit !== undefined;
+    if (!hasPagination) {
+      return MockTest.find(filter)
+        .populate('subjectId', 'name code')
+        .populate('ownerFacultyId', 'fullName email')
+        .sort(sortSpec);
+    }
+
+    const parsed = parsePaginationParams(query, 10, 200);
+    const total = await MockTest.countDocuments(filter);
+    const { page, limit, totalPages, skip } = resolvePageBounds(parsed.page, parsed.limit, total);
+
+    const tests = await MockTest.find(filter)
       .populate('subjectId', 'name code')
       .populate('ownerFacultyId', 'fullName email')
-      .sort({ createdAt: -1 });
+      .sort(sortSpec)
+      .skip(skip)
+      .limit(limit);
+
+    return { tests, total, page, limit, totalPages };
   }
 
   /**
@@ -283,6 +315,33 @@ class MockTestService {
         const err = new Error(`Questions ${emptyNumbers.map((n) => `Q${n}`).join(', ')} are empty. Please enter the question statement.`);
         err.statusCode = 400;
         throw err;
+      }
+      for (let qIdx = 0; qIdx < mockTest.draftQuestions.length; qIdx++) {
+        const dq = mockTest.draftQuestions[qIdx];
+        const rawType = dq?.questionType || dq?.type;
+        const qType = rawType ? String(rawType).toUpperCase() : null;
+        if ((qType === 'SINGLE_MCQ' || qType === 'MULTI_SELECT' || qType === 'MCQ') && Array.isArray(dq.options)) {
+          const opts = dq.options;
+          if (opts.length < 2) {
+            const err = new Error(`Question ${qIdx + 1} must have at least 2 answer options before publishing.`);
+            err.statusCode = 400;
+            throw err;
+          }
+          for (let i = 0; i < opts.length; i++) {
+            if (!opts[i]?.text || !String(opts[i].text).trim()) {
+              const letter = String.fromCharCode(65 + i);
+              const err = new Error(`Question ${qIdx + 1}: Option ${letter} is empty. Please enter the answer option.`);
+              err.statusCode = 400;
+              throw err;
+            }
+          }
+          const hasCorrect = opts.some((o) => Boolean(o?.isCorrect));
+          if (!hasCorrect) {
+            const err = new Error(`Question ${qIdx + 1} must have at least one correct answer selected before publishing.`);
+            err.statusCode = 400;
+            throw err;
+          }
+        }
       }
     } else if (mockTest.isIncomplete) {
       const err = new Error('Cannot publish an incomplete mock test draft.');
@@ -1753,7 +1812,7 @@ class MockTestService {
   /**
    * Get all student attempts for a mock test (Faculty/Admin only)
    */
-  async getMockTestAttempts(mockTestId, user) {
+  async getMockTestAttempts(mockTestId, user, query = {}) {
     const mockTest = await MockTest.findById(mockTestId);
     if (!mockTest) {
       const err = new Error('Mock test not found');
@@ -1768,11 +1827,60 @@ class MockTestService {
       throw err;
     }
 
-    const attempts = await MockTestAttempt.find({ mockTestId })
-      .populate('studentId', 'name email rollNumber')
-      .sort({ createdAt: -1 });
+    const filter = { mockTestId };
+    if (query.status && query.status !== 'all') {
+      if (query.status === 'pending') {
+        filter.evaluationStatus = 'PENDING_MANUAL_REVIEW';
+      } else if (query.status === 'evaluated') {
+        filter.status = 'EVALUATED';
+        filter.evaluationStatus = 'COMPLETED';
+      }
+    }
 
-    return attempts;
+    if (query.search && String(query.search).trim()) {
+      const escapedSearch = String(query.search).trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const matchingStudents = await User.find({
+        role: 'student',
+        $or: [
+          { name: { $regex: escapedSearch, $options: 'i' } },
+          { email: { $regex: escapedSearch, $options: 'i' } },
+          { studentId: { $regex: escapedSearch, $options: 'i' } },
+        ],
+      }).select('_id');
+      filter.studentId = { $in: matchingStudents.map((s) => s._id) };
+    }
+
+    const sortSpec = buildSortSpec(
+      query.sortBy,
+      query.sortOrder,
+      {
+        createdAt: 'createdAt',
+        submittedAt: 'submittedAt',
+        percentage: 'percentage',
+        earnedMarks: 'earnedMarks',
+      },
+      'createdAt',
+      -1
+    );
+
+    const hasPagination = query.page !== undefined || query.limit !== undefined;
+    if (!hasPagination) {
+      return MockTestAttempt.find(filter)
+        .populate('studentId', 'name email rollNumber')
+        .sort(sortSpec);
+    }
+
+    const parsed = parsePaginationParams(query, 10, 200);
+    const total = await MockTestAttempt.countDocuments(filter);
+    const { page, limit, totalPages, skip } = resolvePageBounds(parsed.page, parsed.limit, total);
+
+    const attempts = await MockTestAttempt.find(filter)
+      .populate('studentId', 'name email rollNumber')
+      .sort(sortSpec)
+      .skip(skip)
+      .limit(limit);
+
+    return { attempts, total, page, limit, totalPages };
   }
 
   /**

@@ -1,8 +1,9 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'react-toastify';
 import { useAuth } from '../../hooks/useAuth';
 import { useRefresh } from '../../hooks/useRefresh';
+import useDebounce from '../../hooks/useDebounce';
 import certificateService from '../../services/certificate.service';
 import Card from '../../components/ui/Card';
 import Badge from '../../components/ui/Badge';
@@ -11,6 +12,8 @@ import Modal from '../../components/ui/Modal';
 import EmptyState from '../../components/ui/EmptyState';
 import ErrorState from '../../components/ui/ErrorState';
 import TableSkeleton from '../../components/ui/TableSkeleton';
+import Pagination, { PaginationJumpLink } from '../../components/ui/Pagination';
+import { DEFAULT_PAGE_SIZE, normalizePagination } from '../../utils/pagination';
 import {
   Table,
   TableHead,
@@ -47,18 +50,30 @@ const StudentCertifications = () => {
   const navigate = useNavigate();
 
   const [certificates, setCertificates] = useState([]);
+  const [totalAll, setTotalAll] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState(null);
   const [searchQuery, setSearchQuery] = useState('');
+  const debouncedSearch = useDebounce(searchQuery, 300);
   const [statusFilter, setStatusFilter] = useState('all');
   const [viewMode, setViewMode] = useState('table');
   const [selectedCertForModal, setSelectedCertForModal] = useState(null);
   const [copiedId, setCopiedId] = useState(null);
   const [downloadingId, setDownloadingId] = useState(null);
+  const [page, setPage] = useState(1);
+  const [limit, setLimit] = useState(DEFAULT_PAGE_SIZE);
+  const [pagination, setPagination] = useState({
+    page: 1,
+    limit: DEFAULT_PAGE_SIZE,
+    total: 0,
+    totalPages: 1,
+  });
+  const listTopRef = useRef(null);
+  const paginationRef = useRef(null);
 
   // Set document title
   useEffect(() => {
-    document.title = 'My Certifications | Unified Assessment Platform';
+    document.title = 'My Certificates | Unified Assessment Platform';
   }, []);
 
   // Fetch student certificates from backend
@@ -68,12 +83,24 @@ const StudentCertifications = () => {
     }
     setError(null);
     try {
-      const response = await certificateService.getMyCertificates();
-      // Unpack response data envelope
+      const params = { page, limit };
+      if (statusFilter !== 'all') params.status = statusFilter;
+      if (debouncedSearch.trim()) params.search = debouncedSearch.trim();
+
+      const response = await certificateService.getMyCertificatesPaginated(params);
       const list = Array.isArray(response)
         ? response
         : response?.data || response?.certificates || [];
       setCertificates(list);
+      const norm = normalizePagination(response?.pagination, {
+        page,
+        limit,
+        total: list.length,
+      });
+      setPagination(norm);
+      setTotalAll(
+        typeof response?.totalAll === 'number' ? response.totalAll : norm.total
+      );
     } catch (err) {
       console.error('[StudentCertifications] Failed to load certificates:', err);
       const msg =
@@ -85,7 +112,7 @@ const StudentCertifications = () => {
     } finally {
       setIsLoading(false);
     }
-  }, []);
+  }, [page, limit, statusFilter, debouncedSearch]);
 
   const { isRefreshing, refresh: handleRefresh } = useRefresh(
     () => fetchCertificates(true),
@@ -105,14 +132,16 @@ const StudentCertifications = () => {
     setTimeout(() => setCopiedId(null), 2000);
   };
 
-  // Download action with authoritative streaming
-  const handleDownload = async (cert) => {
+  // Download action with format support (pdf | png | jpg)
+  const handleDownload = async (cert, format = 'pdf') => {
     const certId = cert._id || cert.id || cert.certificateId;
-    setDownloadingId(certId);
+    const downloadKey = `${certId}:${format}`;
+    setDownloadingId(downloadKey);
     try {
-      const filename = `${cert.certificateId || 'Certificate'}.pdf`;
-      await certificateService.downloadCertificate(certId, filename);
-      toast.success('Certificate downloaded successfully');
+      const ext = format === 'jpeg' ? 'jpg' : format;
+      const filename = `${cert.certificateId || 'Certificate'}.${ext}`;
+      await certificateService.downloadCertificate(certId, filename, format);
+      toast.success(`Certificate (${ext.toUpperCase()}) downloaded`);
     } catch (err) {
       toast.error(
         err.response?.data?.message ||
@@ -124,31 +153,7 @@ const StudentCertifications = () => {
     }
   };
 
-  // Filtered certificates based on search query and status filter
-  const filteredCertificates = useMemo(() => {
-    return certificates.filter((cert) => {
-      // Status filter
-      if (statusFilter !== 'all' && cert.status !== statusFilter) {
-        return false;
-      }
-      // Search query filter
-      if (!searchQuery.trim()) return true;
-      const q = searchQuery.toLowerCase().trim();
-      const title = (cert.title || cert.certificateTitle || '').toLowerCase();
-      const assessment = (cert.assessmentName || cert.assessmentTitle || '').toLowerCase();
-      const certId = (cert.certificateId || '').toLowerCase();
-      const code = (cert.verificationCode || '').toLowerCase();
-      const category = (cert.category || '').toLowerCase();
-
-      return (
-        title.includes(q) ||
-        assessment.includes(q) ||
-        certId.includes(q) ||
-        code.includes(q) ||
-        category.includes(q)
-      );
-    });
-  }, [certificates, searchQuery, statusFilter]);
+  const filteredCertificates = certificates;
 
   return (
     <div className="space-y-6">
@@ -167,13 +172,13 @@ const StudentCertifications = () => {
           </div>
           {/* Required page title */}
           <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-slate-900 dark:text-slate-100 flex items-center gap-2.5">
-            <span>My Certifications</span>
+            <span>My Certificates</span>
             <span className="inline-flex items-center justify-center p-1.5 rounded-xl bg-[#FDF1EC] dark:bg-[#341C16] text-[#E05D38] dark:text-[#F4A261]">
               <Award className="w-5 h-5" aria-hidden="true" />
             </span>
           </h1>
           <p className="mt-1 text-xs sm:text-sm text-slate-500 dark:text-slate-400 max-w-2xl">
-            Official accredited certificates and credentials earned through qualifying assessment performances.
+            Official certificates earned from finalized, qualifying assessments.
           </p>
         </div>
 
@@ -216,18 +221,18 @@ const StudentCertifications = () => {
           message={error}
           onRetry={fetchCertificates}
         />
-      ) : certificates.length === 0 ? (
+      ) : totalAll === 0 && !debouncedSearch.trim() && statusFilter === 'all' ? (
         /* Empty State strictly matching specified requirements */
         <EmptyState
           icon={Award}
-          title="No certificates earned yet"
-          description="Complete an eligible assessment and meet its certification requirements to earn your certificate."
+          title="No certificates earned yet."
+          description="Complete an eligible assessment and meet its certification requirements to earn a certificate."
           actionLabel="View Assessments"
           onAction={() => navigate('/student/catalog')}
         />
       ) : (
         /* Populated Certificates View */
-        <div className="space-y-4">
+        <div ref={listTopRef} className="space-y-4">
           {/* Search, Filter, and View Controls */}
           <Card className="p-3.5 sm:p-4">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
@@ -238,7 +243,11 @@ const StudentCertifications = () => {
                   type="text"
                   placeholder="Search by title, assessment, or certificate ID..."
                   value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
+                  onChange={(e) => {
+                    setSearchQuery(e.target.value);
+                    setPage(1);
+                  }}
+                  aria-label="Search certificates"
                   className="w-full pl-9 pr-4 py-2 text-xs sm:text-sm rounded-xl border border-surface-light-border dark:border-surface-dark-border bg-slate-50 dark:bg-surface-dark-muted text-slate-900 dark:text-slate-100 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-brand-primary"
                 />
               </div>
@@ -248,7 +257,10 @@ const StudentCertifications = () => {
                 {/* Status Filter */}
                 <select
                   value={statusFilter}
-                  onChange={(e) => setStatusFilter(e.target.value)}
+                  onChange={(e) => {
+                    setStatusFilter(e.target.value);
+                    setPage(1);
+                  }}
                   className="px-3 py-1.5 text-xs sm:text-sm rounded-xl border border-surface-light-border dark:border-surface-dark-border bg-slate-50 dark:bg-surface-dark-muted text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-brand-primary cursor-pointer"
                   aria-label="Filter by certificate status"
                 >
@@ -256,6 +268,13 @@ const StudentCertifications = () => {
                   <option value="active">Active</option>
                   <option value="revoked">Revoked</option>
                 </select>
+
+                <PaginationJumpLink
+                  currentPage={pagination.page}
+                  totalPages={pagination.totalPages}
+                  totalItems={pagination.total}
+                  targetRef={paginationRef}
+                />
 
                 {/* View Mode Toggle */}
                 <div className="flex items-center space-x-1 border border-surface-light-border dark:border-surface-dark-border rounded-xl p-1 bg-slate-50 dark:bg-surface-dark-muted">
@@ -309,6 +328,7 @@ const StudentCertifications = () => {
                 onClick={() => {
                   setSearchQuery('');
                   setStatusFilter('all');
+                  setPage(1);
                 }}
               >
                 Clear Filters
@@ -320,20 +340,19 @@ const StudentCertifications = () => {
               <Table>
                 <TableHead>
                   <TableRow>
-                    <TableHeader className="min-w-[220px]">Certificate Title</TableHeader>
-                    <TableHeader className="min-w-[180px]">Assessment Name</TableHeader>
-                    <TableHeader className="min-w-[120px]">Grade & Percentage</TableHeader>
-                    <TableHeader className="min-w-[160px]">Certificate ID</TableHeader>
-                    <TableHeader className="min-w-[120px]">Issue Date</TableHeader>
-                    <TableHeader className="min-w-[100px]">Status</TableHeader>
-                    <TableHeader className="text-right min-w-[140px]">Download & Actions</TableHeader>
+                    <TableHeader className="min-w-[200px]">Certificate Title</TableHeader>
+                    <TableHeader className="min-w-[160px]">Exam / Course</TableHeader>
+                    <TableHeader className="min-w-[140px]">Student</TableHeader>
+                    <TableHeader className="min-w-[150px]">Certificate ID</TableHeader>
+                    <TableHeader className="min-w-[115px]">Issue Date</TableHeader>
+                    <TableHeader className="min-w-[110px]">Verification</TableHeader>
+                    <TableHeader className="text-right min-w-[240px]">Downloads</TableHeader>
                   </TableRow>
                 </TableHead>
                 <TableBody>
                   {filteredCertificates.map((cert) => {
                     const certId = cert._id || cert.id || cert.certificateId;
                     const isCopied = copiedId === certId;
-                    const isDownloading = downloadingId === certId;
                     const isRevoked = cert.status === 'revoked';
 
                     return (
@@ -348,10 +367,10 @@ const StudentCertifications = () => {
                               <p className="font-semibold text-slate-900 dark:text-slate-100 truncate text-sm">
                                 {cert.title || cert.certificateTitle || 'Certificate of Completion'}
                               </p>
-                              {cert.category && (
-                                <Badge variant="neutral" size="sm" className="mt-1">
-                                  {cert.category}
-                                </Badge>
+                              {typeof cert.percentage === 'number' && (
+                                <span className="text-[11px] text-slate-500 dark:text-slate-400">
+                                  {cert.grade ? `${cert.grade} · ` : ''}{cert.percentage}%
+                                </span>
                               )}
                             </div>
                           </div>
@@ -364,40 +383,16 @@ const StudentCertifications = () => {
                           </p>
                         </TableCell>
 
-                        {/* Grade and Percentage */}
+                        {/* Student Name */}
                         <TableCell>
-                          <div className="space-y-1">
-                            {cert.grade ? (
-                              <div className="flex items-center space-x-1.5">
-                                <Badge
-                                  variant={
-                                    cert.grade.startsWith('A')
-                                      ? 'success'
-                                      : cert.grade.startsWith('B')
-                                      ? 'secondary'
-                                      : 'neutral'
-                                  }
-                                  size="sm"
-                                >
-                                  {cert.grade}
-                                  {cert.gradeLabel ? ` (${cert.gradeLabel})` : ''}
-                                </Badge>
-                              </div>
-                            ) : null}
-                            {typeof cert.percentage === 'number' && (
-                              <p className="text-xs font-semibold text-slate-600 dark:text-slate-400">
-                                {cert.percentage}%
-                                {cert.score !== undefined && cert.totalPoints ? (
-                                  <span className="font-normal text-slate-400 dark:text-slate-500 text-[11px] ml-1">
-                                    ({cert.score}/{cert.totalPoints} pts)
-                                  </span>
-                                ) : null}
-                              </p>
-                            )}
-                            {!cert.grade && cert.percentage === null && (
-                              <span className="text-xs text-slate-400">—</span>
-                            )}
-                          </div>
+                          <p className="text-xs font-medium text-slate-800 dark:text-slate-200">
+                            {cert.studentName || user?.name || 'Student'}
+                          </p>
+                          {cert.studentIdNumber && (
+                            <span className="text-[10px] font-mono text-slate-400">
+                              {cert.studentIdNumber}
+                            </span>
+                          )}
                         </TableCell>
 
                         {/* Certificate ID */}
@@ -430,42 +425,47 @@ const StudentCertifications = () => {
                           </div>
                         </TableCell>
 
-                        {/* Status */}
+                        {/* Verification Status */}
                         <TableCell>
                           <Badge
                             variant={isRevoked ? 'error' : 'success'}
                             size="sm"
                             dot
                           >
-                            {isRevoked ? 'Revoked' : 'Active'}
+                            {isRevoked ? 'Revoked' : 'Verified'}
                           </Badge>
                         </TableCell>
 
-                        {/* Available Download Action */}
+                        {/* Multi-format Download Actions */}
                         <TableCell className="text-right">
-                          <div className="flex items-center justify-end space-x-1.5">
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              icon={Download}
-                              isLoading={isDownloading}
-                              disabled={isRevoked}
-                              onClick={() => handleDownload(cert)}
-                              title={
-                                isRevoked
-                                  ? 'Revoked certificate cannot be downloaded'
-                                  : 'Download Certificate'
-                              }
-                            >
-                              Download
-                            </Button>
+                          <div className="flex items-center justify-end gap-1 flex-wrap">
+                            {['pdf', 'png', 'jpg'].map((fmt) => (
+                              <Button
+                                key={fmt}
+                                variant={fmt === 'pdf' ? 'outline' : 'ghost'}
+                                size="sm"
+                                icon={fmt === 'pdf' ? Download : undefined}
+                                isLoading={downloadingId === `${certId}:${fmt}`}
+                                disabled={isRevoked}
+                                onClick={() => handleDownload(cert, fmt)}
+                                data-testid={`btn-cert-download-${fmt}-${certId}`}
+                                title={
+                                  isRevoked
+                                    ? 'Revoked certificate cannot be downloaded'
+                                    : `Download ${fmt.toUpperCase()}`
+                                }
+                              >
+                                {fmt.toUpperCase()}
+                              </Button>
+                            ))}
                             <Button
                               variant="ghost"
                               size="sm"
                               icon={ExternalLink}
                               onClick={() => setSelectedCertForModal(cert)}
-                              title="View Credential Snapshot"
-                              aria-label="View Credential Snapshot"
+                              title="Preview Certificate"
+                              aria-label="Preview Certificate"
+                              data-testid={`btn-cert-preview-${certId}`}
                             />
                           </div>
                         </TableCell>
@@ -481,7 +481,6 @@ const StudentCertifications = () => {
               {filteredCertificates.map((cert) => {
                 const certId = cert._id || cert.id || cert.certificateId;
                 const isCopied = copiedId === certId;
-                const isDownloading = downloadingId === certId;
                 const isRevoked = cert.status === 'revoked';
 
                 return (
@@ -494,7 +493,7 @@ const StudentCertifications = () => {
                       {/* Top Badges */}
                       <div className="flex items-center justify-between mb-3">
                         <Badge variant={isRevoked ? 'error' : 'success'} size="sm" dot>
-                          {isRevoked ? 'Revoked' : 'Active'}
+                          {isRevoked ? 'Revoked' : 'Verified'}
                         </Badge>
                         {cert.grade && (
                           <Badge
@@ -530,6 +529,12 @@ const StudentCertifications = () => {
                       {/* Academic & Verification Info */}
                       <div className="mt-4 space-y-2 py-3 border-y border-surface-light-border dark:border-surface-dark-border text-xs">
                         <div className="flex justify-between items-center text-slate-600 dark:text-slate-400">
+                          <span>Student:</span>
+                          <span className="font-semibold text-slate-800 dark:text-slate-200">
+                            {cert.studentName || user?.name || 'Student'}
+                          </span>
+                        </div>
+                        <div className="flex justify-between items-center text-slate-600 dark:text-slate-400">
                           <span>Certificate ID:</span>
                           <div className="flex items-center space-x-1 font-mono font-semibold text-slate-800 dark:text-slate-200">
                             <span>{cert.certificateId}</span>
@@ -548,15 +553,6 @@ const StudentCertifications = () => {
                           </div>
                         </div>
 
-                        {typeof cert.percentage === 'number' && (
-                          <div className="flex justify-between items-center text-slate-600 dark:text-slate-400">
-                            <span>Percentage Score:</span>
-                            <span className="font-semibold text-slate-800 dark:text-slate-200">
-                              {cert.percentage}%
-                            </span>
-                          </div>
-                        )}
-
                         <div className="flex justify-between items-center text-slate-600 dark:text-slate-400">
                           <span>Issue Date:</span>
                           <span className="text-slate-700 dark:text-slate-300">
@@ -567,71 +563,109 @@ const StudentCertifications = () => {
                     </div>
 
                     {/* Bottom Action Footer */}
-                    <div className="pt-4 flex items-center justify-between gap-2 mt-2">
+                    <div className="pt-4 flex items-center justify-between gap-2 mt-2 flex-wrap">
                       <Button
                         variant="ghost"
                         size="sm"
                         onClick={() => setSelectedCertForModal(cert)}
                         className="text-xs"
                       >
-                        Details
+                        Preview
                       </Button>
-                      <Button
-                        variant="primary"
-                        size="sm"
-                        icon={Download}
-                        isLoading={isDownloading}
-                        disabled={isRevoked}
-                        onClick={() => handleDownload(cert)}
-                      >
-                        Download
-                      </Button>
+                      <div className="flex items-center gap-1">
+                        {['pdf', 'png', 'jpg'].map((fmt) => (
+                          <Button
+                            key={fmt}
+                            variant={fmt === 'pdf' ? 'primary' : 'outline'}
+                            size="sm"
+                            isLoading={downloadingId === `${certId}:${fmt}`}
+                            disabled={isRevoked}
+                            onClick={() => handleDownload(cert, fmt)}
+                          >
+                            {fmt.toUpperCase()}
+                          </Button>
+                        ))}
+                      </div>
                     </div>
                   </Card>
                 );
               })}
             </div>
           )}
+          {filteredCertificates.length > 0 && (
+            <Pagination
+              containerRef={paginationRef}
+              scrollTargetRef={listTopRef}
+              currentPage={pagination.page}
+              totalPages={pagination.totalPages}
+              totalItems={pagination.total}
+              pageSize={limit}
+              onPageChange={(nextPage) => setPage(nextPage)}
+              onPageSizeChange={(nextLimit) => {
+                setLimit(nextLimit);
+                setPage(1);
+              }}
+              itemLabel="certificates"
+              testIdPrefix="certificates-pagination"
+            />
+          )}
         </div>
       )}
 
-      {/* Credential Snapshot Modal */}
+      {/* Certificate Preview & Detail Modal */}
       {selectedCertForModal && (
         <Modal
           isOpen={Boolean(selectedCertForModal)}
           onClose={() => setSelectedCertForModal(null)}
-          title="Authoritative Credential Snapshot"
-          maxWidth="max-w-xl"
+          title="Certificate Preview & Details"
+          maxWidth="max-w-2xl"
         >
           <div className="space-y-4">
-            {/* Header Card */}
-            <div className="p-4 rounded-2xl bg-gradient-to-br from-[#FFF4EB] to-white dark:from-[#341C16]/50 dark:to-surface-dark border border-brand-peach/30 dark:border-brand-primary/20">
-              <div className="flex items-center space-x-3 mb-2">
-                <div className="p-2 rounded-xl bg-brand-primary text-white shadow-warm-xs">
-                  <Award className="w-6 h-6" />
-                </div>
-                <div>
-                  <h4 className="font-bold text-base text-slate-900 dark:text-slate-100">
-                    {selectedCertForModal.title || selectedCertForModal.certificateTitle}
-                  </h4>
-                  <p className="text-xs text-slate-500 dark:text-slate-400">
-                    {selectedCertForModal.assessmentName || selectedCertForModal.assessmentTitle}
-                  </p>
-                </div>
+            {/* Visual Certificate Preview */}
+            <div
+              className="p-6 rounded-2xl bg-gradient-to-br from-[#FFF9F2] via-white to-[#FFF4EB] dark:from-[#241712] dark:via-surface-dark dark:to-[#1E2430] border-2 border-[#D4AF37]/70 text-center space-y-2.5 shadow-warm-sm"
+              data-testid="certificate-preview-card"
+            >
+              <span className="text-[11px] font-bold uppercase tracking-[0.2em] text-slate-500 dark:text-slate-400 block">
+                Unified Assessment Platform
+              </span>
+              <h4 className="font-bold text-lg text-[#B45309] dark:text-[#F4A261] tracking-wide">
+                CERTIFICATE OF ACHIEVEMENT
+              </h4>
+              <p className="text-xs italic text-slate-500 dark:text-slate-400">
+                Awarded to
+              </p>
+              <p className="text-xl font-extrabold text-slate-900 dark:text-slate-100 uppercase tracking-wide">
+                {selectedCertForModal.studentName || user?.name}
+              </p>
+              <p className="text-xs text-slate-600 dark:text-slate-300">
+                for completing{' '}
+                <strong className="text-slate-900 dark:text-slate-100">
+                  {selectedCertForModal.assessmentName || selectedCertForModal.assessmentTitle}
+                </strong>
+              </p>
+              <p className="text-sm font-bold text-slate-800 dark:text-slate-200">
+                {selectedCertForModal.title || selectedCertForModal.certificateTitle}
+              </p>
+              <div className="pt-2 flex flex-wrap items-center justify-center gap-3 text-[11px] text-slate-500 dark:text-slate-400">
+                <span>ID: <strong className="font-mono text-slate-700 dark:text-slate-200">{selectedCertForModal.certificateId}</strong></span>
+                <span>·</span>
+                <span>Issued: {formatDate(selectedCertForModal.issuedAt)}</span>
+                <span>·</span>
+                <Badge
+                  variant={selectedCertForModal.status === 'revoked' ? 'error' : 'success'}
+                  size="sm"
+                  dot
+                >
+                  {selectedCertForModal.status === 'revoked' ? 'Revoked' : 'Verified'}
+                </Badge>
               </div>
-              <Badge
-                variant={selectedCertForModal.status === 'revoked' ? 'error' : 'success'}
-                size="sm"
-                dot
-              >
-                Status: {selectedCertForModal.status === 'revoked' ? 'Revoked' : 'Active Credential'}
-              </Badge>
             </div>
 
             {/* Academic Snapshot Metadata Grid */}
             <div className="grid grid-cols-2 gap-3 text-xs">
               <div className="p-3 rounded-xl bg-slate-50 dark:bg-surface-dark-muted border border-surface-light-border dark:border-surface-dark-border">
-                <span className="text-slate-400 block mb-0.5">Recipient Student:</span>
+                <span className="text-slate-400 block mb-0.5">Student Name:</span>
                 <span className="font-semibold text-slate-800 dark:text-slate-200">
                   {selectedCertForModal.studentName || user?.name}
                 </span>
@@ -643,7 +677,7 @@ const StudentCertifications = () => {
               </div>
 
               <div className="p-3 rounded-xl bg-slate-50 dark:bg-surface-dark-muted border border-surface-light-border dark:border-surface-dark-border">
-                <span className="text-slate-400 block mb-0.5">Authoritative Grade:</span>
+                <span className="text-slate-400 block mb-0.5">Evaluation Outcome:</span>
                 <span className="font-semibold text-slate-800 dark:text-slate-200">
                   {selectedCertForModal.grade || 'Passed'}
                   {selectedCertForModal.percentage !== null && ` (${selectedCertForModal.percentage}%)`}
@@ -663,7 +697,7 @@ const StudentCertifications = () => {
               </div>
 
               <div className="p-3 rounded-xl bg-slate-50 dark:bg-surface-dark-muted border border-surface-light-border dark:border-surface-dark-border">
-                <span className="text-slate-400 block mb-0.5">Issuance Timestamp:</span>
+                <span className="text-slate-400 block mb-0.5">Issue Date:</span>
                 <span className="text-slate-800 dark:text-slate-200">
                   {formatDateTime(selectedCertForModal.issuedAt)}
                 </span>
@@ -675,7 +709,7 @@ const StudentCertifications = () => {
               <div className="p-3 rounded-xl bg-[#FCF8F3] dark:bg-surface-dark-muted/80 border border-brand-peach/20 dark:border-slate-700 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                 <div>
                   <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400 block">
-                    Cryptographic Verification Token
+                    Verification Code
                   </span>
                   <span className="font-mono text-xs font-semibold text-slate-800 dark:text-slate-200">
                     {selectedCertForModal.verificationCode}
@@ -688,7 +722,7 @@ const StudentCertifications = () => {
                     icon={Copy}
                     onClick={() => handleCopy(selectedCertForModal.verificationCode, 'modal-verify')}
                   >
-                    Copy Token
+                    Copy Code
                   </Button>
                   <Button
                     variant="outline"
@@ -708,28 +742,31 @@ const StudentCertifications = () => {
               </div>
             )}
 
-            {/* Download Note / Notice */}
-            <div className="p-3 rounded-xl bg-blue-50/60 dark:bg-blue-950/20 border border-blue-200 dark:border-blue-900/40 text-xs text-blue-800 dark:text-blue-300 flex items-start space-x-2">
-              <ShieldCheck className="w-4 h-4 flex-shrink-0 mt-0.5" />
-              <span>
-                Accredited institution credentials maintain permanent blockchain/database verification.
-                PDF document rendering and streaming downloads are integrated via backend template rendering.
-              </span>
-            </div>
-
             {/* Modal Actions */}
-            <div className="flex justify-end space-x-2 pt-2 border-t border-surface-light-border dark:border-surface-dark-border">
+            <div className="flex flex-wrap justify-between items-center gap-2 pt-2 border-t border-surface-light-border dark:border-surface-dark-border">
               <Button variant="outline" size="sm" onClick={() => setSelectedCertForModal(null)}>
                 Close
               </Button>
-              <Button
-                variant="primary"
-                size="sm"
-                icon={Download}
-                onClick={() => handleDownload(selectedCertForModal)}
-              >
-                Download Certificate
-              </Button>
+              <div className="flex items-center gap-1.5">
+                {['pdf', 'png', 'jpg'].map((fmt) => {
+                  const modalCertId =
+                    selectedCertForModal._id || selectedCertForModal.id || selectedCertForModal.certificateId;
+                  return (
+                    <Button
+                      key={fmt}
+                      variant={fmt === 'pdf' ? 'primary' : 'outline'}
+                      size="sm"
+                      icon={Download}
+                      isLoading={downloadingId === `${modalCertId}:${fmt}`}
+                      disabled={selectedCertForModal.status === 'revoked'}
+                      onClick={() => handleDownload(selectedCertForModal, fmt)}
+                      data-testid={`btn-modal-download-${fmt}`}
+                    >
+                      Download {fmt.toUpperCase()}
+                    </Button>
+                  );
+                })}
+              </div>
             </div>
           </div>
         </Modal>

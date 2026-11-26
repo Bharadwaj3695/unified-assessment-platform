@@ -6,6 +6,11 @@ export const instructorService = {
     return res.data || res || [];
   },
 
+  getStudentsPaginated: async (params = {}) => {
+    const res = await api.get('/users/students', { params });
+    return res;
+  },
+
   getInstructorSubmissions: async (params = {}) => {
     const res = await api.get('/evaluations/instructor/submissions', { params });
     return res;

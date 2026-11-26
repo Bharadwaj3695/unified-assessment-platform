@@ -22,6 +22,9 @@ import StatCard from '../../components/common/StatCard';
 import PerformanceDonutChart from '../../components/charts/PerformanceDonutChart';
 import ScoreTrendChart from '../../components/charts/ScoreTrendChart';
 import StudentExamProgress from '../../components/student/StudentExamProgress';
+import useDebounce from '../../hooks/useDebounce';
+import Pagination, { PaginationJumpLink } from '../../components/ui/Pagination';
+import { DEFAULT_PAGE_SIZE, normalizePagination, paginateArray } from '../../utils/pagination';
 import { StudentHeroIllustration } from '../../components/illustrations';
 import {
   Table,
@@ -79,6 +82,7 @@ const StudentDashboard = () => {
 
   const [assessments, setAssessments] = useState([]);
   const [mockTests, setMockTests] = useState([]);
+  const [finalizedMockResults, setFinalizedMockResults] = useState([]);
   const [testTypeFilter, setTestTypeFilter] = useState('all');
   const [submissions, setSubmissions] = useState([]);
   const [performanceData, setPerformanceData] = useState(null);
@@ -95,7 +99,53 @@ const StudentDashboard = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState(null);
   const [catalogSearch, setCatalogSearch] = useState('');
+  const debouncedCatalogSearch = useDebounce(catalogSearch, 300);
   const [selectedCategory, setSelectedCategory] = useState('All');
+  const [catalogPage, setCatalogPage] = useState(1);
+  const [catalogLimit, setCatalogLimit] = useState(DEFAULT_PAGE_SIZE);
+  const [catalogAssessments, setCatalogAssessments] = useState([]);
+  const [catalogPagination, setCatalogPagination] = useState({
+    page: 1,
+    limit: DEFAULT_PAGE_SIZE,
+    total: 0,
+    totalPages: 1,
+  });
+  const [loadingCatalog, setLoadingCatalog] = useState(false);
+
+  const [mockTestsPage, setMockTestsPage] = useState(1);
+  const [mockTestsLimit, setMockTestsLimit] = useState(DEFAULT_PAGE_SIZE);
+  const [catalogMockTests, setCatalogMockTests] = useState([]);
+  const [mockTestsPagination, setMockTestsPagination] = useState({
+    page: 1,
+    limit: DEFAULT_PAGE_SIZE,
+    total: 0,
+    totalPages: 1,
+  });
+
+  const [attemptsSearch, setAttemptsSearch] = useState('');
+  const debouncedAttemptsSearch = useDebounce(attemptsSearch, 300);
+  const [attemptsPage, setAttemptsPage] = useState(1);
+  const [attemptsLimit, setAttemptsLimit] = useState(DEFAULT_PAGE_SIZE);
+  const [pagedAttempts, setPagedAttempts] = useState([]);
+  const [attemptsPagination, setAttemptsPagination] = useState({
+    page: 1,
+    limit: DEFAULT_PAGE_SIZE,
+    total: 0,
+    totalPages: 1,
+  });
+  const [attemptCounts, setAttemptCounts] = useState(null);
+  const [loadingAttempts, setLoadingAttempts] = useState(false);
+
+  const [resultsPage, setResultsPage] = useState(1);
+  const [resultsLimit, setResultsLimit] = useState(DEFAULT_PAGE_SIZE);
+
+  const catalogTopRef = useRef(null);
+  const catalogPaginationRef = useRef(null);
+  const mockTestsTopRef = useRef(null);
+  const mockTestsPaginationRef = useRef(null);
+  const submissionsTopRef = useRef(null);
+  const submissionsPaginationRef = useRef(null);
+
   const [selectedAssessmentForModal, setSelectedAssessmentForModal] = useState(null);
   const [selectedAssessmentForReassignment, setSelectedAssessmentForReassignment] = useState(null);
   const [reassignmentRequests, setReassignmentRequests] = useState([]);
@@ -136,6 +186,11 @@ const StudentDashboard = () => {
     const querySearch = searchParams.get('search');
     if (querySearch !== null && querySearch !== undefined) {
       setCatalogSearch(querySearch);
+      setCatalogPage(1);
+      setMockTestsPage(1);
+      setAttemptsSearch(querySearch);
+      setAttemptsPage(1);
+      setResultsPage(1);
     }
 
     const currentKey = `${location.pathname}${location.search}`;
@@ -208,22 +263,27 @@ const StudentDashboard = () => {
     setError(null);
     try {
       const analyticsParams = dateFilter !== 'all' ? { dateFilter } : {};
-      const [asmtRes, subRes, perfRes, trendsRes, reqsRes, mockTestsRes] = await Promise.all([
+      const [asmtRes, subRes, perfRes, trendsRes, reqsRes, mockTestsRes, examProgressRes] = await Promise.all([
         assessmentService.getAssessments({ limit: 200, includePast: true }),
         submissionService.getStudentSubmissions(),
         analyticsService.getStudentPerformance(analyticsParams).catch(() => null),
         analyticsService.getStudentTrends(analyticsParams).catch(() => []),
         assessmentService.getMyReassignmentRequests().catch(() => []),
         uapQuestionBankService.getMockTests().catch(() => ({ data: [] })),
+        analyticsService.getStudentExamProgress().catch(() => null),
       ]);
 
       const loadedAssessments = asmtRes.data || asmtRes.assessments || [];
       const loadedSubmissions = subRes || [];
       const loadedRequests = Array.isArray(reqsRes) ? reqsRes : (reqsRes?.data || []);
       const loadedMockTests = Array.isArray(mockTestsRes?.data) ? mockTestsRes.data : Array.isArray(mockTestsRes) ? mockTestsRes : [];
+      const loadedMockResults = Array.isArray(examProgressRes?.evaluatedExams)
+        ? examProgressRes.evaluatedExams.filter((e) => e.attemptType === 'mock_test')
+        : [];
 
       setAssessments(loadedAssessments);
       setMockTests(loadedMockTests);
+      setFinalizedMockResults(loadedMockResults);
       setSubmissions(loadedSubmissions);
       setReassignmentRequests(loadedRequests);
       if (perfRes) setPerformanceData(perfRes);
@@ -276,6 +336,107 @@ const StudentDashboard = () => {
       loadData(true);
     }
   }, [loadData]);
+
+  // Server-side paginated catalog assessments & mock tests for Available Tests view
+  const loadCatalogPage = useCallback(async () => {
+    if (currentView !== 'catalog') return;
+    try {
+      setLoadingCatalog(true);
+      const asmtParams = {
+        page: catalogPage,
+        limit: catalogLimit,
+        includePast: true,
+      };
+      if (selectedCategory !== 'All') asmtParams.category = selectedCategory;
+      if (debouncedCatalogSearch.trim()) asmtParams.search = debouncedCatalogSearch.trim();
+
+      const mtParams = {
+        page: mockTestsPage,
+        limit: mockTestsLimit,
+      };
+      if (debouncedCatalogSearch.trim()) mtParams.search = debouncedCatalogSearch.trim();
+
+      const [asmtRes, mtRes] = await Promise.all([
+        assessmentService.getAssessments(asmtParams),
+        uapQuestionBankService.getMockTestsPaginated(mtParams).catch(() => ({ data: [] })),
+      ]);
+
+      const loadedAsmts = asmtRes?.data || asmtRes?.assessments || [];
+      setCatalogAssessments(loadedAsmts);
+      setCatalogPagination(
+        normalizePagination(asmtRes?.pagination, {
+          page: catalogPage,
+          limit: catalogLimit,
+          total: loadedAsmts.length,
+        })
+      );
+
+      const loadedMts = Array.isArray(mtRes?.data)
+        ? mtRes.data
+        : Array.isArray(mtRes)
+        ? mtRes
+        : [];
+      setCatalogMockTests(loadedMts);
+      setMockTestsPagination(
+        normalizePagination(mtRes?.pagination, {
+          page: mockTestsPage,
+          limit: mockTestsLimit,
+          total: loadedMts.length,
+        })
+      );
+    } catch (_err) {
+      // Fall back to preloaded core lists if needed
+    } finally {
+      setLoadingCatalog(false);
+    }
+  }, [
+    currentView,
+    catalogPage,
+    catalogLimit,
+    selectedCategory,
+    debouncedCatalogSearch,
+    mockTestsPage,
+    mockTestsLimit,
+  ]);
+
+  useEffect(() => {
+    loadCatalogPage();
+  }, [loadCatalogPage]);
+
+  // Server-side paginated attempts for My Attempts view
+  const loadAttemptsPage = useCallback(async () => {
+    if (currentView !== 'submissions') return;
+    try {
+      setLoadingAttempts(true);
+      const params = {
+        page: attemptsPage,
+        limit: attemptsLimit,
+        view: 'submissions',
+        status: submissionStatusFilter,
+      };
+      if (debouncedAttemptsSearch.trim()) params.search = debouncedAttemptsSearch.trim();
+
+      const res = await submissionService.getStudentSubmissionsPaginated(params);
+      const list = Array.isArray(res) ? res : res?.data || [];
+      setPagedAttempts(list);
+      setAttemptsPagination(
+        normalizePagination(res?.pagination, {
+          page: attemptsPage,
+          limit: attemptsLimit,
+          total: list.length,
+        })
+      );
+      if (res?.counts) setAttemptCounts(res.counts);
+    } catch (_err) {
+      // Keep fallback data if request fails
+    } finally {
+      setLoadingAttempts(false);
+    }
+  }, [currentView, attemptsPage, attemptsLimit, submissionStatusFilter, debouncedAttemptsSearch]);
+
+  useEffect(() => {
+    loadAttemptsPage();
+  }, [loadAttemptsPage]);
 
   // Isolate dateFilter changes so they only refresh analytics rather than the full catalog
   useEffect(() => {
@@ -660,13 +821,22 @@ const StudentDashboard = () => {
     return { all, passed, failed, pending, inProgress };
   }, [submissions]);
 
-  // Submissions filtered by active status filter tab (My Results strictly excludes pending/in-progress)
+  const isFinalizedSubmission = useCallback(
+    (sub) =>
+      sub &&
+      sub.status === 'evaluated' &&
+      sub.evaluationStatus !== 'pending' &&
+      sub.resultStatus !== 'pending_evaluation' &&
+      typeof (sub.finalScore ?? sub.score) === 'number' &&
+      typeof sub.percentage === 'number',
+    []
+  );
+
+  // Submissions filtered by active status filter tab (My Results strictly excludes pending/in-progress/incomplete)
   const filteredSubmissions = useMemo(() => {
     const baseList =
       currentView === 'results'
-        ? submissions.filter(
-            (sub) => sub.status === 'evaluated' && sub.evaluationStatus !== 'pending'
-          )
+        ? submissions.filter(isFinalizedSubmission)
         : submissions;
 
     if (submissionStatusFilter === 'all') return baseList;
@@ -681,29 +851,86 @@ const StudentDashboard = () => {
         );
       }
       if (submissionStatusFilter === 'passed') {
-        return sub.status === 'evaluated' && sub.evaluationStatus !== 'pending' && Boolean(sub.passed);
+        return isFinalizedSubmission(sub) && Boolean(sub.passed);
       }
       if (submissionStatusFilter === 'failed') {
-        return sub.status === 'evaluated' && sub.evaluationStatus !== 'pending' && !sub.passed;
+        return isFinalizedSubmission(sub) && !sub.passed;
       }
       return true;
     });
-  }, [submissions, submissionStatusFilter, currentView]);
+  }, [submissions, submissionStatusFilter, currentView, isFinalizedSubmission]);
 
-  // Filtered assessments for Catalog - includes all eligible published assessments
-  const filteredCatalog = useMemo(() => {
-    return assessments.filter((a) => {
-      const matchCat =
-        selectedCategory === 'All' ||
-        (a.category && a.category.trim().toLowerCase() === selectedCategory.trim().toLowerCase());
-      const matchSearch =
-        !catalogSearch.trim() ||
-        a.title?.toLowerCase().includes(catalogSearch.toLowerCase()) ||
-        a.description?.toLowerCase().includes(catalogSearch.toLowerCase()) ||
-        a.category?.toLowerCase().includes(catalogSearch.toLowerCase());
-      return matchCat && matchSearch;
-    });
-  }, [assessments, selectedCategory, catalogSearch]);
+  const filteredFinalizedMockResults = useMemo(() => {
+    if (currentView !== 'results') return [];
+    if (submissionStatusFilter === 'passed') return finalizedMockResults.filter((m) => Boolean(m.passed));
+    if (submissionStatusFilter === 'failed') return finalizedMockResults.filter((m) => !m.passed);
+    if (submissionStatusFilter === 'all') return finalizedMockResults;
+    return [];
+  }, [currentView, finalizedMockResults, submissionStatusFilter]);
+
+  // Filtered assessments for Catalog - server-paginated list
+  const filteredCatalog = catalogAssessments;
+
+  const mergedResults = useMemo(() => {
+    if (currentView !== 'results') return [];
+    const q = attemptsSearch.trim().toLowerCase();
+    const asmtItems = filteredSubmissions
+      .filter((sub) => {
+        if (!q) return true;
+        return (
+          (sub.assessment?.title || '').toLowerCase().includes(q) ||
+          (sub.assessment?.category || '').toLowerCase().includes(q)
+        );
+      })
+      .map((sub) => ({
+        kind: 'assessment',
+        id: String(sub._id || sub.id),
+        sortDate: new Date(sub.evaluation?.gradedAt || sub.submittedAt || sub.createdAt || 0).getTime(),
+        data: sub,
+      }));
+
+    const mockItems = filteredFinalizedMockResults
+      .filter((mockRes) => {
+        if (!q) return true;
+        return (
+          (mockRes.examName || '').toLowerCase().includes(q) ||
+          (mockRes.subject || '').toLowerCase().includes(q) ||
+          (mockRes.examinationTag || '').toLowerCase().includes(q)
+        );
+      })
+      .map((mockRes) => ({
+        kind: 'mock',
+        id: String(mockRes.attemptId),
+        sortDate: new Date(mockRes.evaluatedAt || mockRes.submittedAt || 0).getTime(),
+        data: mockRes,
+      }));
+
+    return [...asmtItems, ...mockItems].sort(
+      (a, b) => b.sortDate - a.sortDate || a.id.localeCompare(b.id)
+    );
+  }, [currentView, filteredSubmissions, filteredFinalizedMockResults, attemptsSearch]);
+
+  const pagedResults = useMemo(() => {
+    if (currentView !== 'results') {
+      return { items: [], pagination: { page: 1, limit: resultsLimit, total: 0, totalPages: 1 } };
+    }
+    return paginateArray(mergedResults, resultsPage, resultsLimit);
+  }, [currentView, mergedResults, resultsPage, resultsLimit]);
+
+  const displayedSubmissions = useMemo(() => {
+    if (currentView === 'submissions') return pagedAttempts;
+    if (currentView === 'results') {
+      return pagedResults.items.filter((i) => i.kind === 'assessment').map((i) => i.data);
+    }
+    return filteredSubmissions;
+  }, [currentView, pagedAttempts, pagedResults, filteredSubmissions]);
+
+  const displayedMockResults = useMemo(() => {
+    if (currentView === 'results') {
+      return pagedResults.items.filter((i) => i.kind === 'mock').map((i) => i.data);
+    }
+    return [];
+  }, [currentView, pagedResults]);
 
   if (isLoading && assessments.length === 0 && submissions.length === 0) {
     if (currentView === 'catalog') {
@@ -941,26 +1168,40 @@ const StudentDashboard = () => {
           }
         >
           {/* Unified Test Paradigm Filter (All / Assessments / Mock Tests) */}
-          <div className="flex items-center space-x-2 mb-4 pb-3 border-b border-surface-light-border dark:border-surface-dark-border">
-            <span className="text-xs font-semibold text-slate-500 mr-1">Catalog View:</span>
-            {[
-              { id: 'all', label: 'All Tests' },
-              { id: 'assessments', label: 'Course Assessments' },
-              { id: 'mock-tests', label: 'Practice Mock Tests' },
-            ].map((t) => (
-              <button
-                key={t.id}
-                type="button"
-                onClick={() => setTestTypeFilter(t.id)}
-                className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition-all cursor-pointer ${
-                  testTypeFilter === t.id
-                    ? 'bg-brand-primary text-white shadow-warm-xs'
-                    : 'bg-slate-100 dark:bg-surface-dark-muted text-slate-600 dark:text-slate-300 hover:bg-slate-200'
-                }`}
-              >
-                {t.label}
-              </button>
-            ))}
+          <div ref={catalogTopRef} className="flex flex-wrap items-center justify-between gap-2 mb-4 pb-3 border-b border-surface-light-border dark:border-surface-dark-border">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-xs font-semibold text-slate-500 mr-1">Catalog View:</span>
+              {[
+                { id: 'all', label: 'All Tests' },
+                { id: 'assessments', label: 'Course Assessments' },
+                { id: 'mock-tests', label: 'Practice Mock Tests' },
+              ].map((t) => (
+                <button
+                  key={t.id}
+                  type="button"
+                  onClick={() => {
+                    setTestTypeFilter(t.id);
+                    setCatalogPage(1);
+                    setMockTestsPage(1);
+                  }}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition-all cursor-pointer ${
+                    testTypeFilter === t.id
+                      ? 'bg-brand-primary text-white shadow-warm-xs'
+                      : 'bg-slate-100 dark:bg-surface-dark-muted text-slate-600 dark:text-slate-300 hover:bg-slate-200'
+                  }`}
+                >
+                  {t.label}
+                </button>
+              ))}
+            </div>
+            {testTypeFilter !== 'mock-tests' && (
+              <PaginationJumpLink
+                currentPage={catalogPagination.page}
+                totalPages={catalogPagination.totalPages}
+                totalItems={catalogPagination.total}
+                targetRef={catalogPaginationRef}
+              />
+            )}
           </div>
 
           {/* Filter Bar */}
@@ -970,7 +1211,10 @@ const StudentDashboard = () => {
                 <button
                   key={cat}
                   type="button"
-                  onClick={() => setSelectedCategory(cat)}
+                  onClick={() => {
+                    setSelectedCategory(cat);
+                    setCatalogPage(1);
+                  }}
                   className={`px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition-colors cursor-pointer ${
                     selectedCategory === cat
                       ? 'bg-[#FDECE2] text-[#E05D38] dark:bg-[#341C16] dark:text-[#F4A261] shadow-warm-xs'
@@ -987,7 +1231,11 @@ const StudentDashboard = () => {
                 <span>Filter: &ldquo;{catalogSearch}&rdquo;</span>
                 <button
                   type="button"
-                  onClick={() => setCatalogSearch('')}
+                  onClick={() => {
+                    setCatalogSearch('');
+                    setCatalogPage(1);
+                    setMockTestsPage(1);
+                  }}
                   className="hover:text-red-600 transition-colors cursor-pointer ml-1"
                   title="Clear search filter"
                 >
@@ -997,23 +1245,26 @@ const StudentDashboard = () => {
             )}
           </div>
 
-          {isLoading && assessments.length === 0 ? (
-            catalogViewMode === 'table' ? (
-              <TableSkeleton rows={5} columns={6} />
-            ) : (
-              <CardSkeleton count={6} />
-            )
-          ) : filteredCatalog.length === 0 ? (
-            <EmptyState
-              title="No matching assessments"
-              description="No open assessments match your current search or category filter."
-              actionLabel="Reset Filters"
-              onAction={() => {
-                setSelectedCategory('All');
-                setCatalogSearch('');
-              }}
-            />
-          ) : catalogViewMode === 'table' ? (
+          {testTypeFilter !== 'mock-tests' && (
+            <>
+              {(isLoading || loadingCatalog) && filteredCatalog.length === 0 ? (
+                catalogViewMode === 'table' ? (
+                  <TableSkeleton rows={5} columns={6} />
+                ) : (
+                  <CardSkeleton count={6} />
+                )
+              ) : filteredCatalog.length === 0 ? (
+                <EmptyState
+                  title="No matching assessments"
+                  description="No open assessments match your current search or category filter."
+                  actionLabel="Reset Filters"
+                  onAction={() => {
+                    setSelectedCategory('All');
+                    setCatalogSearch('');
+                    setCatalogPage(1);
+                  }}
+                />
+              ) : catalogViewMode === 'table' ? (
             <Table>
               <TableHead>
                 <TableRow>
@@ -1318,11 +1569,30 @@ const StudentDashboard = () => {
               })}
             </div>
           )}
+          {filteredCatalog.length > 0 && (
+            <Pagination
+              containerRef={catalogPaginationRef}
+              scrollTargetRef={catalogTopRef}
+              currentPage={catalogPagination.page}
+              totalPages={catalogPagination.totalPages}
+              totalItems={catalogPagination.total}
+              pageSize={catalogLimit}
+              onPageChange={(nextPage) => setCatalogPage(nextPage)}
+              onPageSizeChange={(nextLimit) => {
+                setCatalogLimit(nextLimit);
+                setCatalogPage(1);
+              }}
+              itemLabel="assessments"
+              testIdPrefix="catalog-pagination"
+            />
+          )}
+            </>
+          )}
 
           {/* Practice Mock Tests Section (Unified Catalog) */}
-          {(testTypeFilter === 'all' || testTypeFilter === 'mock-tests') && mockTests.length > 0 && (
-            <div className="mt-8 pt-6 border-t border-surface-light-border dark:border-surface-dark-border space-y-4">
-              <div className="flex items-center justify-between">
+          {(testTypeFilter === 'all' || testTypeFilter === 'mock-tests') && (catalogMockTests.length > 0 || mockTests.length > 0) && (
+            <div ref={mockTestsTopRef} className="mt-8 pt-6 border-t border-surface-light-border dark:border-surface-dark-border space-y-4">
+              <div className="flex items-center justify-between gap-2 flex-wrap">
                 <div>
                   <h3 className="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2">
                     <BookOpen className="w-4 h-4 text-brand-primary" />
@@ -1330,47 +1600,78 @@ const StudentDashboard = () => {
                   </h3>
                   <p className="text-xs text-slate-500">Syllabus-calibrated blueprint practice examinations</p>
                 </div>
-                <Badge variant="sage" size="sm">
-                  {mockTests.length} Practice Exam{mockTests.length !== 1 ? 's' : ''}
-                </Badge>
+                <div className="flex items-center gap-2">
+                  <PaginationJumpLink
+                    currentPage={mockTestsPagination.page}
+                    totalPages={mockTestsPagination.totalPages}
+                    totalItems={mockTestsPagination.total}
+                    targetRef={mockTestsPaginationRef}
+                  />
+                  <Badge variant="sage" size="sm">
+                    {mockTestsPagination.total} Practice Exam{mockTestsPagination.total !== 1 ? 's' : ''}
+                  </Badge>
+                </div>
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                {mockTests.map((mt) => (
-                  <div
-                    key={mt._id}
-                    className="p-5 rounded-2xl border border-surface-light-border dark:border-surface-dark-border bg-white dark:bg-surface-dark shadow-warm-xs hover:shadow-warm-md hover:border-brand-peach/60 transition-all flex flex-col justify-between"
-                  >
-                    <div>
-                      <div className="flex items-center justify-between mb-2">
-                        <Badge variant="terracotta" size="sm">
-                          {mt.examination || 'Practice Exam'}
-                        </Badge>
-                        <span className="text-xs text-slate-500 flex items-center gap-1">
-                          <Clock className="w-3.5 h-3.5" />
-                          {mt.durationMinutes} mins
-                        </span>
-                      </div>
-                      <h4 className="font-bold text-sm text-slate-900 dark:text-white line-clamp-2">{mt.title}</h4>
-                      <p className="text-xs text-slate-500 line-clamp-2 mt-1">{mt.description || 'Practice examination'}</p>
-                    </div>
-
-                    <div className="pt-3 mt-4 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between">
-                      <div className="text-xs text-slate-600 dark:text-slate-400">
-                        <span className="font-semibold block">{mt.questionCount || mt.resolvedQuestions?.length || 0} Questions</span>
-                        <span>{mt.totalMarks} Marks</span>
-                      </div>
-                      <Button
-                        variant="primary"
-                        size="sm"
-                        onClick={() => navigate(`/student/mock-test/${mt._id}`)}
+              {catalogMockTests.length === 0 ? (
+                <div className="p-6 text-center text-xs text-slate-500 rounded-xl border border-dashed border-surface-light-border dark:border-surface-dark-border">
+                  No mock tests match your search criteria.
+                </div>
+              ) : (
+                <>
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                    {catalogMockTests.map((mt) => (
+                      <div
+                        key={mt._id}
+                        className="p-5 rounded-2xl border border-surface-light-border dark:border-surface-dark-border bg-white dark:bg-surface-dark shadow-warm-xs hover:shadow-warm-md hover:border-brand-peach/60 transition-all flex flex-col justify-between"
                       >
-                        Start Exam →
-                      </Button>
-                    </div>
+                        <div>
+                          <div className="flex items-center justify-between mb-2">
+                            <Badge variant="terracotta" size="sm">
+                              {mt.examination || 'Practice Exam'}
+                            </Badge>
+                            <span className="text-xs text-slate-500 flex items-center gap-1">
+                              <Clock className="w-3.5 h-3.5" />
+                              {mt.durationMinutes} mins
+                            </span>
+                          </div>
+                          <h4 className="font-bold text-sm text-slate-900 dark:text-white line-clamp-2">{mt.title}</h4>
+                          <p className="text-xs text-slate-500 line-clamp-2 mt-1">{mt.description || 'Practice examination'}</p>
+                        </div>
+
+                        <div className="pt-3 mt-4 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between">
+                          <div className="text-xs text-slate-600 dark:text-slate-400">
+                            <span className="font-semibold block">{mt.questionCount || mt.resolvedQuestions?.length || 0} Questions</span>
+                            <span>{mt.totalMarks} Marks</span>
+                          </div>
+                          <Button
+                            variant="primary"
+                            size="sm"
+                            onClick={() => navigate(`/student/mock-test/${mt._id}`)}
+                          >
+                            Start Exam →
+                          </Button>
+                        </div>
+                      </div>
+                    ))}
                   </div>
-                ))}
-              </div>
+                  <Pagination
+                    containerRef={mockTestsPaginationRef}
+                    scrollTargetRef={mockTestsTopRef}
+                    currentPage={mockTestsPagination.page}
+                    totalPages={mockTestsPagination.totalPages}
+                    totalItems={mockTestsPagination.total}
+                    pageSize={mockTestsLimit}
+                    onPageChange={(nextPage) => setMockTestsPage(nextPage)}
+                    onPageSizeChange={(nextLimit) => {
+                      setMockTestsLimit(nextLimit);
+                      setMockTestsPage(1);
+                    }}
+                    itemLabel="mock tests"
+                    testIdPrefix="catalog-mock-tests-pagination"
+                  />
+                </>
+              )}
             </div>
           )}
         </Card>
@@ -2020,6 +2321,7 @@ const StudentDashboard = () => {
           )}
 
           {/* Submissions History Feed */}
+          <div ref={submissionsTopRef}>
           <Card
             title={
               currentView === 'results'
@@ -2035,61 +2337,123 @@ const StudentDashboard = () => {
                 ? 'Finalized evaluated outcomes, official scores, and individual performance reports'
                 : 'Chronological record of exam attempts, scores, and evaluation feedback'
             }
+            action={
+              currentView === 'submissions' ? (
+                <PaginationJumpLink
+                  currentPage={attemptsPagination.page}
+                  totalPages={attemptsPagination.totalPages}
+                  totalItems={attemptsPagination.total}
+                  targetRef={submissionsPaginationRef}
+                />
+              ) : currentView === 'results' ? (
+                <PaginationJumpLink
+                  currentPage={pagedResults.pagination.page}
+                  totalPages={pagedResults.pagination.totalPages}
+                  totalItems={pagedResults.pagination.total}
+                  targetRef={submissionsPaginationRef}
+                />
+              ) : null
+            }
           >
             {/* Filter Tabs Toolbar */}
-            <div className="flex items-center gap-1.5 overflow-x-auto pb-3 mb-4 border-b border-surface-light-border dark:border-surface-dark-border">
-              {(currentView === 'results'
-                ? [
-                    { id: 'all', label: 'All', count: submissionCounts.passed + submissionCounts.failed },
-                    { id: 'passed', label: 'Passed', count: submissionCounts.passed },
-                    { id: 'failed', label: 'Failed', count: submissionCounts.failed },
-                  ]
-                : [
-                    { id: 'all', label: 'All', count: submissionCounts.all },
-                    { id: 'passed', label: 'Passed', count: submissionCounts.passed },
-                    { id: 'failed', label: 'Failed', count: submissionCounts.failed },
-                    { id: 'pending', label: 'Pending Review', count: submissionCounts.pending },
-                    { id: 'in_progress', label: 'In Progress', count: submissionCounts.inProgress },
-                  ]
-              ).map((tab) => (
-                <button
-                  key={tab.id}
-                  type="button"
-                  onClick={() => setSubmissionStatusFilter(tab.id)}
-                  className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition-colors cursor-pointer ${
-                    submissionStatusFilter === tab.id
-                      ? 'bg-[#FDECE2] text-[#E05D38] dark:bg-[#341C16] dark:text-[#F4A261] shadow-warm-xs'
-                      : 'text-slate-600 dark:text-slate-400 hover:bg-[#FFF4EB]/60 dark:hover:bg-slate-800'
-                  }`}
-                >
-                  <span>{tab.label}</span>
-                  <span
-                    className={`px-1.5 py-0.5 rounded-full text-[10px] font-bold ${
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 mb-4 border-b border-surface-light-border dark:border-surface-dark-border">
+              <div className="flex items-center gap-1.5 overflow-x-auto">
+                {(currentView === 'results'
+                  ? [
+                      {
+                        id: 'all',
+                        label: 'All',
+                        count:
+                          submissions.filter(isFinalizedSubmission).length +
+                          finalizedMockResults.length,
+                      },
+                      {
+                        id: 'passed',
+                        label: 'Passed',
+                        count:
+                          submissions.filter((s) => isFinalizedSubmission(s) && Boolean(s.passed)).length +
+                          finalizedMockResults.filter((m) => Boolean(m.passed)).length,
+                      },
+                      {
+                        id: 'failed',
+                        label: 'Failed',
+                        count:
+                          submissions.filter((s) => isFinalizedSubmission(s) && !s.passed).length +
+                          finalizedMockResults.filter((m) => !m.passed).length,
+                      },
+                    ]
+                  : [
+                      { id: 'all', label: 'All', count: attemptCounts?.all ?? submissionCounts.all },
+                      { id: 'passed', label: 'Passed', count: attemptCounts?.passed ?? submissionCounts.passed },
+                      { id: 'failed', label: 'Failed', count: attemptCounts?.failed ?? submissionCounts.failed },
+                      { id: 'pending', label: 'Pending Review', count: attemptCounts?.pending ?? submissionCounts.pending },
+                      { id: 'in_progress', label: 'In Progress', count: attemptCounts?.inProgress ?? submissionCounts.inProgress },
+                    ]
+                ).map((tab) => (
+                  <button
+                    key={tab.id}
+                    type="button"
+                    onClick={() => {
+                      setSubmissionStatusFilter(tab.id);
+                      setAttemptsPage(1);
+                      setResultsPage(1);
+                    }}
+                    className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition-colors cursor-pointer ${
                       submissionStatusFilter === tab.id
-                        ? 'bg-[#E05D38] text-white dark:bg-[#F4A261] dark:text-[#341C16]'
-                        : 'bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400'
+                        ? 'bg-[#FDECE2] text-[#E05D38] dark:bg-[#341C16] dark:text-[#F4A261] shadow-warm-xs'
+                        : 'text-slate-600 dark:text-slate-400 hover:bg-[#FFF4EB]/60 dark:hover:bg-slate-800'
                     }`}
                   >
-                    {tab.count}
-                  </span>
-                </button>
-              ))}
+                    <span>{tab.label}</span>
+                    <span
+                      className={`px-1.5 py-0.5 rounded-full text-[10px] font-bold ${
+                        submissionStatusFilter === tab.id
+                          ? 'bg-[#E05D38] text-white dark:bg-[#F4A261] dark:text-[#341C16]'
+                          : 'bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400'
+                      }`}
+                    >
+                      {tab.count}
+                    </span>
+                  </button>
+                ))}
+              </div>
+
+              {attemptsSearch && (currentView === 'submissions' || currentView === 'results') && (
+                <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold bg-[#FDECE2] text-[#E05D38] dark:bg-[#341C16] dark:text-[#F4A261] border border-[#E05D38]/30">
+                  <span>Filter: &ldquo;{attemptsSearch}&rdquo;</span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setAttemptsSearch('');
+                      setAttemptsPage(1);
+                      setResultsPage(1);
+                    }}
+                    className="hover:text-red-600 transition-colors cursor-pointer ml-1"
+                    title="Clear search filter"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              )}
             </div>
 
-            {isLoading && submissions.length === 0 ? (
+            {((isLoading && submissions.length === 0 && finalizedMockResults.length === 0) ||
+              (currentView === 'submissions' && loadingAttempts && pagedAttempts.length === 0)) ? (
               <TableSkeleton rows={5} columns={8} />
-            ) : submissions.length === 0 ? (
+            ) : currentView !== 'results' && submissions.length === 0 && (!attemptCounts || attemptCounts.all === 0) ? (
               <EmptyState
                 title="No Submissions Yet"
                 description="When you complete an assessment, your submission score and evaluation will appear here."
               />
-            ) : filteredSubmissions.length === 0 ? (
+            ) : displayedSubmissions.length === 0 && displayedMockResults.length === 0 ? (
               <div className="py-12 flex flex-col items-center justify-center text-center p-6 text-slate-400">
                 <p className="font-semibold text-slate-700 dark:text-slate-300 text-sm mb-1">
                   {currentView === 'results' ? 'No Finalized Results Yet' : 'No Submissions in this Category'}
                 </p>
                 <p className="text-xs text-slate-500 max-w-sm">
-                  {currentView === 'results'
+                  {attemptsSearch.trim()
+                    ? 'No records match your current search or filter criteria.'
+                    : currentView === 'results'
                     ? 'Finalized assessment outcomes will appear here once grading is complete.'
                     : `There are no assessment attempts currently marked as ${submissionStatusFilter.replace('_', ' ')}.`}
                 </p>
@@ -2109,7 +2473,7 @@ const StudentDashboard = () => {
                   </TableRow>
                 </TableHead>
                 <TableBody>
-                  {filteredSubmissions.map((sub) => {
+                  {displayedSubmissions.map((sub) => {
                     const certEnabled = Boolean(sub.assessment?.certification?.enabled);
                     const isPending =
                       sub.status === 'submitted' ||
@@ -2194,9 +2558,9 @@ const StudentDashboard = () => {
                           ) : hasCert ? (
                             <button
                               type="button"
-                              onClick={() => navigate('/student/certifications')}
+                              onClick={() => navigate('/student/certificates')}
                               className="cursor-pointer text-left"
-                              title="View in My Certifications"
+                              title="View in My Certificates"
                             >
                               <Badge variant="success" size="sm" className="flex items-center gap-1">
                                 <Award className="w-3 h-3 text-emerald-600 dark:text-emerald-400" />
@@ -2299,10 +2663,107 @@ const StudentDashboard = () => {
                     </TableRow>
                   );
                 })}
+                {displayedMockResults.map((mockRes) => (
+                  <TableRow key={`mock-${mockRes.attemptId}`}>
+                    <TableCell>
+                      <span className="font-bold text-slate-900 dark:text-slate-100 block">
+                        {mockRes.examName}
+                      </span>
+                      <span className="text-xs text-slate-400">
+                        Mock Test{mockRes.examinationTag ? ` · ${mockRes.examinationTag}` : ''} · {mockRes.subject}
+                      </span>
+                    </TableCell>
+                    <TableCell className="text-xs text-slate-500 dark:text-slate-400">
+                      {mockRes.evaluatedAt
+                        ? new Date(mockRes.evaluatedAt).toLocaleDateString()
+                        : mockRes.submittedAt
+                        ? new Date(mockRes.submittedAt).toLocaleDateString()
+                        : '—'}
+                    </TableCell>
+                    <TableCell className="text-xs font-bold text-slate-800 dark:text-slate-200">
+                      {mockRes.score} / {mockRes.totalMarks}
+                    </TableCell>
+                    <TableCell className="text-xs font-bold text-slate-900 dark:text-slate-100">
+                      {mockRes.percentage}%
+                    </TableCell>
+                    <TableCell className="text-xs font-medium text-slate-600 dark:text-slate-400">
+                      {mockRes.passingThreshold}%
+                    </TableCell>
+                    <TableCell>
+                      <Badge variant={mockRes.passed ? 'success' : 'danger'} size="sm">
+                        {mockRes.resultLabel}
+                      </Badge>
+                    </TableCell>
+                    <TableCell>
+                      <Badge variant="neutral" size="sm">
+                        Not Applicable
+                      </Badge>
+                    </TableCell>
+                    <TableCell className="text-right">
+                      <div className="flex items-center justify-end space-x-2">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => navigate(`/student/reports/mock_test/${mockRes.attemptId}`)}
+                          data-testid={`btn-report-${mockRes.attemptId}`}
+                        >
+                          View Report
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() =>
+                            analyticsService
+                              .downloadIndividualExamReportPdf('mock_test', mockRes.attemptId)
+                              .catch((err) => toast.error(err.message || 'Failed to download PDF'))
+                          }
+                          data-testid={`btn-pdf-${mockRes.attemptId}`}
+                        >
+                          Download PDF
+                        </Button>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                ))}
               </TableBody>
               </Table>
             )}
+            {currentView === 'submissions' && displayedSubmissions.length > 0 && (
+              <Pagination
+                containerRef={submissionsPaginationRef}
+                scrollTargetRef={submissionsTopRef}
+                currentPage={attemptsPagination.page}
+                totalPages={attemptsPagination.totalPages}
+                totalItems={attemptsPagination.total}
+                pageSize={attemptsLimit}
+                onPageChange={(nextPage) => setAttemptsPage(nextPage)}
+                onPageSizeChange={(nextLimit) => {
+                  setAttemptsLimit(nextLimit);
+                  setAttemptsPage(1);
+                }}
+                itemLabel="attempts"
+                testIdPrefix="attempts-pagination"
+              />
+            )}
+            {currentView === 'results' && (displayedSubmissions.length > 0 || displayedMockResults.length > 0) && (
+              <Pagination
+                containerRef={submissionsPaginationRef}
+                scrollTargetRef={submissionsTopRef}
+                currentPage={pagedResults.pagination.page}
+                totalPages={pagedResults.pagination.totalPages}
+                totalItems={pagedResults.pagination.total}
+                pageSize={resultsLimit}
+                onPageChange={(nextPage) => setResultsPage(nextPage)}
+                onPageSizeChange={(nextLimit) => {
+                  setResultsLimit(nextLimit);
+                  setResultsPage(1);
+                }}
+                itemLabel="results"
+                testIdPrefix="results-pagination"
+              />
+            )}
           </Card>
+          </div>
         </>
       )}
 
@@ -2535,10 +2996,10 @@ const StudentDashboard = () => {
                       variant="primary"
                       onClick={() => {
                         setSelectedFeedbackSubmission(null);
-                        navigate('/student/certifications');
+                        navigate('/student/certificates');
                       }}
                     >
-                      View in My Certifications
+                      View in My Certificates
                     </Button>
                   </div>
                 ) : selectedFeedbackSubmission.evaluation?.certificateEligible ? (

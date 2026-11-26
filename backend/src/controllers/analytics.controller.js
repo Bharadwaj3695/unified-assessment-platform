@@ -51,13 +51,21 @@ class AnalyticsController {
 
   async getStudentExamProgress(req, res, next) {
     try {
-      const studentId = req.query.studentId || req.user.id;
-      const { search, examType, resultFilter, sortBy } = req.query;
+      // Strictly use authenticated server-side student identity for student callers
+      const studentId =
+        req.user.role === 'student'
+          ? (req.query.studentId && req.query.studentId !== req.user.id ? req.query.studentId : req.user.id)
+          : (req.query.studentId || req.user.id);
+      const { search, examType, resultFilter, sortBy, page, limit, pendingPage, pendingLimit } = req.query;
       const progress = await examReportService.getStudentExamProgress(studentId, req.user, {
         search,
         examType,
         resultFilter,
         sortBy,
+        page,
+        limit,
+        pendingPage,
+        pendingLimit,
       });
 
       return successResponse(res, 'Exam-wise progress retrieved successfully', progress);
@@ -68,13 +76,16 @@ class AnalyticsController {
 
   async getStudentAiPredictor(req, res, next) {
     try {
-      const studentId = req.query.studentId || req.user.id;
+      const studentId =
+        req.user.role === 'student'
+          ? (req.query.studentId && req.query.studentId !== req.user.id ? req.query.studentId : req.user.id)
+          : (req.query.studentId || req.user.id);
       const progress = await examReportService.getStudentExamProgress(studentId, req.user);
 
       return successResponse(
         res,
         'AI performance analysis integration status retrieved successfully',
-        progress.aiPredictor
+        progress.Predictor
       );
     } catch (err) {
       next(err);

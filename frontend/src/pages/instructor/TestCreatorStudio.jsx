@@ -40,8 +40,8 @@ import { assessmentService } from '../../services/assessment.service';
 import instructorService from '../../services/instructor.service';
 import {
   getQuestionStableId,
-  formatEmptyQuestionMessage,
-  validateQuestionStatements,
+  getOptionLetter,
+  validateQuestions,
 } from '../../utils/questionValidation';
 
 // Supported Question Types aligned with Mock Bank Studio
@@ -216,9 +216,10 @@ export default function TestCreatorStudio() {
   const [isPreviewOpen, setIsPreviewOpen] = useState(false);
   const [previewQuestionIndex, setPreviewQuestionIndex] = useState(0);
   const [isIncompleteDraft, setIsIncompleteDraft] = useState(false);
-  const [validationErrorsById, setValidationErrorsById] = useState({});
+  const [validatedIdsById, setValidatedIdsById] = useState({});
   const questionCardRefs = useRef({});
   const statementInputRefs = useRef({});
+  const optionInputRefs = useRef({});
 
   // Student Preview IDE state
   const [previewCode, setPreviewCode] = useState('');
@@ -442,24 +443,67 @@ export default function TestCreatorStudio() {
   }, [questions]);
 
   // Derived active question validation errors keyed by stable question ID
-  const activeValidationErrors = useMemo(() => {
-    return questions
-      .map((q, idx) => {
-        const qId = getQuestionStableId(q, idx);
-        if (!validationErrorsById[qId]) return null;
-        const number = idx + 1;
-        return {
-          id: qId,
-          number,
-          message: formatEmptyQuestionMessage(number),
-        };
-      })
-      .filter(Boolean);
-  }, [questions, validationErrorsById]);
+  const activeValidation = useMemo(() => {
+    const full = validateQuestions(questions);
+    const errorsById = {};
+    const invalidQuestions = [];
+    const summaryItems = [];
+
+    full.invalidQuestions.forEach((qRes) => {
+      if (validatedIdsById[qRes.id]) {
+        errorsById[qRes.id] = qRes;
+        invalidQuestions.push(qRes);
+        qRes.fieldErrors.forEach((fe) => {
+          summaryItems.push({
+            id: qRes.id,
+            number: qRes.number,
+            field: fe.field,
+            optionIndex: fe.optionIndex,
+            message: fe.summaryMessage,
+          });
+        });
+      }
+    });
+
+    let summaryHeader = '';
+    if (invalidQuestions.length === 1) {
+      summaryHeader = invalidQuestions[0].headerMessage;
+    } else if (invalidQuestions.length > 1) {
+      summaryHeader = `${invalidQuestions.length} questions have incomplete fields.`;
+    }
+
+    return {
+      errorsById,
+      invalidQuestions,
+      summaryItems,
+      summaryHeader,
+    };
+  }, [questions, validatedIdsById]);
+
+  useEffect(() => {
+    const activeIds = Object.keys(validatedIdsById);
+    if (activeIds.length === 0) return;
+
+    const full = validateQuestions(questions);
+    const currentIdSet = new Set(questions.map((q, idx) => getQuestionStableId(q, idx)));
+    let changed = false;
+    const next = { ...validatedIdsById };
+
+    activeIds.forEach((id) => {
+      if (!currentIdSet.has(id) || !full.errorsById[id]) {
+        delete next[id];
+        changed = true;
+      }
+    });
+
+    if (changed) {
+      setValidatedIdsById(next);
+    }
+  }, [questions, validatedIdsById]);
 
   const clearQuestionValidationError = (questionId) => {
     if (!questionId) return;
-    setValidationErrorsById((prev) => {
+    setValidatedIdsById((prev) => {
       if (!prev[questionId]) return prev;
       const next = { ...prev };
       delete next[questionId];
@@ -551,15 +595,36 @@ export default function TestCreatorStudio() {
     setQuestions((prev) => {
       const updated = [...prev];
       const cur = updated[idx];
+      const curConfig = cur.evaluationConfig || {};
+      const nextAllowedLangs =
+        newType === 'SQL'
+          ? ['sqlite']
+          : newType === 'CODING'
+          ? (Array.isArray(curConfig.allowedLanguages) &&
+            curConfig.allowedLanguages.filter((l) => l !== 'sqlite').length > 0
+              ? curConfig.allowedLanguages.filter((l) => l !== 'sqlite')
+              : ['python', 'javascript'])
+          : curConfig.allowedLanguages || ['python', 'javascript'];
+      const nextDefaultLang =
+        newType === 'SQL'
+          ? 'sqlite'
+          : newType === 'CODING'
+          ? (nextAllowedLangs.includes(curConfig.defaultLanguage) ? curConfig.defaultLanguage : nextAllowedLangs[0])
+          : curConfig.defaultLanguage || 'python';
+      const nextAnswerKey =
+        newType === 'TRUE_FALSE' && cur.answerKey !== 'True' && cur.answerKey !== 'False'
+          ? 'True'
+          : cur.answerKey;
+
       updated[idx] = {
         ...cur,
         questionType: newType,
-        // Reset or adapt options/testcases if switching to/from coding or sql
+        answerKey: nextAnswerKey,
         evaluationConfig: {
-          ...cur.evaluationConfig,
-          allowedLanguages: ['python', 'javascript'],
-          defaultLanguage: 'python',
-          sqlDialect: 'sqlite',
+          ...curConfig,
+          allowedLanguages: nextAllowedLangs,
+          defaultLanguage: nextDefaultLang,
+          sqlDialect: curConfig.sqlDialect || 'sqlite',
         },
       };
       return updated;
@@ -568,10 +633,6 @@ export default function TestCreatorStudio() {
 
   // Update simple question field
   const updateQuestionField = (idx, field, value) => {
-    if (field === 'statement' && String(value ?? '').trim().length > 0) {
-      const targetId = getQuestionStableId(questions[idx], idx);
-      clearQuestionValidationError(targetId);
-    }
     setQuestions((prev) => {
       const updated = [...prev];
       updated[idx] = { ...updated[idx], [field]: value };
@@ -633,6 +694,11 @@ export default function TestCreatorStudio() {
     clearQuestionValidationError(removedId);
     delete questionCardRefs.current[removedId];
     delete statementInputRefs.current[removedId];
+    Object.keys(optionInputRefs.current).forEach((key) => {
+      if (key.startsWith(`${removedId}:`)) {
+        delete optionInputRefs.current[key];
+      }
+    });
     setQuestions((prev) => prev.filter((_, i) => i !== idx));
     toast.info('Question removed.');
   };
@@ -651,7 +717,12 @@ export default function TestCreatorStudio() {
     setQuestions((prev) => {
       const updated = [...prev];
       const cur = updated[qIdx];
-      const optId = `opt_${(cur.options || []).length + 1}`;
+      const existingIds = new Set((cur.options || []).map((o) => o.id));
+      let suffix = (cur.options || []).length + 1;
+      while (existingIds.has(`opt_${suffix}`)) {
+        suffix += 1;
+      }
+      const optId = `opt_${suffix}`;
       updated[qIdx] = {
         ...cur,
         options: [...(cur.options || []), { id: optId, text: '', isCorrect: false }],
@@ -678,8 +749,14 @@ export default function TestCreatorStudio() {
         toast.warning('Multiple-choice questions require at least 2 options.');
         return prev;
       }
+      const removedOpt = cur.options[optIdx];
       const opts = cur.options.filter((_, i) => i !== optIdx);
-      updated[qIdx] = { ...cur, options: opts };
+      const nextCorrect = opts.find((o) => o.isCorrect);
+      updated[qIdx] = {
+        ...cur,
+        options: opts,
+        answerKey: cur.answerKey === removedOpt?.id ? (nextCorrect?.id || '') : cur.answerKey,
+      };
       return updated;
     });
   };
@@ -815,10 +892,6 @@ export default function TestCreatorStudio() {
 
   // Faculty IDE Integration Handlers
   const handleUpdateQuestionFromIDE = (qIdx, field, val) => {
-    if ((field === 'statement' || field === 'questionText') && String(val ?? '').trim().length > 0) {
-      const targetId = getQuestionStableId(questions[qIdx], qIdx);
-      clearQuestionValidationError(targetId);
-    }
     setQuestions((prev) => {
       const updated = [...prev];
       const targetField = field === 'questionText' ? 'statement' : field;
@@ -915,7 +988,7 @@ export default function TestCreatorStudio() {
 
   // --- VALIDATION, SAVE DRAFT & PUBLISH ---
 
-  const scrollToInvalidQuestion = (questionId) => {
+  const scrollToInvalidQuestion = (questionId, focusOptionIdx = null) => {
     if (!questionId) return;
     requestAnimationFrame(() => {
       setTimeout(() => {
@@ -923,33 +996,54 @@ export default function TestCreatorStudio() {
         if (cardEl && typeof cardEl.scrollIntoView === 'function') {
           cardEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
         }
-        const inputEl = statementInputRefs.current[questionId];
-        if (inputEl && typeof inputEl.focus === 'function') {
-          inputEl.focus({ preventScroll: true });
+        const targetEl =
+          focusOptionIdx !== null && focusOptionIdx !== undefined
+            ? optionInputRefs.current[`${questionId}:${focusOptionIdx}`]
+            : statementInputRefs.current[questionId];
+        if (targetEl && typeof targetEl.focus === 'function') {
+          targetEl.focus({ preventScroll: true });
         }
       }, 40);
     });
   };
 
-  const runStatementValidation = () => {
-    const result = validateQuestionStatements(questions);
+  const runQuestionValidation = () => {
+    const result = validateQuestions(questions);
     if (!result.valid) {
-      setValidationErrorsById(result.errorsById);
-      const invalidIdSet = new Set(result.errors.map((e) => e.id));
+      const nextValidated = {};
+      result.invalidQuestions.forEach((qRes) => {
+        nextValidated[qRes.id] = true;
+      });
+      setValidatedIdsById(nextValidated);
+      const invalidIdSet = new Set(result.invalidQuestions.map((e) => e.id));
       setQuestions((prev) =>
         prev.map((q, idx) =>
           invalidIdSet.has(getQuestionStableId(q, idx)) ? { ...q, isCollapsed: false } : q
         )
       );
-      scrollToInvalidQuestion(result.firstInvalidId);
+      const firstInvalid = result.invalidQuestions[0];
+      scrollToInvalidQuestion(
+        firstInvalid.id,
+        firstInvalid.statementError ? null : firstInvalid.firstEmptyOptionIdx
+      );
     } else {
-      setValidationErrorsById({});
+      setValidatedIdsById({});
     }
     return result;
   };
 
+  const handleValidateQuestions = () => {
+    const result = runQuestionValidation();
+    if (!result.valid) {
+      toast.error(result.summaryMessage);
+      return false;
+    }
+    toast.success('All questions passed validation.');
+    return true;
+  };
+
   const handleOpenPreview = () => {
-    const result = runStatementValidation();
+    const result = runQuestionValidation();
     if (!result.valid) {
       toast.error(result.summaryMessage);
       return;
@@ -970,7 +1064,7 @@ export default function TestCreatorStudio() {
     correctAnswer:
       q.questionType === 'TRUE_FALSE'
         ? q.answerKey
-        : q.options?.find((o) => o.isCorrect)?.id || 'opt_1',
+        : q.options?.find((o) => o.isCorrect)?.id || null,
     explanation: q.explanation || '',
     points: Number(q.marks) || 5,
     orderIndex: idx,
@@ -994,7 +1088,7 @@ export default function TestCreatorStudio() {
             memoryLimitMb: Number(q.evaluationConfig?.memoryLimitMb) || 256,
             testCases: (q.evaluationConfig?.testCases || []).map((tc, tcIdx) => ({
               input: tc.input || '',
-              expectedOutput: tc.expectedOutput?.trim() || 'PASS',
+              expectedOutput: tc.expectedOutput ?? '',
               isHidden: Boolean(tc.isHidden),
               isEnabled: tc.isEnabled !== false,
               weight: Number(tc.weight) || 1,
@@ -1010,6 +1104,11 @@ export default function TestCreatorStudio() {
   });
 
   const validateTestForm = (isPublishingMode = false) => {
+    const questionResult = runQuestionValidation();
+    if (!questionResult.valid) {
+      toast.error(questionResult.summaryMessage);
+      return false;
+    }
     if (!title.trim()) {
       toast.error('Please enter a test title.');
       return false;
@@ -1022,47 +1121,11 @@ export default function TestCreatorStudio() {
       toast.error('Please enter a target examination.');
       return false;
     }
-
-    if (isPublishingMode) {
-      const statementResult = runStatementValidation();
-      if (!statementResult.valid) {
-        toast.error(statementResult.summaryMessage);
-        return false;
-      }
-      for (let i = 0; i < questions.length; i++) {
-        const q = questions[i];
-        if (q.questionType === 'SINGLE_MCQ' || q.questionType === 'MULTI_SELECT') {
-          const emptyOpts = (q.options || []).some((o) => !o.text.trim());
-          if (emptyOpts) {
-            toast.error(`Question #${i + 1} has options with empty text.`);
-            return false;
-          }
-          const hasCorrect = (q.options || []).some((o) => o.isCorrect);
-          if (!hasCorrect) {
-            toast.error(`Question #${i + 1} must mark at least one correct option.`);
-            return false;
-          }
-        }
-        if (q.questionType === 'CODING') {
-          const tc = q.evaluationConfig?.testCases || [];
-          if (tc.length === 0) {
-            toast.error(`Coding Question #${i + 1} must have at least one test case.`);
-            return false;
-          }
-        }
-      }
-    }
     return true;
   };
 
   const handleSaveDraft = async () => {
     if (!validateTestForm(false)) return;
-
-    const statementValidation = runStatementValidation();
-    const hasStatementErrors = !statementValidation.valid;
-    if (hasStatementErrors) {
-      toast.error(statementValidation.summaryMessage);
-    }
 
     try {
       setIsSaving(true);
@@ -1080,8 +1143,8 @@ export default function TestCreatorStudio() {
           cameraRequired,
           randomization: { enabled: randomization, shuffleOrder: randomization },
           status: 'draft',
-          isIncomplete: hasStatementErrors,
-          draftStatus: hasStatementErrors ? 'incomplete' : 'ready',
+          isIncomplete: false,
+          draftStatus: 'ready',
           certification: {
             enabled: certificationEnabled,
             passingPercentage: Number(certPassingPercentage) || Number(passingScore) || 50,
@@ -1111,11 +1174,7 @@ export default function TestCreatorStudio() {
             }, { replace: true });
           }
         }
-        if (hasStatementErrors) {
-          toast.warning(`Draft saved for "${title.trim()}" (Incomplete).`);
-        } else {
-          toast.success(`Draft saved for "${title.trim()}".`);
-        }
+        toast.success(`Draft saved for "${title.trim()}".`);
       } else {
         // Mock Test payload
         const activeSubjectId = subjectId || (subjects.length > 0 ? (subjects[0]._id || subjects[0].id) : undefined);
@@ -1132,8 +1191,8 @@ export default function TestCreatorStudio() {
           difficultyDistribution,
           negativeMarking,
           negativeMarkingRatio: Number(negativeMarkingRatio) || 0.33,
-          isIncomplete: hasStatementErrors,
-          draftStatus: hasStatementErrors ? 'INCOMPLETE' : 'READY',
+          isIncomplete: false,
+          draftStatus: 'READY',
           draftQuestions: questions.map((q, idx) => ({
             ...q,
             clientId: getQuestionStableId(q, idx),
@@ -1157,14 +1216,10 @@ export default function TestCreatorStudio() {
           }
         }
         setExamination(normalizedExam);
-        if (hasStatementErrors) {
-          toast.warning(`Mock test draft saved for "${title.trim()}" (Incomplete).`);
-        } else {
-          toast.success(`Mock test draft saved for "${title.trim()}".`);
-        }
+        toast.success(`Mock test draft saved for "${title.trim()}".`);
       }
       setStatus('draft');
-      setIsIncompleteDraft(hasStatementErrors);
+      setIsIncompleteDraft(false);
     } catch (err) {
       toast.error('Failed to save draft: ' + (err.response?.data?.message || err.message));
     } finally {
@@ -1173,14 +1228,7 @@ export default function TestCreatorStudio() {
   };
 
   const handlePublish = async () => {
-    if (!validateTestForm(true)) {
-      const statementCheck = validateQuestionStatements(questions);
-      if (!statementCheck.valid) {
-        setStatus('draft');
-        setIsIncompleteDraft(true);
-      }
-      return;
-    }
+    if (!validateTestForm(true)) return;
 
     try {
       setIsPublishing(true);
@@ -1314,6 +1362,15 @@ export default function TestCreatorStudio() {
 
           {/* Action Buttons */}
           <div className="flex items-center gap-2 flex-wrap">
+            <Button
+              variant="outline"
+              size="sm"
+              icon={CheckCircle2}
+              onClick={handleValidateQuestions}
+              data-testid="btn-validate"
+            >
+              Validate
+            </Button>
             <Button
               variant="outline"
               size="sm"
@@ -1842,7 +1899,7 @@ export default function TestCreatorStudio() {
         </div>
 
         {/* Validation Error Summary Banner */}
-        {activeValidationErrors.length > 0 && (
+        {activeValidation.summaryItems.length > 0 && (
           <div
             role="alert"
             data-testid="question-validation-summary"
@@ -1850,18 +1907,14 @@ export default function TestCreatorStudio() {
           >
             <div className="flex items-center gap-2 text-xs font-bold">
               <AlertCircle className="w-4 h-4 text-rose-600 dark:text-rose-400 shrink-0" />
-              <span>
-                {activeValidationErrors.length === 1
-                  ? '1 question has an empty statement'
-                  : `${activeValidationErrors.length} questions have empty statements`}
-              </span>
+              <span>{activeValidation.summaryHeader}</span>
             </div>
             <ul className="space-y-1 pl-6 list-disc text-xs">
-              {activeValidationErrors.map((err) => (
-                <li key={err.id}>
+              {activeValidation.summaryItems.map((err, errIdx) => (
+                <li key={`${err.id}-${err.field}-${err.optionIndex ?? errIdx}`}>
                   <button
                     type="button"
-                    onClick={() => scrollToInvalidQuestion(err.id)}
+                    onClick={() => scrollToInvalidQuestion(err.id, err.optionIndex)}
                     className="text-left hover:underline font-medium cursor-pointer"
                   >
                     {err.message}
@@ -1877,8 +1930,10 @@ export default function TestCreatorStudio() {
           {questions.map((q, qIdx) => {
             const isCollapsed = q.isCollapsed;
             const qId = getQuestionStableId(q, qIdx);
-            const qErrorMessage = validationErrorsById[qId] ? formatEmptyQuestionMessage(qIdx + 1) : null;
-            const hasError = Boolean(qErrorMessage);
+            const qValidation = activeValidation.errorsById[qId] || null;
+            const qStatementError = qValidation?.statementError || null;
+            const hasStatementError = Boolean(qStatementError);
+            const hasError = Boolean(qValidation);
 
             return (
               <div
@@ -1920,7 +1975,9 @@ export default function TestCreatorStudio() {
 
                     {hasError && (
                       <Badge variant="danger" size="sm" data-testid={`question-error-badge-${qIdx}`}>
-                        Statement Required
+                        {qValidation.fieldErrors.length === 1 && hasStatementError
+                          ? 'Statement Required'
+                          : `${qValidation.fieldErrors.length} Issue${qValidation.fieldErrors.length !== 1 ? 's' : ''}`}
                       </Badge>
                     )}
 
@@ -2038,22 +2095,22 @@ export default function TestCreatorStudio() {
                         value={q.statement}
                         onChange={(e) => updateQuestionField(qIdx, 'statement', e.target.value)}
                         placeholder="Enter question statement or instructions..."
-                        aria-invalid={hasError ? 'true' : 'false'}
+                        aria-invalid={hasStatementError ? 'true' : 'false'}
                         data-testid={`question-statement-input-${qIdx}`}
                         className={`w-full p-2.5 rounded-xl border text-slate-900 dark:text-white text-xs focus:ring-1 focus:outline-none ${
-                          hasError
+                          hasStatementError
                             ? 'border-rose-500 dark:border-rose-500 bg-rose-50/30 dark:bg-rose-950/20 focus:ring-rose-500'
                             : 'border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 focus:ring-brand-primary'
                         }`}
                       />
-                      {hasError && (
+                      {hasStatementError && (
                         <p
                           role="alert"
                           data-testid={`question-statement-error-${qIdx}`}
                           className="mt-1.5 text-xs font-semibold text-rose-600 dark:text-rose-400 flex items-center gap-1.5"
                         >
                           <AlertCircle className="w-3.5 h-3.5 shrink-0" />
-                          <span>{qErrorMessage}</span>
+                          <span>{qStatementError}</span>
                         </p>
                       )}
                     </div>
@@ -2082,53 +2139,119 @@ export default function TestCreatorStudio() {
                         </div>
 
                         {q.questionType === 'TRUE_FALSE' ? (
-                          <div className="flex items-center gap-4 pt-1">
-                            {['True', 'False'].map((val) => (
-                              <label key={val} className="flex items-center gap-2 text-xs font-semibold text-slate-800 dark:text-slate-200 cursor-pointer">
-                                <input
-                                  type="radio"
-                                  name={`tf_${q.clientId}`}
-                                  checked={q.answerKey === val}
-                                  onChange={() => updateQuestionField(qIdx, 'answerKey', val)}
-                                  className="w-4 h-4 text-brand-primary"
-                                />
-                                <span>{val}</span>
-                              </label>
-                            ))}
+                          <div className="space-y-1.5">
+                            <div className="flex items-center gap-4 pt-1">
+                              {['True', 'False'].map((val) => (
+                                <label key={val} className="flex items-center gap-2 text-xs font-semibold text-slate-800 dark:text-slate-200 cursor-pointer">
+                                  <input
+                                    type="radio"
+                                    name={`tf_${q.clientId}`}
+                                    checked={q.answerKey === val}
+                                    onChange={() => updateQuestionField(qIdx, 'answerKey', val)}
+                                    className="w-4 h-4 text-brand-primary"
+                                  />
+                                  <span>{val}</span>
+                                </label>
+                              ))}
+                            </div>
+                            {qValidation?.correctAnswerError && (
+                              <p
+                                role="alert"
+                                data-testid={`question-correct-answer-error-${qIdx}`}
+                                className="text-xs font-semibold text-rose-600 dark:text-rose-400 flex items-center gap-1.5"
+                              >
+                                <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                                <span>{qValidation.correctAnswerError}</span>
+                              </p>
+                            )}
                           </div>
                         ) : (
-                          <div className="space-y-2">
-                            {(q.options || []).map((opt, optIdx) => (
-                              <div key={opt.id || optIdx} className="flex items-center gap-2">
-                                <input
-                                  type={q.questionType === 'MULTI_SELECT' ? 'checkbox' : 'radio'}
-                                  name={`correct_opt_${q.clientId}`}
-                                  checked={Boolean(opt.isCorrect)}
-                                  onChange={() => handleToggleCorrectOption(qIdx, opt.id)}
-                                  title="Mark as correct answer"
-                                  className="w-4 h-4 text-brand-primary cursor-pointer shrink-0"
-                                />
-                                <span className="text-xs font-bold text-slate-500 w-5 text-center">
-                                  {String.fromCharCode(65 + optIdx)}
-                                </span>
-                                <input
-                                  type="text"
-                                  value={opt.text}
-                                  onChange={(e) => handleUpdateOptionText(qIdx, optIdx, e.target.value)}
-                                  placeholder={`Option ${String.fromCharCode(65 + optIdx)} text...`}
-                                  className="flex-1 p-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
-                                />
-                                {(q.options || []).length > 2 && (
-                                  <button
-                                    type="button"
-                                    onClick={() => handleRemoveOption(qIdx, optIdx)}
-                                    className="p-1.5 text-slate-400 hover:text-rose-500 transition"
-                                  >
-                                    <Trash2 className="w-3.5 h-3.5" />
-                                  </button>
-                                )}
+                          <div className="space-y-2.5">
+                            {(q.options || []).map((opt, optIdx) => {
+                              const optionLetter = getOptionLetter(optIdx);
+                              const optError = qValidation?.optionErrors?.[optIdx] || null;
+                              const optRefKey = `${qId}:${optIdx}`;
+                              return (
+                                <div key={opt.id || optIdx} className="space-y-1">
+                                  <div className="flex items-center gap-2">
+                                    <input
+                                      type={q.questionType === 'MULTI_SELECT' ? 'checkbox' : 'radio'}
+                                      name={`correct_opt_${q.clientId}`}
+                                      checked={Boolean(opt.isCorrect)}
+                                      onChange={() => handleToggleCorrectOption(qIdx, opt.id)}
+                                      title="Mark as correct answer"
+                                      data-testid={`question-option-correct-${qIdx}-${optIdx}`}
+                                      className="w-4 h-4 text-brand-primary cursor-pointer shrink-0"
+                                    />
+                                    <span className="text-xs font-bold text-slate-500 w-5 text-center">
+                                      {optionLetter}
+                                    </span>
+                                    <input
+                                      ref={(el) => {
+                                        if (el) optionInputRefs.current[optRefKey] = el;
+                                        else delete optionInputRefs.current[optRefKey];
+                                      }}
+                                      type="text"
+                                      value={opt.text}
+                                      onChange={(e) => handleUpdateOptionText(qIdx, optIdx, e.target.value)}
+                                      placeholder={`Option ${optionLetter} text...`}
+                                      aria-invalid={optError ? 'true' : 'false'}
+                                      data-testid={`question-option-input-${qIdx}-${optIdx}`}
+                                      className={`flex-1 p-2 text-xs rounded-lg border text-slate-900 dark:text-white focus:ring-1 focus:outline-none ${
+                                        optError
+                                          ? 'border-rose-500 dark:border-rose-500 bg-rose-50/30 dark:bg-rose-950/20 focus:ring-rose-500'
+                                          : 'border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 focus:ring-brand-primary'
+                                      }`}
+                                    />
+                                    {(q.options || []).length > 2 && (
+                                      <button
+                                        type="button"
+                                        onClick={() => handleRemoveOption(qIdx, optIdx)}
+                                        title={`Remove Option ${optionLetter}`}
+                                        data-testid={`question-option-remove-${qIdx}-${optIdx}`}
+                                        className="p-1.5 text-slate-400 hover:text-rose-500 transition"
+                                      >
+                                        <Trash2 className="w-3.5 h-3.5" />
+                                      </button>
+                                    )}
+                                  </div>
+                                  {optError && (
+                                    <p
+                                      role="alert"
+                                      data-testid={`question-option-error-${qIdx}-${optIdx}`}
+                                      className="pl-12 text-xs font-semibold text-rose-600 dark:text-rose-400 flex items-center gap-1.5"
+                                    >
+                                      <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                                      <span>{optError}</span>
+                                    </p>
+                                  )}
+                                </div>
+                              );
+                            })}
+                            {qValidation?.correctAnswerError && (
+                              <p
+                                role="alert"
+                                data-testid={`question-correct-answer-error-${qIdx}`}
+                                className="pt-1 text-xs font-semibold text-rose-600 dark:text-rose-400 flex items-center gap-1.5"
+                              >
+                                <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                                <span>{qValidation.correctAnswerError}</span>
+                              </p>
+                            )}
+                            {qValidation?.configErrors?.length > 0 && (
+                              <div
+                                role="alert"
+                                data-testid={`question-config-error-${qIdx}`}
+                                className="pt-1 space-y-1 text-xs font-semibold text-rose-600 dark:text-rose-400"
+                              >
+                                {qValidation.configErrors.map((errMsg, errIdx) => (
+                                  <p key={errIdx} className="flex items-center gap-1.5">
+                                    <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                                    <span>{errMsg}</span>
+                                  </p>
+                                ))}
                               </div>
-                            ))}
+                            )}
                           </div>
                         )}
                       </div>
@@ -2152,7 +2275,7 @@ export default function TestCreatorStudio() {
                                 id: tc.id || `tc-${idx + 1}`,
                                 description: tc.description || (tc.isHidden ? `Hidden Evaluation Case #${idx + 1}` : `Public Sample Case #${idx + 1}`),
                                 input: tc.input || '',
-                                expectedOutput: tc.expectedOutput?.trim() || 'PASS',
+                                expectedOutput: tc.expectedOutput ?? '',
                                 isHidden: Boolean(tc.isHidden),
                                 isEnabled: tc.isEnabled !== false,
                                 weight: Number(tc.weight) || 1,
@@ -2164,6 +2287,20 @@ export default function TestCreatorStudio() {
                           onUpdateQuestion={handleUpdateQuestionFromIDE}
                           onUpdateCodingConfig={updateCodingConfig}
                         />
+                        {qValidation?.configErrors?.length > 0 && (
+                          <div
+                            role="alert"
+                            data-testid={`question-config-error-${qIdx}`}
+                            className="mt-2 space-y-1 text-xs font-semibold text-rose-600 dark:text-rose-400"
+                          >
+                            {qValidation.configErrors.map((errMsg, errIdx) => (
+                              <p key={errIdx} className="flex items-center gap-1.5">
+                                <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                                <span>{errMsg}</span>
+                              </p>
+                            ))}
+                          </div>
+                        )}
                       </div>
                     )}
 
@@ -2341,8 +2478,8 @@ export default function TestCreatorStudio() {
                             name="preview_opt"
                             className="w-4 h-4 text-brand-primary"
                           />
-                          <span className="text-xs font-bold text-slate-500">{String.fromCharCode(65 + oi)}.</span>
-                          <span className="text-xs text-slate-800 dark:text-slate-200">{opt.text || `Option ${oi + 1}`}</span>
+                          <span className="text-xs font-bold text-slate-500">{getOptionLetter(oi)}.</span>
+                          <span className="text-xs text-slate-800 dark:text-slate-200">{opt.text}</span>
                         </div>
                       ))
                     )}

@@ -1,7 +1,7 @@
 // Import CertificateService containing business logic for student credential retrieval, PDF streaming, and admin controls
 const certificateService = require('../services/certificate.service');
 // Import standardized API response formatting helpers
-const { successResponse, errorResponse } = require('../utils/response');
+const { successResponse, errorResponse, paginatedResponse } = require('../utils/response');
 
 /**
  * Controller handling student certificate endpoints and administrator Certification Studio actions.
@@ -16,8 +16,28 @@ class CertificateController {
   async getMyCertificates(req, res, next) {
     try {
       const studentId = req.user.id;
-      const certificates = await certificateService.getStudentCertificates(studentId);
-      return successResponse(res, 'Certificates retrieved successfully', certificates);
+      const { page, limit, search, status, sortBy, sortOrder } = req.query;
+      const hasPagination = page !== undefined || limit !== undefined;
+      const result = await certificateService.getStudentCertificates(studentId, {
+        page,
+        limit,
+        search,
+        status,
+        sortBy,
+        sortOrder,
+      });
+      if (!hasPagination || Array.isArray(result)) {
+        return successResponse(res, 'Certificates retrieved successfully', result);
+      }
+      return paginatedResponse(
+        res,
+        'Certificates retrieved successfully',
+        result.certificates,
+        result.page,
+        result.limit,
+        result.total,
+        { totalAll: result.totalAll }
+      );
     } catch (err) {
       next(err);
     }
@@ -46,9 +66,11 @@ class CertificateController {
    */
   async downloadCertificate(req, res, next) {
     try {
+      const format = req.query.format || 'pdf';
       const result = await certificateService.downloadCertificate(
         req.params.id,
-        req.user
+        req.user,
+        { format }
       );
 
       res.setHeader('Content-Type', result.contentType || 'application/pdf');

@@ -1,5 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const http = require('node:http');
+const app = require('../src/app');
 const { connectDB, disconnectDB } = require('../src/config/db');
 const {
   User,
@@ -10,9 +12,13 @@ const {
   Evaluation,
   MockTest,
   MockTestAttempt,
+  Certificate,
+  CertificateTemplate,
 } = require('../src/models');
+const { generateAccessToken } = require('../src/utils/jwt');
 const examReportService = require('../src/services/examReport.service');
-const aiPredictorService = require('../src/services/aiPredictor.service');
+const aiPredictorService = require('../src/services/Predictor.service');
+const certificateService = require('../src/services/certificate.service');
 const pdfGenerator = require('../src/utils/pdfGenerator');
 
 test('UAP Exam-Wise Progress, Individual Performance Reports, PDF & AI Predictor Suite', async (t) => {
@@ -30,6 +36,13 @@ test('UAP Exam-Wise Progress, Individual Performance Reports, PDF & AI Predictor
   let evaluatedMockAttempt;
   let pendingMockAttempt;
 
+  let server;
+  let baseUrl;
+  let studentAToken;
+  let studentBToken;
+  let facultyOwnerToken;
+  let issuedCert;
+
   t.before(async () => {
     process.env.NODE_ENV = 'test';
     await connectDB();
@@ -42,7 +55,13 @@ test('UAP Exam-Wise Progress, Individual Performance Reports, PDF & AI Predictor
       Evaluation.deleteMany({}),
       MockTest.deleteMany({}),
       MockTestAttempt.deleteMany({}),
+      Certificate.deleteMany({}),
+      CertificateTemplate.deleteMany({}),
     ]);
+
+    server = http.createServer(app);
+    await new Promise((resolve) => server.listen(0, resolve));
+    baseUrl = `http://127.0.0.1:${server.address().port}`;
 
     facultyOwner = await User.create({
       name: 'Prof. Elena Vance',
@@ -50,6 +69,7 @@ test('UAP Exam-Wise Progress, Individual Performance Reports, PDF & AI Predictor
       password: 'Password@123',
       role: 'instructor',
       status: 'active',
+      isActive: true,
       department: 'Computer Science',
     });
 
@@ -59,6 +79,7 @@ test('UAP Exam-Wise Progress, Individual Performance Reports, PDF & AI Predictor
       password: 'Password@123',
       role: 'instructor',
       status: 'active',
+      isActive: true,
       department: 'Mathematics',
     });
 
@@ -68,6 +89,7 @@ test('UAP Exam-Wise Progress, Individual Performance Reports, PDF & AI Predictor
       password: 'Password@123',
       role: 'student',
       status: 'active',
+      isActive: true,
       studentId: 'STU-2026-001',
       department: 'Computer Science',
     });
@@ -78,6 +100,7 @@ test('UAP Exam-Wise Progress, Individual Performance Reports, PDF & AI Predictor
       password: 'Password@123',
       role: 'student',
       status: 'active',
+      isActive: true,
       studentId: 'STU-2026-002',
       department: 'Computer Science',
     });
@@ -282,9 +305,68 @@ test('UAP Exam-Wise Progress, Individual Performance Reports, PDF & AI Predictor
       totalMarks: 10,
       submittedAt: new Date(),
     });
+
+    studentAToken = generateAccessToken({ id: studentA._id, role: 'student' });
+    studentBToken = generateAccessToken({ id: studentB._id, role: 'student' });
+    facultyOwnerToken = generateAccessToken({ id: facultyOwner._id, role: 'instructor' });
+
+    const template = await CertificateTemplate.create({
+      title: 'Graduate Excellence Certificate',
+      name: 'Graduate Excellence Certificate',
+      status: 'published',
+      isDefault: true,
+      createdBy: facultyOwner._id,
+    });
+
+    // Enable certification on evaluatedAssessment and issue one valid certificate
+    evaluatedAssessment.certification = {
+      enabled: true,
+      passingPercentage: 70,
+      certificateTitle: 'Distributed Systems Certificate',
+    };
+    await evaluatedAssessment.save();
+    await Evaluation.updateOne(
+      { submissionId: evaluatedSubmission._id },
+      { $set: { certificateEligible: true } }
+    );
+
+    const evalDoc = await Evaluation.findOne({ submissionId: evaluatedSubmission._id });
+    issuedCert = await certificateService.issueCertificateForEvaluation(
+      evalDoc,
+      evaluatedSubmission,
+      evaluatedAssessment,
+      studentA
+    );
+
+    // Create a pending-issuance certificate that MUST NOT appear in student earned list
+    await Certificate.create({
+      certificateId: 'CERT-2026-PEND01',
+      studentId: studentA._id,
+      assessmentId: pendingAssessment._id,
+      submissionId: pendingSubmission._id,
+      templateId: template._id,
+      templateVersion: 1,
+      templateSnapshot: { title: template.title },
+      academicSnapshot: {
+        studentName: studentA.name,
+        studentEmail: studentA.email,
+        assessmentTitle: pendingAssessment.title,
+        certificateTitle: 'Pending Cert',
+        score: 0,
+        totalPoints: 50,
+        percentage: 0,
+        grade: 'F',
+        passingPercentage: 60,
+      },
+      issuance: { status: 'pending' },
+      verificationCode: 'VERIFY-PEND-001',
+    });
   });
 
   t.after(async () => {
+    if (server) {
+      await new Promise((resolve) => server.close(resolve));
+    }
     await disconnectDB();
   });
 
@@ -440,5 +522,91 @@ test('UAP Exam-Wise Progress, Individual Performance Reports, PDF & AI Predictor
     assert.equal(payload.prediction, null);
     assert.equal(payload.evaluatedHistoryCount, 1);
     assert.equal(payload.hasSufficientHistory, false);
+  });
+
+  await t.test('7. HTTP Progress API enforces authentication, student isolation, and returns exam progress', async () => {
+    const unauthRes = await fetch(`${baseUrl}/api/analytics/student/exam-progress`);
+    assert.equal(unauthRes.status, 401);
+
+    const resA = await fetch(`${baseUrl}/api/analytics/student/exam-progress`, {
+      headers: { Authorization: `Bearer ${studentAToken}` },
+    });
+    assert.equal(resA.status, 200);
+    const bodyA = await resA.json();
+    assert.equal(bodyA.success, true);
+    assert.equal(bodyA.data.evaluatedExams.length, 2);
+    assert.equal(bodyA.data.pendingExams.length, 2);
+
+    // Student B attempting to query Student A's progress must be denied (403)
+    const isolationRes = await fetch(
+      `${baseUrl}/api/analytics/student/exam-progress?studentId=${studentA._id.toString()}`,
+      { headers: { Authorization: `Bearer ${studentBToken}` } }
+    );
+    assert.equal(isolationRes.status, 403);
+
+    // Faculty report HTTP endpoint check (includes certification status)
+    const facReportRes = await fetch(
+      `${baseUrl}/api/analytics/reports/assessment/${evaluatedSubmission._id.toString()}`,
+      { headers: { Authorization: `Bearer ${facultyOwnerToken}` } }
+    );
+    assert.equal(facReportRes.status, 200);
+    const facBody = await facReportRes.json();
+    assert.equal(facBody.data.certification.issued, true);
+    assert.equal(facBody.data.certification.certificateId, issuedCert.certificateId);
+  });
+
+  await t.test('8. Certificates filter out pending/ineligible items and support PDF, PNG, and JPG exports on the same certificate record', async () => {
+    const mineRes = await fetch(`${baseUrl}/api/certificates/mine`, {
+      headers: { Authorization: `Bearer ${studentAToken}` },
+    });
+    assert.equal(mineRes.status, 200);
+    const mineBody = await mineRes.json();
+    assert.equal(mineBody.data.length, 1, 'Pending issuance certificate must be excluded');
+    assert.equal(mineBody.data[0].certificateId, issuedCert.certificateId);
+
+    // Student B has 0 certificates
+    const emptyRes = await fetch(`${baseUrl}/api/certificates/mine`, {
+      headers: { Authorization: `Bearer ${studentBToken}` },
+    });
+    assert.equal(emptyRes.status, 200);
+    const emptyBody = await emptyRes.json();
+    assert.equal(emptyBody.data.length, 0);
+
+    // PDF export
+    const pdfRes = await fetch(`${baseUrl}/api/certificates/${issuedCert._id}/download?format=pdf`, {
+      headers: { Authorization: `Bearer ${studentAToken}` },
+    });
+    assert.equal(pdfRes.status, 200);
+    assert.match(pdfRes.headers.get('content-type'), /application\/pdf/);
+    const pdfBuf = Buffer.from(await pdfRes.arrayBuffer());
+    assert.equal(pdfBuf.subarray(0, 5).toString('utf-8'), '%PDF-');
+
+    // PNG export
+    const pngRes = await fetch(`${baseUrl}/api/certificates/${issuedCert._id}/download?format=png`, {
+      headers: { Authorization: `Bearer ${studentAToken}` },
+    });
+    assert.equal(pngRes.status, 200);
+    assert.match(pngRes.headers.get('content-type'), /image\/png/);
+    const pngBuf = Buffer.from(await pngRes.arrayBuffer());
+    assert.deepEqual([...pngBuf.subarray(0, 4)], [0x89, 0x50, 0x4e, 0x47]);
+
+    // JPG export
+    const jpgRes = await fetch(`${baseUrl}/api/certificates/${issuedCert._id}/download?format=jpg`, {
+      headers: { Authorization: `Bearer ${studentAToken}` },
+    });
+    assert.equal(jpgRes.status, 200);
+    assert.match(jpgRes.headers.get('content-type'), /image\/jpeg/);
+    const jpgBuf = Buffer.from(await jpgRes.arrayBuffer());
+    assert.deepEqual([...jpgBuf.subarray(0, 3)], [0xff, 0xd8, 0xff]);
+
+    // Student B cannot download Student A's certificate
+    const forbiddenRes = await fetch(`${baseUrl}/api/certificates/${issuedCert._id}/download?format=png`, {
+      headers: { Authorization: `Bearer ${studentBToken}` },
+    });
+    assert.equal(forbiddenRes.status, 403);
+
+    // Still only 1 certificate in DB (no duplicate created across downloads)
+    const count = await Certificate.countDocuments({ studentId: studentA._id, assessmentId: evaluatedAssessment._id });
+    assert.equal(count, 1);
   });
 });

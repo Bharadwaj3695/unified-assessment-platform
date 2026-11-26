@@ -2,7 +2,8 @@ const fs = require('fs');
 const path = require('path');
 const { User, Submission, AuditLog } = require('../models');
 const userService = require('../services/user.service');
-const { successResponse, errorResponse } = require('../utils/response');
+const { successResponse, errorResponse, paginatedResponse } = require('../utils/response');
+const { parsePaginationParams, resolvePageBounds, buildSortSpec } = require('../utils/pagination');
 
 /**
  * Safely unlink an old avatar file from the uploads directory if it is local
@@ -165,27 +166,57 @@ class UserController {
 
   async getStudents(req, res, next) {
     try {
-      const { search } = req.query;
+      const { search, sortBy, sortOrder, page, limit } = req.query;
+      const hasPagination = page !== undefined || limit !== undefined;
       const query = {
         role: 'student',
         $or: [{ status: 'active' }, { status: { $exists: false } }],
       };
 
-      if (search) {
+      if (search && String(search).trim()) {
+        const escapedSearch = String(search).trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
         query.$and = [
           {
             $or: [
-              { name: { $regex: search, $options: 'i' } },
-              { email: { $regex: search, $options: 'i' } },
-              { studentId: { $regex: search, $options: 'i' } },
+              { name: { $regex: escapedSearch, $options: 'i' } },
+              { email: { $regex: escapedSearch, $options: 'i' } },
+              { studentId: { $regex: escapedSearch, $options: 'i' } },
+              { department: { $regex: escapedSearch, $options: 'i' } },
             ],
           },
         ];
       }
 
-      const students = await User.find(query)
-        .select('name email avatar studentId department isActive status createdAt')
-        .sort({ name: 1 });
+      const sortSpec = buildSortSpec(
+        sortBy,
+        sortOrder,
+        { name: 'name', email: 'email', createdAt: 'createdAt', studentId: 'studentId' },
+        'name',
+        1
+      );
+
+      let students;
+      let pageNum = 1;
+      let limitNum = 10;
+      let total = 0;
+
+      if (hasPagination) {
+        const parsed = parsePaginationParams({ page, limit }, 10, 200);
+        total = await User.countDocuments(query);
+        const bounds = resolvePageBounds(parsed.page, parsed.limit, total);
+        pageNum = bounds.page;
+        limitNum = bounds.limit;
+        students = await User.find(query)
+          .select('name email avatar studentId department isActive status createdAt')
+          .sort(sortSpec)
+          .skip(bounds.skip)
+          .limit(limitNum);
+      } else {
+        students = await User.find(query)
+          .select('name email avatar studentId department isActive status createdAt')
+          .sort(sortSpec);
+        total = students.length;
+      }
 
       const studentIds = students.map((s) => s._id);
       const submissions = await Submission.find({ studentId: { $in: studentIds } }).select(
@@ -210,6 +241,17 @@ class UserController {
           submissions: studentSubmissions,
         };
       });
+
+      if (hasPagination) {
+        return paginatedResponse(
+          res,
+          'Students retrieved successfully',
+          studentData,
+          pageNum,
+          limitNum,
+          total
+        );
+      }
 
       return successResponse(res, 'Students retrieved successfully', studentData);
     } catch (err) {

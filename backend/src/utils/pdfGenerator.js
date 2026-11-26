@@ -1,4 +1,5 @@
 const qrcode = require('qrcode');
+const sharp = require('sharp');
 
 /**
  * Production-ready, zero-dependency PDF generation engine conforming to ISO 32000-1 (PDF 1.4).
@@ -102,20 +103,24 @@ class PdfGenerator {
   }
 
   /**
-   * Main certificate generation method.
-   * Accepts certificate document, template snapshot/doc, and institutional context.
-   * Returns a complete, valid PDF Buffer.
+   * Escape XML/SVG special characters safely.
    */
-  async generateCertificatePdf({ certificate, template, systemSetting, verificationUrl }) {
+  escapeXml(str) {
+    if (str === null || str === undefined) return '';
+    return String(str)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&apos;');
+  }
+
+  /**
+   * Resolve unified certificate branding, academic snapshot, and verification link
+   * shared across PDF, PNG, and JPG/JPEG exports.
+   */
+  resolveCertificateContext({ certificate, template, systemSetting, verificationUrl }) {
     const snap = certificate.academicSnapshot || {};
-    const orientation = template?.orientation || 'landscape';
-    const pageSizeKey = template?.pageSize === 'Letter' ? 'Letter' : 'A4';
-    const baseDimensions = this.PAGE_SIZES[pageSizeKey];
-
-    const width = orientation === 'landscape' ? baseDimensions.height : baseDimensions.width;
-    const height = orientation === 'landscape' ? baseDimensions.width : baseDimensions.height;
-
-    // Formatting date
     const issueDate = certificate.issuedAt
       ? new Date(certificate.issuedAt).toLocaleDateString('en-US', {
           year: 'numeric',
@@ -146,7 +151,6 @@ class PdfGenerator {
       certSetting.defaultSignatoryTitle ||
       'Dean of Academic Affairs';
 
-    // Placeholders context
     const context = {
       studentName: snap.studentName || 'Student',
       studentIdNumber: snap.studentIdNumber || '',
@@ -172,6 +176,132 @@ class PdfGenerator {
     const verifyLink =
       verificationUrl ||
       `${process.env.CLIENT_URL || 'http://localhost:5173'}/verify/${certificate.verificationCode}`;
+
+    return { context, verifyLink, institutionName, signatoryName, signatoryTitle };
+  }
+
+  /**
+   * Render a crisp PNG or JPG/JPEG certificate image from the authoritative certificate record.
+   */
+  async generateCertificateImage({ certificate, template, systemSetting, verificationUrl, format = 'png' }) {
+    const normFormat = String(format || 'png').toLowerCase().trim();
+    if (!['png', 'jpg', 'jpeg'].includes(normFormat)) {
+      const err = new Error('Unsupported image format. Supported formats: png, jpg, jpeg.');
+      err.statusCode = 400;
+      throw err;
+    }
+
+    const { context, verifyLink, institutionName } = this.resolveCertificateContext({
+      certificate,
+      template,
+      systemSetting,
+      verificationUrl,
+    });
+
+    const width = 1600;
+    const height = 1131;
+    const canvasBg = template?.canvas?.backgroundColor || '#FFFFFF';
+    const borderStyle = template?.canvas?.borderStyle || 'classic-gold';
+    const borderColor =
+      template?.canvas?.borderColor || (borderStyle === 'modern-slate' ? '#475569' : '#D4AF37');
+
+    let qrSvgInner = '';
+    try {
+      const rawQrSvg = await qrcode.toString(verifyLink, {
+        type: 'svg',
+        margin: 1,
+        width: 140,
+        color: { dark: '#0F172A', light: '#FFFFFF' },
+      });
+      qrSvgInner = rawQrSvg.replace(/<\?xml[^>]*\?>/g, '').trim();
+    } catch (qrErr) {
+      console.warn('[PdfGenerator] SVG QR generation fallback:', qrErr.message);
+    }
+
+    const borderMarkup =
+      borderStyle === 'none'
+        ? ''
+        : `
+      <rect x="36" y="36" width="${width - 72}" height="${height - 72}" fill="none" stroke="${this.escapeXml(borderColor)}" stroke-width="6" />
+      <rect x="52" y="52" width="${width - 104}" height="${height - 104}" fill="none" stroke="${this.escapeXml(borderColor)}" stroke-width="2" />
+      <rect x="46" y="46" width="12" height="12" fill="${this.escapeXml(borderColor)}" />
+      <rect x="${width - 58}" y="46" width="12" height="12" fill="${this.escapeXml(borderColor)}" />
+      <rect x="46" y="${height - 58}" width="12" height="12" fill="${this.escapeXml(borderColor)}" />
+      <rect x="${width - 58}" y="${height - 58}" width="12" height="12" fill="${this.escapeXml(borderColor)}" />
+    `;
+
+    const idBlock = context.studentIdNumber
+      ? `<text x="${width / 2}" y="458" text-anchor="middle" font-family="DejaVu Sans, Arial, sans-serif" font-size="22" fill="#64748B">Institutional ID: ${this.escapeXml(context.studentIdNumber)}</text>`
+      : '';
+
+    const metricLine = `Score: ${context.percentage}%   |   Grade: ${context.grade}${
+      context.gradeLabel ? ` (${context.gradeLabel})` : ''
+    }   |   Passing Threshold: ${context.passingPercentage}%`;
+
+    const svg = `<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">
+  <rect x="0" y="0" width="${width}" height="${height}" fill="${this.escapeXml(canvasBg)}" />
+  ${borderMarkup}
+
+  <text x="${width / 2}" y="138" text-anchor="middle" font-family="DejaVu Sans, Arial, sans-serif" font-size="30" font-weight="bold" letter-spacing="3" fill="#475569">${this.escapeXml(institutionName.toUpperCase())}</text>
+  <line x1="480" y1="162" x2="1120" y2="162" stroke="${this.escapeXml(borderColor)}" stroke-width="3" />
+
+  <text x="${width / 2}" y="236" text-anchor="middle" font-family="DejaVu Sans, Arial, sans-serif" font-size="50" font-weight="bold" fill="#B45309">CERTIFICATE OF ACHIEVEMENT</text>
+  <text x="${width / 2}" y="294" text-anchor="middle" font-family="DejaVu Sans, Arial, sans-serif" font-size="24" font-style="italic" fill="#475569">This is proudly and authoritatively presented to</text>
+
+  <text x="${width / 2}" y="410" text-anchor="middle" font-family="DejaVu Sans, Arial, sans-serif" font-size="56" font-weight="bold" fill="#1E293B">${this.escapeXml((context.studentName || 'Recipient').toUpperCase())}</text>
+  ${idBlock}
+  <line x1="420" y1="486" x2="1180" y2="486" stroke="${this.escapeXml(borderColor)}" stroke-width="2" />
+
+  <text x="${width / 2}" y="544" text-anchor="middle" font-family="DejaVu Sans, Arial, sans-serif" font-size="24" fill="#475569">for successfully satisfying all qualifying academic and examination requirements for</text>
+  <text x="${width / 2}" y="616" text-anchor="middle" font-family="DejaVu Sans, Arial, sans-serif" font-size="38" font-weight="bold" fill="#1E293B">${this.escapeXml(context.certificateTitle)}</text>
+  <text x="${width / 2}" y="662" text-anchor="middle" font-family="DejaVu Sans, Arial, sans-serif" font-size="24" fill="#334155">Assessment: ${this.escapeXml(context.assessmentTitle)}</text>
+  <text x="${width / 2}" y="712" text-anchor="middle" font-family="DejaVu Sans, Arial, sans-serif" font-size="22" fill="#334155">${this.escapeXml(metricLine)}</text>
+
+  <!-- Left Signatory -->
+  <line x1="170" y1="905" x2="510" y2="905" stroke="#94A3B8" stroke-width="2" />
+  <text x="340" y="940" text-anchor="middle" font-family="DejaVu Sans, Arial, sans-serif" font-size="22" font-weight="bold" fill="#1E293B">${this.escapeXml(context.signatoryName)}</text>
+  <text x="340" y="970" text-anchor="middle" font-family="DejaVu Sans, Arial, sans-serif" font-size="18" fill="#64748B">${this.escapeXml(context.signatoryTitle)}</text>
+
+  <!-- Center QR & Verification -->
+  <g transform="translate(${(width - 140) / 2}, 790)">
+    ${qrSvgInner}
+  </g>
+  <text x="${width / 2}" y="965" text-anchor="middle" font-family="DejaVu Sans, Arial, sans-serif" font-size="18" font-weight="bold" fill="#334155">Certificate ID: ${this.escapeXml(context.certificateId)}</text>
+  <text x="${width / 2}" y="995" text-anchor="middle" font-family="DejaVu Sans, Arial, sans-serif" font-size="16" fill="#64748B">Issued: ${this.escapeXml(context.issueDate)}  |  Verification: ${this.escapeXml(context.verificationCode)}</text>
+
+  <!-- Right Evaluator -->
+  <line x1="1090" y1="905" x2="1430" y2="905" stroke="#94A3B8" stroke-width="2" />
+  <text x="1260" y="940" text-anchor="middle" font-family="DejaVu Sans, Arial, sans-serif" font-size="22" font-weight="bold" fill="#1E293B">${this.escapeXml(context.instructorName)}</text>
+  <text x="1260" y="970" text-anchor="middle" font-family="DejaVu Sans, Arial, sans-serif" font-size="18" fill="#64748B">Academic Instructor &amp; Evaluator</text>
+</svg>`;
+
+    const pipeline = sharp(Buffer.from(svg, 'utf-8'));
+    if (normFormat === 'jpg' || normFormat === 'jpeg') {
+      return pipeline
+        .flatten({ background: '#ffffff' })
+        .jpeg({ quality: 92, mozjpeg: true })
+        .toBuffer();
+    }
+    return pipeline.png({ compressionLevel: 9 }).toBuffer();
+  }
+
+  /**
+   * Main certificate generation method.
+   * Accepts certificate document, template snapshot/doc, and institutional context.
+   * Returns a complete, valid PDF Buffer.
+   */
+  async generateCertificatePdf({ certificate, template, systemSetting, verificationUrl }) {
+    const snap = certificate.academicSnapshot || {};
+    const orientation = template?.orientation || 'landscape';
+    const pageSizeKey = template?.pageSize === 'Letter' ? 'Letter' : 'A4';
+    const baseDimensions = this.PAGE_SIZES[pageSizeKey];
+
+    const width = orientation === 'landscape' ? baseDimensions.height : baseDimensions.width;
+    const height = orientation === 'landscape' ? baseDimensions.width : baseDimensions.height;
+
+    const { context, verifyLink, institutionName, signatoryName, signatoryTitle } =
+      this.resolveCertificateContext({ certificate, template, systemSetting, verificationUrl });
 
     // Assemble PDF vector stream commands
     let stream = '';
@@ -495,14 +625,22 @@ class PdfGenerator {
     drawSectionHeading('Final Evaluation Outcome');
     const resultColor = outcome.passed ? '0.06 0.50 0.32' : '0.75 0.15 0.20';
     writeText(
-      `Result: ${outcome.resultLabel || (outcome.passed ? 'Passed' : 'Failed')}   |   Score: ${outcome.score ?? 0} / ${outcome.totalMarks ?? 0}   |   Percentage: ${outcome.percentage ?? 0}%   |   Passing Threshold: ${outcome.passingThreshold ?? 60}%`,
-      { font: 'F2', size: 10, color: resultColor }
+      `Result: ${outcome.resultLabel || (outcome.passed ? 'Passed' : 'Failed')}   |   Evaluation Status: ${outcome.evaluationStatus || meta.evaluationStatus || 'Evaluated'}   |   Score: ${outcome.score ?? 0} / ${outcome.totalMarks ?? 0}   |   Percentage: ${outcome.percentage ?? 0}%   |   Threshold: ${outcome.passingThreshold ?? 60}%`,
+      { font: 'F2', size: 9.5, color: resultColor }
     );
     if (outcome.grade) {
       writeText(
         `Grade: ${outcome.grade}${outcome.gradeLabel ? ` (${outcome.gradeLabel})` : ''}`,
         { font: 'F2', size: 9.5, color: '0.25 0.30 0.38' }
       );
+    }
+    if (report?.certification?.enabled) {
+      const certLine = report.certification.issued
+        ? `Certificate Status: Issued (${report.certification.certificateId})`
+        : report.certification.eligible
+          ? 'Certificate Status: Eligible'
+          : 'Certificate Status: Not Eligible';
+      writeText(certLine, { size: 9.5, color: '0.25 0.30 0.38' });
     }
     writeText(
       `Answer Breakdown: Correct ${counts.correct ?? 0}   |   Incorrect ${counts.incorrect ?? 0}   |   Unanswered ${counts.unanswered ?? 0}   |   Total Questions ${counts.totalQuestions ?? questionBreakdown.length}`,
@@ -567,10 +705,10 @@ class PdfGenerator {
     }
 
     // AI Integration Disclaimer
-    drawSectionHeading('AI Performance Analysis (Integration Status)');
+    drawSectionHeading('Performance Analysis (Integration Status)');
     for (const line of this.wrapTextLines(
-      report?.aiPredictor?.disclaimer ||
-        'AI Performance Analysis is not yet operational. Official scores and pass/fail outcomes are determined solely by faculty and automated evaluation.',
+      report?.Predictor?.disclaimer ||
+        'Performance Analysis is not yet operational. Official scores and pass/fail outcomes are determined solely by faculty and automated evaluation.',
       90
     )) {
       writeText(line, { size: 8.5, color: '0.40 0.45 0.52', lineStep: 12 });

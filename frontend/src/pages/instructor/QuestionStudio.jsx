@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
   Save,
@@ -26,6 +26,10 @@ import {
 } from 'lucide-react';
 import { toast } from 'react-toastify';
 import uapQuestionBankService from '../../services/uapQuestionBank.service';
+import {
+  getOptionLetter,
+  validateQuestion as validateSharedQuestion,
+} from '../../utils/questionValidation';
 
 const QUESTION_TYPES = [
   { id: 'SINGLE_MCQ', label: 'Single Choice (MCQ)', icon: CheckCircle2 },
@@ -110,7 +114,7 @@ const createDefaultQuestion = (overrides = {}, curriculumContext = {}) => {
 };
 
 // Validate an individual question according to platform rules
-const validateSingleQuestion = (q, { isPublishing = false } = {}) => {
+const validateSingleQuestion = (q, { isPublishing = false, index = 0 } = {}) => {
   const errors = [];
   const warnings = [];
 
@@ -136,34 +140,39 @@ const validateSingleQuestion = (q, { isPublishing = false } = {}) => {
     warnings.push('Adding concept tags improves student learning analytics.');
   }
 
+  const shared = validateSharedQuestion(q, index, { minStatementLength: 5 });
+  const optionErrors = {};
+  let statementError = null;
+  let correctAnswerError = null;
+
+  if (!statement) {
+    statementError = shared.statementError;
+  } else if (statement.length < 5) {
+    statementError = 'Question statement must be at least 5 characters long.';
+  }
+
   // Type specific rules
-  if (q.questionType === 'SINGLE_MCQ') {
+  if (q.questionType === 'SINGLE_MCQ' || q.questionType === 'MULTI_SELECT') {
     const opts = q.options || [];
     if (opts.length < 2) {
-      errors.push('MCQ requires at least 2 options.');
+      errors.push(
+        q.questionType === 'SINGLE_MCQ'
+          ? 'MCQ requires at least 2 options.'
+          : 'Multi-select requires at least 2 options.'
+      );
     }
-    if (opts.some((o) => !o.text || !o.text.trim())) {
-      errors.push('All options must have non-empty text.');
-    }
-    const correct = opts.filter((o) => o.isCorrect);
-    if (correct.length !== 1) {
-      errors.push('Single MCQ must have exactly one correct option.');
-    }
-  } else if (q.questionType === 'MULTI_SELECT') {
-    const opts = q.options || [];
-    if (opts.length < 2) {
-      errors.push('Multi-select requires at least 2 options.');
-    }
-    if (opts.some((o) => !o.text || !o.text.trim())) {
-      errors.push('All options must have non-empty text.');
-    }
-    const correct = opts.filter((o) => o.isCorrect);
-    if (correct.length < 1) {
-      errors.push('Multi-select must have at least one correct option.');
+    Object.entries(shared.optionErrors || {}).forEach(([optIdx, msg]) => {
+      optionErrors[optIdx] = msg;
+      errors.push(msg);
+    });
+    if (shared.correctAnswerError) {
+      correctAnswerError = shared.correctAnswerError;
+      errors.push(shared.correctAnswerError);
     }
   } else if (q.questionType === 'TRUE_FALSE') {
     if (q.answerKey === undefined || q.answerKey === null || q.answerKey === '') {
-      errors.push('Please select the correct True/False answer.');
+      correctAnswerError = 'Please select the correct True/False answer.';
+      errors.push(correctAnswerError);
     }
   } else if (q.questionType === 'FILL_BLANK') {
     const hasAnswer =
@@ -205,6 +214,9 @@ const validateSingleQuestion = (q, { isPublishing = false } = {}) => {
     valid: errors.length === 0,
     errors,
     warnings,
+    statementError,
+    optionErrors,
+    correctAnswerError,
   };
 };
 
@@ -237,6 +249,19 @@ export default function QuestionStudio() {
   const [isCurriculumExpanded, setIsCurriculumExpanded] = useState(true);
   const [isSavingAll, setIsSavingAll] = useState(false);
   const [isPublishingAll, setIsPublishingAll] = useState(false);
+  const questionCardRefs = useRef({});
+
+  const scrollToQuestionCard = (clientId) => {
+    if (!clientId) return;
+    requestAnimationFrame(() => {
+      setTimeout(() => {
+        const el = questionCardRefs.current[clientId];
+        if (el && typeof el.scrollIntoView === 'function') {
+          el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+      }, 40);
+    });
+  };
 
   // Load initial question if edit mode
   useEffect(() => {
@@ -446,6 +471,10 @@ export default function QuestionStudio() {
     setQuestions((prev) => {
       const next = [...prev];
       next[idx] = { ...next[idx], [field]: value };
+      if (field !== 'validationReport' && next[idx].validationReport) {
+        const rep = validateSingleQuestion(next[idx], { index: idx });
+        next[idx] = { ...next[idx], validationReport: rep.valid ? null : rep };
+      }
       return next;
     });
   };
@@ -454,13 +483,18 @@ export default function QuestionStudio() {
   const updateEvaluationConfig = (idx, field, value) => {
     setQuestions((prev) => {
       const next = [...prev];
-      next[idx] = {
+      const updated = {
         ...next[idx],
         evaluationConfig: {
           ...next[idx].evaluationConfig,
           [field]: value,
         },
       };
+      if (updated.validationReport) {
+        const rep = validateSingleQuestion(updated, { index: idx });
+        updated.validationReport = rep.valid ? null : rep;
+      }
+      next[idx] = updated;
       return next;
     });
   };
@@ -491,13 +525,18 @@ export default function QuestionStudio() {
         newAnswerKey = newType === 'SINGLE_MCQ' ? 'opt_1' : ['opt_1'];
       }
 
-      next[idx] = {
+      const updated = {
         ...current,
         questionType: newType,
         options: newOptions,
         answerKey: newAnswerKey,
         validationReport: null,
       };
+      if (current.validationReport) {
+        const rep = validateSingleQuestion(updated, { index: idx });
+        updated.validationReport = rep.valid ? null : rep;
+      }
+      next[idx] = updated;
       return next;
     });
   };
@@ -509,7 +548,12 @@ export default function QuestionStudio() {
       const current = next[qIdx];
       const opts = [...current.options];
       opts[optIdx] = { ...opts[optIdx], text };
-      next[qIdx] = { ...current, options: opts };
+      const updated = { ...current, options: opts };
+      if (current.validationReport) {
+        const rep = validateSingleQuestion(updated, { index: qIdx });
+        updated.validationReport = rep.valid ? null : rep;
+      }
+      next[qIdx] = updated;
       return next;
     });
   };
@@ -518,18 +562,24 @@ export default function QuestionStudio() {
     setQuestions((prev) => {
       const next = [...prev];
       const current = next[qIdx];
+      let updated = current;
 
       if (current.questionType === 'SINGLE_MCQ' || current.questionType === 'TRUE_FALSE') {
         const opts = current.options.map((o) => ({ ...o, isCorrect: o.id === optId }));
-        next[qIdx] = { ...current, options: opts, answerKey: optId };
+        updated = { ...current, options: opts, answerKey: optId };
       } else if (current.questionType === 'MULTI_SELECT') {
         const opts = current.options.map((o) =>
           o.id === optId ? { ...o, isCorrect: !o.isCorrect } : o
         );
         const correctIds = opts.filter((o) => o.isCorrect).map((o) => o.id);
-        next[qIdx] = { ...current, options: opts, answerKey: correctIds };
+        updated = { ...current, options: opts, answerKey: correctIds };
       }
 
+      if (current.validationReport) {
+        const rep = validateSingleQuestion(updated, { index: qIdx });
+        updated.validationReport = rep.valid ? null : rep;
+      }
+      next[qIdx] = updated;
       return next;
     });
   };
@@ -538,11 +588,21 @@ export default function QuestionStudio() {
     setQuestions((prev) => {
       const next = [...prev];
       const current = next[qIdx];
-      const newOptId = `opt_${current.options.length + 1}`;
-      next[qIdx] = {
+      const existingIds = new Set((current.options || []).map((o) => o.id));
+      let suffix = current.options.length + 1;
+      while (existingIds.has(`opt_${suffix}`)) {
+        suffix += 1;
+      }
+      const newOptId = `opt_${suffix}`;
+      const updated = {
         ...current,
         options: [...current.options, { id: newOptId, text: '', isCorrect: false }],
       };
+      if (current.validationReport) {
+        const rep = validateSingleQuestion(updated, { index: qIdx });
+        updated.validationReport = rep.valid ? null : rep;
+      }
+      next[qIdx] = updated;
       return next;
     });
   };
@@ -555,10 +615,15 @@ export default function QuestionStudio() {
         toast.warning('A multiple choice question requires at least 2 options.');
         return prev;
       }
-      next[qIdx] = {
+      const updated = {
         ...current,
         options: current.options.filter((_, i) => i !== optIdx),
       };
+      if (current.validationReport) {
+        const rep = validateSingleQuestion(updated, { index: qIdx });
+        updated.validationReport = rep.valid ? null : rep;
+      }
+      next[qIdx] = updated;
       return next;
     });
   };
@@ -664,12 +729,23 @@ export default function QuestionStudio() {
   // Run validation on all questions
   const handleValidateAll = (isPublishing = false) => {
     let allValid = true;
-    const validated = questions.map((q) => {
-      const report = validateSingleQuestion(q, { isPublishing });
-      if (!report.valid) allValid = false;
-      return { ...q, validationReport: report };
+    let firstInvalidClientId = null;
+    const validated = questions.map((q, idx) => {
+      const report = validateSingleQuestion(q, { isPublishing, index: idx });
+      if (!report.valid) {
+        allValid = false;
+        if (!firstInvalidClientId) firstInvalidClientId = q.clientId;
+      }
+      return {
+        ...q,
+        isCollapsed: !report.valid ? false : q.isCollapsed,
+        validationReport: report,
+      };
     });
     setQuestions(validated);
+    if (!allValid && firstInvalidClientId) {
+      scrollToQuestionCard(firstInvalidClientId);
+    }
     return { allValid, validated };
   };
 
@@ -706,6 +782,18 @@ export default function QuestionStudio() {
   // Save Single Question Draft
   const handleSaveSingleDraft = async (idx) => {
     const q = questions[idx];
+    const report = validateSingleQuestion(q, { isPublishing: false, index: idx });
+    if (!report.valid) {
+      setQuestions((prev) =>
+        prev.map((item, i) =>
+          i === idx ? { ...item, isCollapsed: false, validationReport: report } : item
+        )
+      );
+      scrollToQuestionCard(q.clientId);
+      toast.error(`Question #${idx + 1} has incomplete fields. Please fix validation errors.`);
+      return;
+    }
+
     try {
       updateQuestionField(idx, 'saveStatus', 'saving');
       updateQuestionField(idx, 'saveError', null);
@@ -743,6 +831,12 @@ export default function QuestionStudio() {
 
   // Save ALL Question Drafts
   const handleSaveAllDrafts = async () => {
+    const { allValid } = handleValidateAll(false);
+    if (!allValid) {
+      toast.error('Please resolve validation errors before saving drafts.');
+      return;
+    }
+
     setIsSavingAll(true);
     let successCount = 0;
     let failCount = 0;
@@ -889,7 +983,19 @@ export default function QuestionStudio() {
         <div className="flex flex-wrap items-center gap-2">
           <button
             type="button"
-            onClick={() => setActiveTab(activeTab === 'editor' ? 'preview' : 'editor')}
+            onClick={() => {
+              if (activeTab === 'editor') {
+                const { allValid } = handleValidateAll(false);
+                if (!allValid) {
+                  toast.error('Please resolve validation errors before previewing.');
+                  return;
+                }
+                setPreviewQuestionIndex(0);
+                setActiveTab('preview');
+              } else {
+                setActiveTab('editor');
+              }
+            }}
             className="px-3 py-1.5 text-xs font-semibold rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:bg-slate-100 transition flex items-center gap-1.5"
           >
             <Eye className="w-3.5 h-3.5 text-slate-500" />
@@ -997,8 +1103,9 @@ export default function QuestionStudio() {
                           className="w-4 h-4 text-brand-primary border-slate-300 focus:ring-brand-primary"
                           readOnly
                         />
+                        <span className="text-xs font-bold text-slate-500">{getOptionLetter(i)}.</span>
                         <span className="text-xs text-slate-800 dark:text-slate-200">
-                          {opt.text || `Option ${i + 1}`}
+                          {opt.text}
                         </span>
                       </div>
                     ))}
@@ -1228,6 +1335,41 @@ export default function QuestionStudio() {
             </div>
           </div>
 
+          {/* VALIDATION SUMMARY BANNER */}
+          {questions.some((q) => q.validationReport && !q.validationReport.valid) && (
+            <div
+              role="alert"
+              data-testid="question-studio-validation-summary"
+              className="p-3.5 rounded-xl border border-rose-300 dark:border-rose-800 bg-rose-50 dark:bg-rose-950/30 text-rose-900 dark:text-rose-200 space-y-1.5"
+            >
+              <div className="flex items-center gap-2 text-xs font-bold">
+                <AlertCircle className="w-4 h-4 text-rose-600 dark:text-rose-400 shrink-0" />
+                <span>
+                  {questions.filter((q) => q.validationReport && !q.validationReport.valid).length === 1
+                    ? `Question ${questions.findIndex((q) => q.validationReport && !q.validationReport.valid) + 1} has incomplete fields.`
+                    : `${questions.filter((q) => q.validationReport && !q.validationReport.valid).length} questions have incomplete fields.`}
+                </span>
+              </div>
+              <ul className="space-y-0.5 pl-6 list-disc text-xs">
+                {questions.map((q, qIdx) => {
+                  const rep = q.validationReport;
+                  if (!rep || rep.valid) return null;
+                  return rep.errors.map((errMsg, eIdx) => (
+                    <li key={`${q.clientId}-${eIdx}`}>
+                      <button
+                        type="button"
+                        onClick={() => scrollToQuestionCard(q.clientId)}
+                        className="text-left hover:underline font-medium cursor-pointer"
+                      >
+                        Question {qIdx + 1}: {errMsg}
+                      </button>
+                    </li>
+                  ));
+                })}
+              </ul>
+            </div>
+          )}
+
           {/* QUESTIONS LIST CARDS */}
           <div className="space-y-4">
             {questions.map((q, qIdx) => {
@@ -1237,6 +1379,10 @@ export default function QuestionStudio() {
               return (
                 <div
                   key={q.clientId}
+                  ref={(el) => {
+                    if (el) questionCardRefs.current[q.clientId] = el;
+                    else delete questionCardRefs.current[q.clientId];
+                  }}
                   className={`bg-white dark:bg-slate-900 rounded-xl border shadow-warm-xs transition-all overflow-hidden ${
                     rep && !rep.valid
                       ? 'border-rose-300 dark:border-rose-800'
@@ -1400,8 +1546,21 @@ export default function QuestionStudio() {
                           value={q.statement}
                           onChange={(e) => updateQuestionField(qIdx, 'statement', e.target.value)}
                           placeholder="Enter complete question prompt, context, formulas, and instructions..."
-                          className="w-full p-2.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white text-xs focus:ring-1 focus:ring-brand-primary focus:outline-none"
+                          className={`w-full p-2.5 rounded-lg border text-slate-900 dark:text-white text-xs focus:ring-1 focus:outline-none ${
+                            rep?.statementError
+                              ? 'border-rose-500 dark:border-rose-500 bg-rose-50/30 dark:bg-rose-950/20 focus:ring-rose-500'
+                              : 'border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 focus:ring-brand-primary'
+                          }`}
                         />
+                        {rep?.statementError && (
+                          <p
+                            role="alert"
+                            className="mt-1 text-xs font-semibold text-rose-600 dark:text-rose-400 flex items-center gap-1.5"
+                          >
+                            <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                            <span>{rep.statementError}</span>
+                          </p>
+                        )}
                       </div>
 
                       {/* --- TYPE-SPECIFIC ANSWER CONFIGURATION --- */}
@@ -1458,46 +1617,76 @@ export default function QuestionStudio() {
                           )}
 
                           <div className="space-y-2">
-                            {q.options.map((opt, optIdx) => (
-                              <div
-                                key={opt.id || optIdx}
-                                className={`p-2.5 rounded-lg border transition flex items-center gap-2.5 ${
-                                  opt.isCorrect
-                                    ? 'border-emerald-500/50 bg-emerald-50/30 dark:bg-emerald-950/20'
-                                    : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800'
-                                }`}
-                              >
-                                <button
-                                  type="button"
-                                  onClick={() => handleSetCorrectOption(qIdx, opt.id)}
-                                  className={`w-5 h-5 rounded-full flex items-center justify-center border transition flex-shrink-0 ${
-                                    opt.isCorrect
-                                      ? 'bg-emerald-600 border-emerald-600 text-white'
-                                      : 'border-slate-300 dark:border-slate-600 text-transparent hover:border-slate-400'
-                                  }`}
-                                >
-                                  <Check className="w-3 h-3 stroke-[3]" />
-                                </button>
-
-                                <input
-                                  type="text"
-                                  value={opt.text}
-                                  onChange={(e) => handleOptionTextChange(qIdx, optIdx, e.target.value)}
-                                  placeholder={`Option ${optIdx + 1} text...`}
-                                  className="flex-1 bg-transparent text-xs text-slate-900 dark:text-white focus:outline-none"
-                                />
-
-                                {q.questionType !== 'TRUE_FALSE' && q.options.length > 2 && (
-                                  <button
-                                    type="button"
-                                    onClick={() => handleRemoveOption(qIdx, optIdx)}
-                                    className="text-slate-400 hover:text-rose-500 transition p-1"
+                            {q.options.map((opt, optIdx) => {
+                              const optError = rep?.optionErrors?.[optIdx] || null;
+                              const optLetter = getOptionLetter(optIdx);
+                              return (
+                                <div key={opt.id || optIdx} className="space-y-1">
+                                  <div
+                                    className={`p-2.5 rounded-lg border transition flex items-center gap-2.5 ${
+                                      optError
+                                        ? 'border-rose-500 dark:border-rose-500 bg-rose-50/30 dark:bg-rose-950/20'
+                                        : opt.isCorrect
+                                        ? 'border-emerald-500/50 bg-emerald-50/30 dark:bg-emerald-950/20'
+                                        : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800'
+                                    }`}
                                   >
-                                    <Trash2 className="w-3.5 h-3.5" />
-                                  </button>
-                                )}
-                              </div>
-                            ))}
+                                    <button
+                                      type="button"
+                                      onClick={() => handleSetCorrectOption(qIdx, opt.id)}
+                                      className={`w-5 h-5 rounded-full flex items-center justify-center border transition flex-shrink-0 ${
+                                        opt.isCorrect
+                                          ? 'bg-emerald-600 border-emerald-600 text-white'
+                                          : 'border-slate-300 dark:border-slate-600 text-transparent hover:border-slate-400'
+                                      }`}
+                                    >
+                                      <Check className="w-3 h-3 stroke-[3]" />
+                                    </button>
+
+                                    <span className="text-xs font-bold text-slate-500 w-4 text-center">
+                                      {optLetter}
+                                    </span>
+
+                                    <input
+                                      type="text"
+                                      value={opt.text}
+                                      onChange={(e) => handleOptionTextChange(qIdx, optIdx, e.target.value)}
+                                      placeholder={`Option ${optLetter} text...`}
+                                      aria-invalid={optError ? 'true' : 'false'}
+                                      className="flex-1 bg-transparent text-xs text-slate-900 dark:text-white focus:outline-none"
+                                    />
+
+                                    {q.questionType !== 'TRUE_FALSE' && q.options.length > 2 && (
+                                      <button
+                                        type="button"
+                                        onClick={() => handleRemoveOption(qIdx, optIdx)}
+                                        className="text-slate-400 hover:text-rose-500 transition p-1"
+                                      >
+                                        <Trash2 className="w-3.5 h-3.5" />
+                                      </button>
+                                    )}
+                                  </div>
+                                  {optError && (
+                                    <p
+                                      role="alert"
+                                      className="pl-2 text-xs font-semibold text-rose-600 dark:text-rose-400 flex items-center gap-1.5"
+                                    >
+                                      <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                                      <span>{optError}</span>
+                                    </p>
+                                  )}
+                                </div>
+                              );
+                            })}
+                            {rep?.correctAnswerError && (
+                              <p
+                                role="alert"
+                                className="pt-1 text-xs font-semibold text-rose-600 dark:text-rose-400 flex items-center gap-1.5"
+                              >
+                                <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                                <span>{rep.correctAnswerError}</span>
+                              </p>
+                            )}
                           </div>
                         </div>
                       )}
@@ -1923,7 +2112,7 @@ export default function QuestionStudio() {
                           <button
                             type="button"
                             onClick={() => {
-                              const rep = validateSingleQuestion(q, { isPublishing: false });
+                              const rep = validateSingleQuestion(q, { isPublishing: false, index: qIdx });
                               updateQuestionField(qIdx, 'validationReport', rep);
                               if (rep.valid) toast.success(`Question #${qIdx + 1} validation passed.`);
                               else toast.warn(`Question #${qIdx + 1} has ${rep.errors.length} issue(s).`);

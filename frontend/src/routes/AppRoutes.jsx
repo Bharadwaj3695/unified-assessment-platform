@@ -180,9 +180,10 @@ const AppRoutes = () => {
             <Route path="mock-test/:id" element={<MockTestAttempt />} />
             <Route path="mock-test/analytics/:attemptId" element={<MockTestAnalytics />} />
             {/* Student certifications and earned credential awards */}
+            <Route path="certificates" element={<StudentCertifications />} />
             <Route path="certifications" element={<StudentCertifications />} />
-            {/* Route alias forwarding /student/my-certifications to /student/certifications */}
-            <Route path="my-certifications" element={<Navigate to="/student/certifications" replace />} />
+            {/* Route alias forwarding /student/my-certifications to /student/certificates */}
+            <Route path="my-certifications" element={<Navigate to="/student/certificates" replace />} />
             {/* Student submission history, attempts, results, and progress */}
             <Route path="submissions" element={<StudentDashboard />} />
             <Route path="submissions/:id" element={<StudentDashboard />} />

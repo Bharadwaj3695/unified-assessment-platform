@@ -6,8 +6,10 @@ const {
   MockTestAttempt,
   MockTest,
   User,
+  Certificate,
 } = require('../models');
 const aiPredictorService = require('./aiPredictor.service');
+const { parsePaginationParams, paginateInMemory } = require('../utils/pagination');
 
 const VALID_ATTEMPT_TYPES = new Set(['assessment', 'mock_test', 'mock']);
 
@@ -252,25 +254,27 @@ class ExamReportService {
     const filteredPending = pendingExams.filter((item) => matchesSearch(item) && matchesType(item));
 
     const sortFn = (a, b) => {
+      let diff = 0;
       if (sortBy === 'date_asc') {
-        return new Date(a.evaluatedAt || a.submittedAt || 0) - new Date(b.evaluatedAt || b.submittedAt || 0);
+        diff = new Date(a.evaluatedAt || a.submittedAt || 0) - new Date(b.evaluatedAt || b.submittedAt || 0);
+      } else if (sortBy === 'score_desc') {
+        diff = (b.percentage ?? 0) - (a.percentage ?? 0);
+      } else if (sortBy === 'score_asc') {
+        diff = (a.percentage ?? 0) - (b.percentage ?? 0);
+      } else if (sortBy === 'name_asc') {
+        diff = a.examName.localeCompare(b.examName);
+      } else {
+        // default: date_desc
+        diff = new Date(b.evaluatedAt || b.submittedAt || 0) - new Date(a.evaluatedAt || a.submittedAt || 0);
       }
-      if (sortBy === 'score_desc') {
-        return (b.percentage ?? 0) - (a.percentage ?? 0);
-      }
-      if (sortBy === 'score_asc') {
-        return (a.percentage ?? 0) - (b.percentage ?? 0);
-      }
-      if (sortBy === 'name_asc') {
-        return a.examName.localeCompare(b.examName);
-      }
-      // default: date_desc
-      return new Date(b.evaluatedAt || b.submittedAt || 0) - new Date(a.evaluatedAt || a.submittedAt || 0);
+      return diff || String(a.attemptId).localeCompare(String(b.attemptId));
     };
 
     filteredEvaluated = filteredEvaluated.sort(sortFn);
     filteredPending.sort(
-      (a, b) => new Date(b.submittedAt || 0) - new Date(a.submittedAt || 0)
+      (a, b) =>
+        new Date(b.submittedAt || 0) - new Date(a.submittedAt || 0) ||
+        String(a.attemptId).localeCompare(String(b.attemptId))
     );
 
     const passedCount = evaluatedExams.filter((e) => e.passed).length;
@@ -282,14 +286,43 @@ class ExamReportService {
           ) / 10
         : null;
 
-    const aiPredictor = aiPredictorService.buildIntegrationPayload({
+    const Predictor = aiPredictorService.buildIntegrationPayload({
       evaluatedExams,
       topicBreakdown: [],
     });
 
+    const hasEvalPagination = options.page !== undefined || options.limit !== undefined;
+    const hasPendingPagination = options.pendingPage !== undefined || options.pendingLimit !== undefined;
+
+    let returnedEvaluated = filteredEvaluated;
+    let evaluatedPagination = null;
+    if (hasEvalPagination) {
+      const parsed = parsePaginationParams({ page: options.page, limit: options.limit }, 10, 200);
+      const paged = paginateInMemory(filteredEvaluated, parsed.page, parsed.limit);
+      returnedEvaluated = paged.items;
+      evaluatedPagination = paged.pagination;
+    }
+
+    let returnedPending = filteredPending;
+    let pendingPagination = null;
+    if (hasPendingPagination) {
+      const parsed = parsePaginationParams(
+        { page: options.pendingPage, limit: options.pendingLimit },
+        10,
+        200
+      );
+      const paged = paginateInMemory(filteredPending, parsed.page, parsed.limit);
+      returnedPending = paged.items;
+      pendingPagination = paged.pagination;
+    }
+
     return {
-      evaluatedExams: filteredEvaluated,
-      pendingExams: filteredPending,
+      evaluatedExams: returnedEvaluated,
+      pendingExams: returnedPending,
+      ...(evaluatedPagination
+        ? { pagination: evaluatedPagination, evaluatedPagination }
+        : {}),
+      ...(pendingPagination ? { pendingPagination } : {}),
       summary: {
         evaluatedCount: evaluatedExams.length,
         pendingCount: pendingExams.length,
@@ -297,7 +330,7 @@ class ExamReportService {
         failedCount,
         averagePercentage: avgPct,
       },
-      aiPredictor,
+      Predictor,
     };
   }
 
@@ -506,6 +539,17 @@ class ExamReportService {
     const passingThreshold = typeof assessment.passingScore === 'number' ? assessment.passingScore : 60;
     const evaluatedAt = submission.evaluation?.gradedAt || submission.submittedAt || submission.updatedAt;
 
+    let certDoc = null;
+    try {
+      certDoc = await Certificate.findOne({
+        studentId: student?._id || submission.studentId,
+        assessmentId: assessment._id,
+        $or: [{ 'issuance.status': 'issued' }, { 'issuance.status': { $exists: false } }],
+      }).select('certificateId status issuedAt verificationCode');
+    } catch (_certErr) {
+      certDoc = null;
+    }
+
     const report = {
       meta: {
         attemptId: submission._id.toString(),
@@ -517,6 +561,7 @@ class ExamReportService {
         subject: assessment.category || 'General',
         submittedAt: submission.submittedAt || submission.createdAt,
         evaluatedAt,
+        evaluationStatus: 'Evaluated',
         timeSpentSeconds: submission.timeSpentSeconds || 0,
         durationMinutes: assessment.durationMinutes || 60,
       },
@@ -534,10 +579,23 @@ class ExamReportService {
         passingThreshold,
         passed: Boolean(submission.passed),
         resultLabel: submission.passed ? 'Passed' : 'Failed',
+        evaluationStatus: 'Evaluated',
         grade: submission.evaluation?.grade || null,
         gradeLabel: submission.evaluation?.gradeLabel || null,
         autoScore: submission.autoScore ?? 0,
         manualScore: submission.manualScore ?? 0,
+      },
+      certification: {
+        enabled: Boolean(assessment.certification?.enabled),
+        eligible: Boolean(submission.evaluation?.certificateEligible),
+        issued: Boolean(certDoc),
+        certificateId: certDoc?.certificateId || null,
+        status: certDoc
+          ? certDoc.status
+          : submission.evaluation?.certificateEligible
+            ? 'eligible'
+            : 'not_eligible',
+        issuedAt: certDoc?.issuedAt || null,
       },
       counts: {
         correct: correctCount,
@@ -558,7 +616,7 @@ class ExamReportService {
       },
     };
 
-    report.aiPredictor = aiPredictorService.buildIntegrationPayload({
+    report.Predictor = aiPredictorService.buildIntegrationPayload({
       evaluatedExams: [
         {
           attemptId: report.meta.attemptId,
@@ -706,6 +764,7 @@ class ExamReportService {
         subject: subjectName,
         submittedAt: attempt.submittedAt || attempt.createdAt,
         evaluatedAt,
+        evaluationStatus: 'Evaluated',
         timeSpentSeconds: attempt.timeSpentSeconds || 0,
         durationMinutes: mockTest.durationMinutes || 60,
       },
@@ -723,10 +782,19 @@ class ExamReportService {
         passingThreshold,
         passed,
         resultLabel: passed ? 'Passed' : 'Failed',
+        evaluationStatus: 'Evaluated',
         grade: null,
         gradeLabel: null,
         autoScore: attempt.autoScore ?? 0,
         manualScore: attempt.manualScore ?? 0,
+      },
+      certification: {
+        enabled: false,
+        eligible: false,
+        issued: false,
+        certificateId: null,
+        status: 'not_applicable',
+        issuedAt: null,
       },
       counts: {
         correct: attempt.correctCount ?? questionBreakdown.filter((q) => q.status === 'correct').length,
@@ -744,7 +812,7 @@ class ExamReportService {
       },
     };
 
-    report.aiPredictor = aiPredictorService.buildIntegrationPayload({
+    report.Predictor = aiPredictorService.buildIntegrationPayload({
       evaluatedExams: [
         {
           attemptId: report.meta.attemptId,

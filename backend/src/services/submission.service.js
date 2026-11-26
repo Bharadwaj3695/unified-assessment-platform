@@ -5,6 +5,7 @@ const proctoringService = require('./proctoring.service');
 const storageService = require('./storage.service');
 const executionClient = require('./executionClient.service');
 const { resolveGrade } = require('../utils/gradingScheme');
+const { parsePaginationParams, paginateInMemory } = require('../utils/pagination');
 
 class SubmissionService {
   async startAttempt(studentId, assessmentId) {
@@ -963,6 +964,87 @@ class SubmissionService {
       json.certificate = asmtId ? (certMap.get(asmtId) || null) : null;
       return json;
     });
+  }
+
+  async getStudentSubmissionsPaginated(studentId, options = {}) {
+    const allSubmissions = await this.getStudentSubmissions(studentId);
+
+    const isFinalized = (sub) =>
+      Boolean(
+        sub &&
+          sub.status === 'evaluated' &&
+          sub.evaluationStatus !== 'pending' &&
+          sub.resultStatus !== 'pending_evaluation' &&
+          typeof (sub.finalScore ?? sub.score) === 'number' &&
+          typeof sub.percentage === 'number'
+      );
+
+    const counts = {
+      all: allSubmissions.length,
+      passed: allSubmissions.filter((s) => isFinalized(s) && Boolean(s.passed)).length,
+      failed: allSubmissions.filter((s) => isFinalized(s) && !s.passed).length,
+      pending: allSubmissions.filter(
+        (s) => s.status === 'submitted' || (s.status !== 'in_progress' && s.evaluationStatus === 'pending')
+      ).length,
+      inProgress: allSubmissions.filter((s) => s.status === 'in_progress').length,
+    };
+
+    const view = String(options.view || 'submissions').toLowerCase();
+    let list = view === 'results' ? allSubmissions.filter(isFinalized) : allSubmissions;
+
+    const status = String(options.status || 'all').toLowerCase();
+    if (status !== 'all') {
+      list = list.filter((sub) => {
+        if (status === 'in_progress') return view !== 'results' && sub.status === 'in_progress';
+        if (status === 'pending') {
+          return (
+            view !== 'results' &&
+            (sub.status === 'submitted' || (sub.status !== 'in_progress' && sub.evaluationStatus === 'pending'))
+          );
+        }
+        if (status === 'passed') return isFinalized(sub) && Boolean(sub.passed);
+        if (status === 'failed') return isFinalized(sub) && !sub.passed;
+        return true;
+      });
+    }
+
+    if (options.search && String(options.search).trim()) {
+      const q = String(options.search).trim().toLowerCase();
+      list = list.filter((sub) => {
+        const title = (sub.assessment?.title || '').toLowerCase();
+        const cat = (sub.assessment?.category || '').toLowerCase();
+        return title.includes(q) || cat.includes(q);
+      });
+    }
+
+    const sortBy = String(options.sortBy || 'createdAt');
+    const dir = String(options.sortOrder || '').toLowerCase() === 'asc' ? 1 : -1;
+    list = [...list].sort((a, b) => {
+      const idA = String(a._id || a.id || '');
+      const idB = String(b._id || b.id || '');
+      if (sortBy === 'percentage') {
+        const diff = (Number(a.percentage) || 0) - (Number(b.percentage) || 0);
+        return dir * diff || idA.localeCompare(idB);
+      }
+      if (sortBy === 'submittedAt') {
+        const diff = new Date(a.submittedAt || a.createdAt || 0) - new Date(b.submittedAt || b.createdAt || 0);
+        return dir * diff || idA.localeCompare(idB);
+      }
+      const diff = new Date(a.createdAt || 0) - new Date(b.createdAt || 0);
+      return dir * diff || idA.localeCompare(idB);
+    });
+
+    const parsed = parsePaginationParams(options, 10, 200);
+    const paged = paginateInMemory(list, parsed.page, parsed.limit);
+
+    return {
+      submissions: paged.items,
+      total: paged.total,
+      page: paged.page,
+      limit: paged.limit,
+      totalPages: paged.totalPages,
+      counts,
+    };
   }
 
   async getSubmissionById(submissionId, userId, role) {

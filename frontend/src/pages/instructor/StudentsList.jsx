@@ -1,13 +1,16 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useLocation } from 'react-router-dom';
 import { toast } from 'react-toastify';
 import { instructorService } from '../../services/instructor.service';
+import useDebounce from '../../hooks/useDebounce';
 import Card from '../../components/ui/Card';
 import Badge from '../../components/ui/Badge';
 import Button from '../../components/ui/Button';
 import EmptyState from '../../components/ui/EmptyState';
 import ErrorState from '../../components/ui/ErrorState';
 import TableSkeleton from '../../components/ui/TableSkeleton';
+import Pagination, { PaginationJumpLink } from '../../components/ui/Pagination';
+import { DEFAULT_PAGE_SIZE, normalizePagination } from '../../utils/pagination';
 import { useRefresh } from '../../hooks/useRefresh';
 import {
   Table,
@@ -30,11 +33,25 @@ const StudentsList = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState(null);
   const [searchTerm, setSearchTerm] = useState('');
+  const debouncedSearch = useDebounce(searchTerm, 300);
+  const [page, setPage] = useState(1);
+  const [limit, setLimit] = useState(DEFAULT_PAGE_SIZE);
+  const [pagination, setPagination] = useState({
+    page: 1,
+    limit: DEFAULT_PAGE_SIZE,
+    total: 0,
+    totalPages: 1,
+  });
+  const listTopRef = useRef(null);
+  const paginationRef = useRef(null);
 
   useEffect(() => {
     const params = new URLSearchParams(location.search);
     const q = params.get('search');
-    if (q) setSearchTerm(q);
+    if (q !== null) {
+      setSearchTerm(q);
+      setPage(1);
+    }
   }, [location.search]);
 
   const loadStudents = useCallback(async (isManual = false) => {
@@ -43,16 +60,19 @@ const StudentsList = () => {
         setIsLoading(true);
       }
       setError(null);
-      const res = await instructorService.getStudents();
+      const params = { page, limit };
+      if (debouncedSearch.trim()) params.search = debouncedSearch.trim();
+      const res = await instructorService.getStudentsPaginated(params);
       const list = Array.isArray(res) ? res : res.data || [];
       setStudents(list);
+      setPagination(normalizePagination(res.pagination, { page, limit, total: list.length }));
     } catch (err) {
       setError(err.message || 'Failed to retrieve student directory.');
       throw err;
     } finally {
       setIsLoading(false);
     }
-  }, []);
+  }, [page, limit, debouncedSearch]);
 
   const { isRefreshing, refresh: handleRefresh } = useRefresh(
     () => loadStudents(true),
@@ -63,14 +83,7 @@ const StudentsList = () => {
     loadStudents(false).catch(() => {});
   }, [loadStudents]);
 
-  const filteredStudents = students.filter((s) => {
-    if (!searchTerm.trim()) return true;
-    const term = searchTerm.toLowerCase();
-    return (
-      s.name?.toLowerCase().includes(term) ||
-      s.email?.toLowerCase().includes(term)
-    );
-  });
+  const filteredStudents = students;
 
   return (
     <div className="space-y-6">
@@ -91,7 +104,14 @@ const StudentsList = () => {
           </p>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div ref={listTopRef} className="flex flex-wrap items-center gap-2">
+          <PaginationJumpLink
+            currentPage={pagination.page}
+            totalPages={pagination.totalPages}
+            totalItems={pagination.total}
+            targetRef={paginationRef}
+          />
+
           <Button
             type="button"
             variant="outline"
@@ -112,7 +132,10 @@ const StudentsList = () => {
               <span>Filter: &ldquo;{searchTerm}&rdquo;</span>
               <button
                 type="button"
-                onClick={() => setSearchTerm('')}
+                onClick={() => {
+                  setSearchTerm('');
+                  setPage(1);
+                }}
                 className="hover:text-red-600 transition-colors cursor-pointer ml-1"
                 title="Clear search filter"
               >
@@ -195,6 +218,23 @@ const StudentsList = () => {
               })}
             </TableBody>
           </Table>
+        )}
+        {filteredStudents.length > 0 && (
+          <Pagination
+            containerRef={paginationRef}
+            scrollTargetRef={listTopRef}
+            currentPage={pagination.page}
+            totalPages={pagination.totalPages}
+            totalItems={pagination.total}
+            pageSize={limit}
+            onPageChange={(nextPage) => setPage(nextPage)}
+            onPageSizeChange={(nextLimit) => {
+              setLimit(nextLimit);
+              setPage(1);
+            }}
+            itemLabel="students"
+            testIdPrefix="students-pagination"
+          />
         )}
       </Card>
     </div>

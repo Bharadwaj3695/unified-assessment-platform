@@ -2,7 +2,7 @@ FROM node:24-alpine
 
 WORKDIR /app
 
-RUN apk add --no-cache curl
+RUN apk add --no-cache curl fontconfig ttf-dejavu
 
 COPY package*.json ./
 RUN npm install

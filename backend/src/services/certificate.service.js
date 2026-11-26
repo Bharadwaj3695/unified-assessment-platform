@@ -16,6 +16,7 @@ const {
 const pdfGenerator = require('../utils/pdfGenerator');
 const storageService = require('./storage.service');
 const emailService = require('./email.service');
+const { parsePaginationParams, paginateInMemory } = require('../utils/pagination');
 
 /**
  * Service managing student certificate retrieval, automatic issuance for eligible submissions,
@@ -317,27 +318,60 @@ class CertificateService {
    * Retrieves all certificates earned by the authenticated student.
    * Derives ownership strictly from the verified authenticated student ID.
    */
-  async getStudentCertificates(studentId) {
-    if (!studentId) return [];
+  async getStudentCertificates(studentId, options = {}) {
+    const hasPagination = options.page !== undefined || options.limit !== undefined;
+    if (!studentId) {
+      return hasPagination
+        ? { certificates: [], total: 0, page: 1, limit: 10, totalPages: 1 }
+        : [];
+    }
 
     const studentUser = await User.findById(studentId);
-    if (!studentUser) return [];
+    if (!studentUser) {
+      return hasPagination
+        ? { certificates: [], total: 0, page: 1, limit: 10, totalPages: 1 }
+        : [];
+    }
 
-    // Query all authoritative certificates owned by this student
+    // Query authoritative issued certificates owned by this student
     const certificates = await Certificate.find({
       studentId,
+      $or: [{ 'issuance.status': 'issued' }, { 'issuance.status': { $exists: false } }],
     })
       .populate('assessmentId', 'title category totalPoints passingScore status accessType')
-      .sort({ issuedAt: -1 });
+      .populate('submissionId', 'status evaluationStatus passed')
+      .populate('evaluationId', 'status passed certificateEligible')
+      .sort({ issuedAt: -1, _id: -1 });
+
+    // Exclude any certificate linked to a pending, failed, or non-eligible submission/evaluation
+    const eligibleCertificates = certificates.filter((cert) => {
+      if (cert.submissionId && typeof cert.submissionId === 'object' && cert.submissionId.status) {
+        if (
+          cert.submissionId.status !== 'evaluated' ||
+          cert.submissionId.evaluationStatus === 'pending' ||
+          !cert.submissionId.passed
+        ) {
+          return false;
+        }
+      }
+      if (cert.evaluationId && typeof cert.evaluationId === 'object' && cert.evaluationId.status) {
+        if (cert.evaluationId.status !== 'completed' || !cert.evaluationId.certificateEligible) {
+          return false;
+        }
+      }
+      return true;
+    });
 
     // Format clean response representation for frontend consumption
-    return certificates.map((cert) => {
+    let formatted = eligibleCertificates.map((cert) => {
       const snap = cert.academicSnapshot || {};
+      const certStatus = cert.status || 'active';
       return {
         id: cert._id.toString(),
         _id: cert._id.toString(),
         certificateId: cert.certificateId,
         verificationCode: cert.verificationCode,
+        verificationStatus: certStatus === 'revoked' ? 'revoked' : 'verified',
         title: snap.certificateTitle || `${snap.assessmentTitle || 'Course'} Certificate`,
         certificateTitle: snap.certificateTitle || `${snap.assessmentTitle || 'Course'} Certificate`,
         assessmentName: snap.assessmentTitle || cert.assessmentId?.title || 'Assessment',
@@ -352,14 +386,68 @@ class CertificateService {
         percentage: typeof snap.percentage === 'number' ? snap.percentage : null,
         grade: snap.grade || null,
         gradeLabel: snap.gradeLabel || '',
-        status: cert.status || 'active',
-        revocation: cert.status === 'revoked' ? cert.revocation : null,
+        status: certStatus,
+        revocation: certStatus === 'revoked' ? cert.revocation : null,
         issuedAt: cert.issuedAt,
-        downloadAvailable: cert.status !== 'revoked',
+        downloadAvailable: certStatus !== 'revoked',
+        supportedFormats: ['pdf', 'png', 'jpg'],
         pdfKey: cert.pdf?.fileKey || null,
         emailStatus: cert.emailDelivery?.status || 'pending',
       };
     });
+
+    if (!hasPagination && !options.search && !options.status) {
+      return formatted;
+    }
+
+    const totalAll = formatted.length;
+    if (options.status && options.status !== 'all') {
+      formatted = formatted.filter((c) => c.status === options.status);
+    }
+
+    if (options.search && String(options.search).trim()) {
+      const q = String(options.search).trim().toLowerCase();
+      formatted = formatted.filter((cert) => {
+        const title = (cert.title || cert.certificateTitle || '').toLowerCase();
+        const assessment = (cert.assessmentName || cert.assessmentTitle || '').toLowerCase();
+        const certId = (cert.certificateId || '').toLowerCase();
+        const code = (cert.verificationCode || '').toLowerCase();
+        const category = (cert.category || '').toLowerCase();
+        return (
+          title.includes(q) ||
+          assessment.includes(q) ||
+          certId.includes(q) ||
+          code.includes(q) ||
+          category.includes(q)
+        );
+      });
+    }
+
+    if (options.sortBy) {
+      const dir = String(options.sortOrder || '').toLowerCase() === 'asc' ? 1 : -1;
+      formatted.sort((a, b) => {
+        if (options.sortBy === 'title') {
+          return dir * (a.title || '').localeCompare(b.title || '') || a.id.localeCompare(b.id);
+        }
+        const diff = new Date(a.issuedAt || 0) - new Date(b.issuedAt || 0);
+        return dir * diff || a.id.localeCompare(b.id);
+      });
+    }
+
+    if (!hasPagination) {
+      return formatted;
+    }
+
+    const parsed = parsePaginationParams(options, 10, 200);
+    const paged = paginateInMemory(formatted, parsed.page, parsed.limit);
+    return {
+      certificates: paged.items,
+      total: paged.total,
+      page: paged.page,
+      limit: paged.limit,
+      totalPages: paged.totalPages,
+      totalAll,
+    };
   }
 
   /**
@@ -399,12 +487,19 @@ class CertificateService {
   }
 
   /**
-   * Handles certificate download request.
-   * Returns valid PDF buffer and filename, verifying caller authorization (student owner or administrator).
+   * Handles certificate download request in PDF, PNG, or JPG/JPEG format.
+   * Uses the same authoritative certificate record and enforces caller authorization.
    */
-  async downloadCertificate(identifier, requestingUser) {
+  async downloadCertificate(identifier, requestingUser, options = {}) {
     if (!identifier || !requestingUser) {
       const err = new Error('Certificate ID and authenticated user are required');
+      err.statusCode = 400;
+      throw err;
+    }
+
+    const format = String(options.format || 'pdf').toLowerCase().trim();
+    if (!['pdf', 'png', 'jpg', 'jpeg'].includes(format)) {
+      const err = new Error('Unsupported certificate format. Allowed formats: pdf, png, jpg, jpeg.');
       err.statusCode = 400;
       throw err;
     }
@@ -431,6 +526,30 @@ class CertificateService {
       const err = new Error('Access denied: You are not authorized to download this certificate');
       err.statusCode = 403;
       throw err;
+    }
+
+    if (cert.issuance?.status && cert.issuance.status !== 'issued') {
+      const err = new Error('Certificate is not issued yet and cannot be downloaded.');
+      err.statusCode = 409;
+      throw err;
+    }
+
+    if (format === 'png' || format === 'jpg' || format === 'jpeg') {
+      const systemSetting = await SystemSetting.findOne();
+      const buffer = await pdfGenerator.generateCertificateImage({
+        certificate: cert,
+        template: cert.templateSnapshot || cert.templateId,
+        systemSetting,
+        format,
+      });
+      const ext = format === 'jpeg' ? 'jpg' : format;
+      const contentType = ext === 'png' ? 'image/png' : 'image/jpeg';
+      return {
+        buffer,
+        filename: `${cert.certificateId}.${ext}`,
+        contentType,
+        certificate: cert,
+      };
     }
 
     // Check if PDF is already stored

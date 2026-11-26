@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Plus,
@@ -28,6 +28,9 @@ import {
 } from 'lucide-react';
 import { toast } from 'react-toastify';
 import uapQuestionBankService from '../../services/uapQuestionBank.service';
+import useDebounce from '../../hooks/useDebounce';
+import Pagination, { PaginationJumpLink } from '../../components/ui/Pagination';
+import { DEFAULT_PAGE_SIZE, normalizePagination } from '../../utils/pagination';
 import AiQuestionGeneratorModal from '../../components/instructor/AiQuestionGeneratorModal';
 import BulkQuestionImportModal from '../../components/instructor/BulkQuestionImportModal';
 import MockTestBlueprintModal from '../../components/instructor/MockTestBlueprintModal';
@@ -45,13 +48,24 @@ export default function QuestionBankHub() {
   const [totalQuestions, setTotalQuestions] = useState(0);
   const [loadingQuestions, setLoadingQuestions] = useState(true);
 
-  // Filters
+  // Filters & Pagination
   const [searchQuery, setSearchQuery] = useState('');
+  const debouncedSearch = useDebounce(searchQuery, 300);
   const [selectedSubject, setSelectedSubject] = useState('');
   const [selectedBank, setSelectedBank] = useState('');
   const [selectedType, setSelectedType] = useState('');
   const [selectedDifficulty, setSelectedDifficulty] = useState('');
   const [selectedStatus, setSelectedStatus] = useState('');
+  const [page, setPage] = useState(1);
+  const [limit, setLimit] = useState(DEFAULT_PAGE_SIZE);
+  const [pagination, setPagination] = useState({
+    page: 1,
+    limit: DEFAULT_PAGE_SIZE,
+    total: 0,
+    totalPages: 1,
+  });
+  const listTopRef = useRef(null);
+  const paginationRef = useRef(null);
 
   // Auxiliary data
   const [subjects, setSubjects] = useState([]);
@@ -83,54 +97,59 @@ export default function QuestionBankHub() {
     loadMetadata();
   }, []);
 
-  // Fetch Questions when filters change
-  const fetchQuestions = async () => {
+  // Fetch Questions when filters or pagination change
+  const fetchQuestions = useCallback(async () => {
     try {
       setLoadingQuestions(true);
-      const params = {};
-      if (searchQuery) params.search = searchQuery;
+      const params = {
+        page,
+        limit,
+      };
+      if (debouncedSearch.trim()) params.search = debouncedSearch.trim();
       if (selectedSubject) params.subjectId = selectedSubject;
+      if (selectedBank) params.bankId = selectedBank;
       if (selectedType) params.questionType = selectedType;
       if (selectedDifficulty) params.difficulty = selectedDifficulty;
       if (selectedStatus) params.status = selectedStatus;
 
-      const res = await uapQuestionBankService.getQuestions(params);
-      let questionList = Array.isArray(res) ? res : (res.data || res.questions || []);
-
-      // Filter by Question Bank / Pool assignment if selected
-      if (selectedBank) {
-        const bankObj = questionBanks.find(
-          (b) => (b._id || b.id) === selectedBank
-        );
-        if (bankObj && Array.isArray(bankObj.questionIds)) {
-          const qIdSet = new Set(
-            bankObj.questionIds.map((qid) => (qid._id || qid).toString())
-          );
-          questionList = questionList.filter((q) =>
-            qIdSet.has((q.id || q._id).toString())
-          );
-        }
-      }
+      const res = await uapQuestionBankService.getQuestionsPaginated(params);
+      const questionList = Array.isArray(res) ? res : (res.data || res.questions || []);
+      const norm = normalizePagination(res.pagination, {
+        page,
+        limit,
+        total: questionList.length,
+      });
 
       setQuestions(questionList);
-      setTotalQuestions(res.pagination?.total || (Array.isArray(res) ? res.length : (res.data ? res.data.length : questionList.length)));
+      setTotalQuestions(norm.total);
+      setPagination(norm);
     } catch (err) {
       toast.error('Failed to load questions: ' + err.message);
     } finally {
       setLoadingQuestions(false);
     }
-  };
+  }, [
+    page,
+    limit,
+    debouncedSearch,
+    selectedSubject,
+    selectedBank,
+    selectedType,
+    selectedDifficulty,
+    selectedStatus,
+  ]);
 
   useEffect(() => {
     if (activeTab === 'questions') {
       fetchQuestions();
     } else if (activeTab === 'mockTests') {
-      uapQuestionBankService.getMockTests().then((res) => setMockTests(res.data || []));
+      uapQuestionBankService.getMockTests().then((res) => setMockTests(res.data || res || []));
     }
-  }, [activeTab, selectedSubject, selectedBank, selectedType, selectedDifficulty, selectedStatus]);
+  }, [activeTab, fetchQuestions]);
 
   const handleSearchSubmit = (e) => {
     e.preventDefault();
+    setPage(1);
     fetchQuestions();
   };
 
@@ -237,13 +256,19 @@ export default function QuestionBankHub() {
       </div>
 
       {/* Questions Section Header */}
-      <div className="flex items-center justify-between pt-1">
+      <div ref={listTopRef} className="flex items-center justify-between pt-1">
         <div className="flex items-center gap-2.5">
           <h2 className="text-lg font-bold font-display text-slate-900 dark:text-white">Questions</h2>
           <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300">
             {totalQuestions} Items
           </span>
         </div>
+        <PaginationJumpLink
+          currentPage={pagination.page}
+          totalPages={pagination.totalPages}
+          totalItems={pagination.total}
+          targetRef={paginationRef}
+        />
       </div>
 
       {/* UNIFIED QUESTIONS VIEW */}
@@ -257,7 +282,11 @@ export default function QuestionBankHub() {
                 type="text"
                 placeholder="Search statement, code, or concept tags..."
                 value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
+                onChange={(e) => {
+                  setSearchQuery(e.target.value);
+                  setPage(1);
+                }}
+                aria-label="Search questions"
                 className="w-full pl-9 pr-4 py-1.5 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 focus:outline-none focus:ring-1 focus:ring-brand-primary"
               />
             </form>
@@ -265,7 +294,11 @@ export default function QuestionBankHub() {
             <div className="flex flex-wrap items-center gap-2 w-full md:w-auto">
               <select
                 value={selectedSubject}
-                onChange={(e) => setSelectedSubject(e.target.value)}
+                onChange={(e) => {
+                  setSelectedSubject(e.target.value);
+                  setPage(1);
+                }}
+                aria-label="Filter by subject"
                 className="p-1.5 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200"
               >
                 <option value="">All Subjects</option>
@@ -279,7 +312,11 @@ export default function QuestionBankHub() {
               {/* Integrated Question Bank & Pool Filter */}
               <select
                 value={selectedBank}
-                onChange={(e) => setSelectedBank(e.target.value)}
+                onChange={(e) => {
+                  setSelectedBank(e.target.value);
+                  setPage(1);
+                }}
+                aria-label="Filter by bank"
                 className="p-1.5 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200"
               >
                 <option value="">All Banks & Pools</option>
@@ -292,7 +329,11 @@ export default function QuestionBankHub() {
 
               <select
                 value={selectedType}
-                onChange={(e) => setSelectedType(e.target.value)}
+                onChange={(e) => {
+                  setSelectedType(e.target.value);
+                  setPage(1);
+                }}
+                aria-label="Filter by question type"
                 className="p-1.5 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200"
               >
                 <option value="">All Types</option>
@@ -309,7 +350,11 @@ export default function QuestionBankHub() {
 
               <select
                 value={selectedDifficulty}
-                onChange={(e) => setSelectedDifficulty(e.target.value)}
+                onChange={(e) => {
+                  setSelectedDifficulty(e.target.value);
+                  setPage(1);
+                }}
+                aria-label="Filter by difficulty"
                 className="p-1.5 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200"
               >
                 <option value="">All Difficulties</option>
@@ -320,7 +365,11 @@ export default function QuestionBankHub() {
 
               <select
                 value={selectedStatus}
-                onChange={(e) => setSelectedStatus(e.target.value)}
+                onChange={(e) => {
+                  setSelectedStatus(e.target.value);
+                  setPage(1);
+                }}
+                aria-label="Filter by status"
                 className="p-1.5 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200"
               >
                 <option value="">All Statuses</option>
@@ -519,6 +568,25 @@ export default function QuestionBankHub() {
                     })}
                   </tbody>
                 </table>
+              </div>
+            )}
+            {questions.length > 0 && (
+              <div className="px-4 pb-4">
+                <Pagination
+                  containerRef={paginationRef}
+                  scrollTargetRef={listTopRef}
+                  currentPage={pagination.page}
+                  totalPages={pagination.totalPages}
+                  totalItems={pagination.total}
+                  pageSize={limit}
+                  onPageChange={(nextPage) => setPage(nextPage)}
+                  onPageSizeChange={(nextLimit) => {
+                    setLimit(nextLimit);
+                    setPage(1);
+                  }}
+                  itemLabel="questions"
+                  testIdPrefix="question-bank-pagination"
+                />
               </div>
             )}
           </div>

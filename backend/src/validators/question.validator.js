@@ -89,6 +89,10 @@ function validateQuestionObject(data, { isPublishing = false } = {}) {
     if (options.length < 2) {
       errors.push('MULTI_SELECT must have at least 2 choice options.');
     }
+    const hasEmptyOption = options.some((opt) => !opt.text || !opt.text.trim());
+    if (hasEmptyOption) {
+      errors.push('All options must have non-empty text.');
+    }
     const correctOptions = options.filter((opt) => opt.isCorrect === true);
     const hasAnswerKey = Array.isArray(data.answerKey) && data.answerKey.length > 0;
     if (isPublishing && correctOptions.length < 1 && !hasAnswerKey) {

@@ -38,6 +38,11 @@ export const uapQuestionBankService = {
     return res.data;
   },
 
+  async getQuestionsPaginated(params = {}) {
+    const res = await api.get('/questions', { params });
+    return res;
+  },
+
   async getQuestionById(id) {
     const res = await api.get(`/questions/${id}`);
     return res.data;
@@ -145,6 +150,11 @@ export const uapQuestionBankService = {
     return res.data;
   },
 
+  async getMockTestsPaginated(params = {}) {
+    const res = await api.get('/mock-tests', { params });
+    return res;
+  },
+
   async getMockTestById(id) {
     const res = await api.get(`/mock-tests/${id}`);
     return res.data;
@@ -204,9 +214,14 @@ export const uapQuestionBankService = {
   },
 
   // --- FACULTY MOCK TEST MANUAL EVALUATION ---
-  async getMockTestAttempts(mockTestId) {
-    const res = await api.get(`/mock-tests/${mockTestId}/attempts`);
+  async getMockTestAttempts(mockTestId, params = {}) {
+    const res = await api.get(`/mock-tests/${mockTestId}/attempts`, { params });
     return res.data;
+  },
+
+  async getMockTestAttemptsPaginated(mockTestId, params = {}) {
+    const res = await api.get(`/mock-tests/${mockTestId}/attempts`, { params });
+    return res;
   },
 
   async getMockTestAttemptForReview(attemptId) {

@@ -1,32 +1,61 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { X, Award, User, CheckCircle2, Clock, AlertCircle, Loader2, ArrowRight, FileText, Download } from 'lucide-react';
+import { X, Award, User, Loader2, ArrowRight, FileText, Download, Search } from 'lucide-react';
 import { toast } from 'react-toastify';
 import uapQuestionBankService from '../../services/uapQuestionBank.service';
 import analyticsService from '../../services/analytics.service';
+import useDebounce from '../../hooks/useDebounce';
+import Pagination from '../ui/Pagination';
+import { DEFAULT_PAGE_SIZE, normalizePagination } from '../../utils/pagination';
 
 export default function MockTestAttemptsModal({ isOpen, onClose, mockTest }) {
   const navigate = useNavigate();
   const [loading, setLoading] = useState(false);
   const [attempts, setAttempts] = useState([]);
+  const [search, setSearch] = useState('');
+  const debouncedSearch = useDebounce(search, 300);
+  const [statusFilter, setStatusFilter] = useState('all');
+  const [page, setPage] = useState(1);
+  const [limit, setLimit] = useState(DEFAULT_PAGE_SIZE);
+  const [pagination, setPagination] = useState({
+    page: 1,
+    limit: DEFAULT_PAGE_SIZE,
+    total: 0,
+    totalPages: 1,
+  });
+  const listTopRef = useRef(null);
 
   useEffect(() => {
-    if (isOpen && mockTest?._id) {
-      async function fetchAttempts() {
-        try {
-          setLoading(true);
-          const res = await uapQuestionBankService.getMockTestAttempts(mockTest._id);
-          setAttempts(res.data || []);
-        } catch (err) {
-          toast.error(err.response?.data?.message || 'Failed to fetch student attempts');
-          setAttempts([]);
-        } finally {
-          setLoading(false);
-        }
-      }
-      fetchAttempts();
+    if (isOpen) {
+      setPage(1);
+      setSearch('');
+      setStatusFilter('all');
     }
-  }, [isOpen, mockTest]);
+  }, [isOpen, mockTest?._id]);
+
+  const fetchAttempts = useCallback(async () => {
+    if (!isOpen || !mockTest?._id) return;
+    try {
+      setLoading(true);
+      const params = { page, limit };
+      if (statusFilter !== 'all') params.status = statusFilter;
+      if (debouncedSearch.trim()) params.search = debouncedSearch.trim();
+
+      const res = await uapQuestionBankService.getMockTestAttemptsPaginated(mockTest._id, params);
+      const list = Array.isArray(res) ? res : res.data || [];
+      setAttempts(list);
+      setPagination(normalizePagination(res.pagination, { page, limit, total: list.length }));
+    } catch (err) {
+      toast.error(err.response?.data?.message || 'Failed to fetch student attempts');
+      setAttempts([]);
+    } finally {
+      setLoading(false);
+    }
+  }, [isOpen, mockTest?._id, page, limit, statusFilter, debouncedSearch]);
+
+  useEffect(() => {
+    fetchAttempts();
+  }, [fetchAttempts]);
 
   if (!isOpen || !mockTest) return null;
 
@@ -54,8 +83,39 @@ export default function MockTestAttemptsModal({ isOpen, onClose, mockTest }) {
           </button>
         </div>
 
+        {/* Filter toolbar */}
+        <div className="px-6 pt-4 flex flex-wrap items-center gap-2">
+          <div className="relative flex-1 min-w-[200px]">
+            <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+            <input
+              type="text"
+              value={search}
+              onChange={(e) => {
+                setSearch(e.target.value);
+                setPage(1);
+              }}
+              placeholder="Search student name, email, or ID..."
+              aria-label="Search mock test attempts"
+              className="w-full pl-8 pr-3 py-1.5 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-800 dark:text-slate-200"
+            />
+          </div>
+          <select
+            value={statusFilter}
+            onChange={(e) => {
+              setStatusFilter(e.target.value);
+              setPage(1);
+            }}
+            aria-label="Filter mock test attempts by status"
+            className="px-2.5 py-1.5 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200"
+          >
+            <option value="all">All Statuses</option>
+            <option value="pending">Pending Manual Review</option>
+            <option value="evaluated">Evaluated</option>
+          </select>
+        </div>
+
         {/* Content list */}
-        <div className="p-6 overflow-y-auto space-y-4 flex-1">
+        <div ref={listTopRef} className="p-6 overflow-y-auto space-y-4 flex-1">
           {loading ? (
             <div className="py-16 text-center text-slate-400 flex flex-col items-center gap-2">
               <Loader2 className="w-7 h-7 animate-spin text-brand-primary" />
@@ -163,11 +223,27 @@ export default function MockTestAttemptsModal({ isOpen, onClose, mockTest }) {
               })}
             </div>
           )}
+          {attempts.length > 0 && (
+            <Pagination
+              scrollTargetRef={listTopRef}
+              currentPage={pagination.page}
+              totalPages={pagination.totalPages}
+              totalItems={pagination.total}
+              pageSize={limit}
+              onPageChange={(nextPage) => setPage(nextPage)}
+              onPageSizeChange={(nextLimit) => {
+                setLimit(nextLimit);
+                setPage(1);
+              }}
+              itemLabel="attempts"
+              testIdPrefix="mock-attempts-pagination"
+            />
+          )}
         </div>
 
         {/* Footer */}
         <div className="p-4 border-t border-slate-100 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/60 flex items-center justify-between text-xs text-slate-400">
-          <span>{attempts.length} Total Submissions</span>
+          <span>{pagination.total} Total Submissions</span>
           <button
             onClick={onClose}
             className="px-4 py-2 rounded-lg bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300 text-xs font-semibold hover:bg-slate-300"

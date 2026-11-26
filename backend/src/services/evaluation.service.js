@@ -1,9 +1,13 @@
-const { Evaluation, Submission, Assessment, Question, User, Notification } = require('../models');
+const { Evaluation, Submission, Assessment, Question, User, Notification, Certificate } = require('../models');
 const emailService = require('./email.service');
 const { resolveGrade } = require('../utils/gradingScheme');
+const { parsePaginationParams, resolvePageBounds, buildSortSpec } = require('../utils/pagination');
 
 class EvaluationService {
-  async getSubmissionsForInstructor(instructorId, { assessmentId, status, search, page = 1, limit = 10 }) {
+  async getSubmissionsForInstructor(
+    instructorId,
+    { assessmentId, status, search, sortBy, sortOrder, page = 1, limit = 10 }
+  ) {
     // Find all assessments belonging to instructor
     const assessmentQuery = { instructorId };
     if (assessmentId) {
@@ -13,41 +17,102 @@ class EvaluationService {
     const assessmentIds = instructorAssessments.map((a) => a._id);
 
     const submissionQuery = { assessmentId: { $in: assessmentIds } };
-    if (status) {
-      submissionQuery.status = status;
+    const andConditions = [];
+
+    if (status && status !== 'all') {
+      if (status === 'pending') {
+        andConditions.push({
+          $or: [
+            { status: 'submitted' },
+            { status: { $ne: 'in_progress' }, evaluationStatus: 'pending' },
+          ],
+        });
+      } else if (status === 'evaluated') {
+        submissionQuery.status = 'evaluated';
+        submissionQuery.evaluationStatus = { $ne: 'pending' };
+      } else if (status === 'certified') {
+        const issuedCerts = await Certificate.find({
+          assessmentId: { $in: assessmentIds },
+        }).select('studentId assessmentId');
+
+        if (issuedCerts.length === 0) {
+          const { page: reqPage, limit: reqLimit } = parsePaginationParams({ page, limit }, 10, 200);
+          return { total: 0, page: 1, limit: reqLimit, submissions: [] };
+        }
+
+        andConditions.push({
+          $or: issuedCerts.map((c) => ({
+            studentId: c.studentId,
+            assessmentId: c.assessmentId,
+          })),
+        });
+      } else {
+        submissionQuery.status = status;
+      }
     }
 
     if (search && search.trim()) {
-      const searchRegex = { $regex: search.trim(), $options: 'i' };
-      const matchingStudents = await User.find({
-        role: 'student',
-        $or: [{ name: searchRegex }, { email: searchRegex }],
-      }).select('_id');
-      const matchingStudentIds = matchingStudents.map((s) => s._id);
+      const trimmed = search.trim();
+      const escapedSearch = trimmed.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const searchRegex = { $regex: escapedSearch, $options: 'i' };
 
+      const [matchingStudents, matchingCerts] = await Promise.all([
+        User.find({
+          role: 'student',
+          $or: [{ name: searchRegex }, { email: searchRegex }, { studentId: searchRegex }],
+        }).select('_id'),
+        Certificate.find({
+          assessmentId: { $in: assessmentIds },
+          certificateId: searchRegex,
+        }).select('studentId assessmentId'),
+      ]);
+
+      const matchingStudentIds = matchingStudents.map((s) => s._id);
       const matchingAssessmentIds = instructorAssessments
-        .filter((a) => a.title && a.title.toLowerCase().includes(search.trim().toLowerCase()))
+        .filter((a) => a.title && a.title.toLowerCase().includes(trimmed.toLowerCase()))
         .map((a) => a._id);
 
-      submissionQuery.$or = [
+      const searchOr = [
         { studentId: { $in: matchingStudentIds } },
         { assessmentId: { $in: matchingAssessmentIds } },
+        ...matchingCerts.map((c) => ({
+          studentId: c.studentId,
+          assessmentId: c.assessmentId,
+        })),
       ];
+      andConditions.push({ $or: searchOr });
     }
 
-    const skip = (page - 1) * limit;
+    if (andConditions.length > 0) {
+      submissionQuery.$and = andConditions;
+    }
+
+    const { page: requestedPage, limit: parsedLimit } = parsePaginationParams({ page, limit }, 10, 200);
     const total = await Submission.countDocuments(submissionQuery);
+    const { page: pageNum, limit: limitNum, skip } = resolvePageBounds(requestedPage, parsedLimit, total);
+
+    const sortSpec = buildSortSpec(
+      sortBy,
+      sortOrder,
+      {
+        createdAt: 'createdAt',
+        submittedAt: 'submittedAt',
+        score: 'score',
+        percentage: 'percentage',
+      },
+      'createdAt',
+      -1
+    );
 
     const rows = await Submission.find(submissionQuery)
       .populate('assessmentId', 'title category totalPoints passingScore certification')
       .populate('studentId', 'name email avatar studentId department')
       .populate('evaluation')
-      .sort({ createdAt: -1 })
+      .sort(sortSpec)
       .skip(skip)
-      .limit(parseInt(limit, 10));
+      .limit(limitNum);
 
     // Look up certificates for these submissions
-    const { Certificate } = require('../models');
     const studentIds = rows.map((r) => r.studentId?._id || r.studentId).filter(Boolean);
     const asmtIds = rows.map((r) => r.assessmentId?._id || r.assessmentId).filter(Boolean);
     const certMap = new Map();
@@ -85,7 +150,7 @@ class EvaluationService {
       return json;
     });
 
-    return { total, submissions };
+    return { total, page: pageNum, limit: limitNum, submissions };
   }
 
 

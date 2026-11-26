@@ -1,4 +1,5 @@
 const mockTestService = require('../services/mockTest.service');
+const { paginatedResponse } = require('../utils/response');
 
 class MockTestController {
   async createMockTest(req, res, next) {
@@ -16,11 +17,21 @@ class MockTestController {
 
   async getMockTests(req, res, next) {
     try {
-      const tests = await mockTestService.getMockTests(req.query, req.user);
-      res.status(200).json({
-        success: true,
-        data: tests,
-      });
+      const result = await mockTestService.getMockTests(req.query, req.user);
+      if (Array.isArray(result)) {
+        return res.status(200).json({
+          success: true,
+          data: result,
+        });
+      }
+      return paginatedResponse(
+        res,
+        'Mock tests retrieved successfully',
+        result.tests,
+        result.page,
+        result.limit,
+        result.total
+      );
     } catch (err) {
       next(err);
     }
@@ -174,11 +185,21 @@ class MockTestController {
 
   async getMockTestAttempts(req, res, next) {
     try {
-      const attempts = await mockTestService.getMockTestAttempts(req.params.id, req.user);
-      res.status(200).json({
-        success: true,
-        data: attempts,
-      });
+      const result = await mockTestService.getMockTestAttempts(req.params.id, req.user, req.query);
+      if (Array.isArray(result)) {
+        return res.status(200).json({
+          success: true,
+          data: result,
+        });
+      }
+      return paginatedResponse(
+        res,
+        'Mock test attempts retrieved successfully',
+        result.attempts,
+        result.page,
+        result.limit,
+        result.total
+      );
     } catch (err) {
       next(err);
     }

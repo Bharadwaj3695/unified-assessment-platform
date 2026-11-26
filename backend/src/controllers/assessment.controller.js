@@ -54,9 +54,20 @@ class AssessmentController {
     // Begin try block
     try {
       // Destructure query parameters with fallback defaults (page 1, limit 200)
-      const { status, category, search, page = 1, limit = 200, dateFilter, includePast } = req.query;
+      const {
+        status,
+        category,
+        accessType,
+        search,
+        page = 1,
+        limit = 200,
+        dateFilter,
+        sortBy,
+        sortOrder,
+        includePast,
+      } = req.query;
       // Query assessments through service applying role-specific visibility rules
-      const { total, assessments } = await assessmentService.getAssessments({
+      const result = await assessmentService.getAssessments({
         // User role (student, instructor, or admin)
         role: req.user.role,
         // Authenticated user ID
@@ -65,6 +76,8 @@ class AssessmentController {
         status,
         // Academic category or subject filter
         category,
+        // Access type filter (public, restricted)
+        accessType,
         // Free text search keyword
         search,
         // Requested page number
@@ -73,11 +86,21 @@ class AssessmentController {
         limit,
         // Date range filter option
         dateFilter,
+        // Deterministic sorting options
+        sortBy,
+        sortOrder,
         // Flag to include assessments whose deadlines have passed (for student viewing missed assessments)
         includePast: includePast === 'true' || includePast === true,
       });
       // Return paginated response envelope with assessments array and paging metadata
-      return paginatedResponse(res, 'Assessments retrieved successfully', assessments, page, limit, total);
+      return paginatedResponse(
+        res,
+        'Assessments retrieved successfully',
+        result.assessments,
+        result.page,
+        result.limit,
+        result.total
+      );
     // Forward errors
     } catch (err) {
       // Pass error to centralized error middleware
