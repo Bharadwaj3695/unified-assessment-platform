@@ -48,6 +48,10 @@ const Subject = require('./Subject');
 const Topic = require('./Topic');
 const QuestionBank = require('./QuestionBank');
 const QuestionGenerationJob = require('./QuestionGenerationJob');
+const Interview = require('./Interview');
+const InterviewSession = require('./InterviewSession');
+const InterviewTranscriptSegment = require('./InterviewTranscriptSegment');
+const BehavioralReport = require('./BehavioralReport');
 
 
 // Export an aggregated object containing all Mongoose models for unified access across the platform
@@ -101,5 +105,9 @@ module.exports = {
   Topic,
   QuestionBank,
   QuestionGenerationJob,
+  Interview,
+  InterviewSession,
+  InterviewTranscriptSegment,
+  BehavioralReport,
 // Close the exported models dictionary
 };

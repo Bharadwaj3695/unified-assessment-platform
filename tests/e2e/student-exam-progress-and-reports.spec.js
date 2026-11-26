@@ -38,7 +38,7 @@ test.describe('UAP Exam-Wise Progress, My Results, My Certificates, Individual R
 
     const progressView = page.getByTestId('student-exam-progress-view');
     await expect(progressView).toBeVisible({ timeout: 15000 });
-    await expect(progressView.getByText('Exam Performance')).toBeVisible();
+    await expect(progressView.getByRole('heading', { name: 'Exam Performance' })).toBeVisible();
     await expect(page.getByText(/Request failed with status code 404/i)).toHaveCount(0);
 
     const aiBox = page.getByTestId('progress-ai-predictor');

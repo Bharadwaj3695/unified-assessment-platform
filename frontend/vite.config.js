@@ -8,12 +8,15 @@ export default defineConfig({
     allowedHosts: ['.trycloudflare.com','localhost'],
     proxy: {
       '/api': {
-        target: 'http://uap-backend:5000',
+        target: process.env.VITE_API_TARGET || 'http://uap-backend:5000',
         changeOrigin: true,
+        xfwd: true,
+        ws: true,
       },
       '/uploads': {
-        target: 'http://uap-backend:5000',
+        target: process.env.VITE_API_TARGET || 'http://uap-backend:5000',
         changeOrigin: true,
+        xfwd: true,
       },
     },
   },

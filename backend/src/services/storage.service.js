@@ -11,6 +11,10 @@ class StorageService {
     // Dedicated secure private folder for immutable certificate PDF credentials
     this.certificatesDir = path.resolve(__dirname, '../../storage/certificates');
     this.ensureDirectoryExists(this.certificatesDir);
+
+    // Dedicated protected folder for time-bounded proctoring evidence snapshots
+    this.proctoringEvidenceDir = path.resolve(__dirname, '../../storage/proctoring-evidence');
+    this.ensureDirectoryExists(this.proctoringEvidenceDir);
   }
 
   ensureDirectoryExists(dir) {
@@ -307,6 +311,75 @@ class StorageService {
       googleDocsUrl: parsed.toString(),
       submittedAt: new Date(),
     };
+  }
+
+  /**
+   * Save protected proctoring evidence snapshot outside public /uploads.
+   * Returns an opaque storage key (never a public URL).
+   */
+  async saveProctoringEvidence({ buffer, mimeType = 'image/jpeg', sessionId, eventId }) {
+    if (!buffer || !Buffer.isBuffer(buffer)) {
+      const err = new Error('Invalid evidence buffer');
+      err.statusCode = 400;
+      throw err;
+    }
+
+    const allowedMimes = {
+      'image/jpeg': 'jpg',
+      'image/png': 'png',
+      'image/webp': 'webp',
+      'application/json': 'json',
+    };
+    const ext = allowedMimes[String(mimeType).toLowerCase()];
+    if (!ext) {
+      const err = new Error('Unsupported evidence MIME type');
+      err.statusCode = 400;
+      throw err;
+    }
+
+    const randomSuffix = crypto.randomBytes(8).toString('hex');
+    const storageKey = `ev-${sessionId}-${eventId || 'evt'}-${Date.now()}-${randomSuffix}.${ext}`;
+    const targetPath = path.join(this.proctoringEvidenceDir, storageKey);
+    await fs.promises.writeFile(targetPath, buffer);
+
+    return {
+      storageKey,
+      mimeType,
+    };
+  }
+
+  getProctoringEvidencePath(storageKey) {
+    if (!storageKey || typeof storageKey !== 'string') {
+      const err = new Error('Invalid evidence storage key');
+      err.statusCode = 400;
+      throw err;
+    }
+    const safeKey = path.basename(storageKey);
+    const resolvedPath = path.resolve(this.proctoringEvidenceDir, safeKey);
+    if (!resolvedPath.startsWith(this.proctoringEvidenceDir)) {
+      const err = new Error('Access denied. Invalid storage path traversal.');
+      err.statusCode = 403;
+      throw err;
+    }
+    if (!fs.existsSync(resolvedPath)) {
+      const err = new Error('Evidence artifact not found or already purged.');
+      err.statusCode = 404;
+      throw err;
+    }
+    return resolvedPath;
+  }
+
+  async deleteProctoringEvidence(storageKey) {
+    if (!storageKey || typeof storageKey !== 'string') return;
+    try {
+      const safeKey = path.basename(storageKey);
+      const resolvedPath = path.resolve(this.proctoringEvidenceDir, safeKey);
+      if (resolvedPath.startsWith(this.proctoringEvidenceDir) && fs.existsSync(resolvedPath)) {
+        await fs.promises.unlink(resolvedPath);
+      }
+    } catch (err) {
+      console.warn('[StorageService] Non-fatal error deleting proctoring evidence:', err.message);
+    }
   }
 }
 

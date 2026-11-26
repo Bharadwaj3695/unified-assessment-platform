@@ -24,6 +24,8 @@ import {
   Database,
   // Icon for bulk file upload and data import actions
   UploadCloud,
+  // Icon for faculty-student interviews
+  Video,
 // Conclude lucide-react icon imports
 } from 'lucide-react';
 
@@ -174,6 +176,15 @@ export const studentNavigation = {
           description: 'Review exam-wise performance, individual reports, and PDF scorecards',
         // Conclude student-progress item definition
         },
+        // Navigation item linking to student assigned interviews
+        {
+          id: 'student-interviews',
+          name: 'Interviews',
+          path: '/student/interviews',
+          icon: Video,
+          matchPatterns: ['/student/interviews'],
+          description: 'View assigned faculty interviews, join rooms, and read performance reports',
+        },
       // Conclude items array
       ],
     // Conclude student-academics section
@@ -292,8 +303,13 @@ export const instructorNavigation = {
           path: '/instructor/create-test',
           // Lucide plus icon for new item creation
           icon: PlusCircle,
-          // URL patterns matching test creation hub and builder create mode
-          matchPatterns: ['/instructor/create-test', '/instructor/create', '/instructor/test-creator'],
+          // URL patterns matching test creation hub, builder create mode, and faculty interviews
+          matchPatterns: [
+            '/instructor/create-test',
+            '/instructor/create',
+            '/instructor/test-creator',
+            '/instructor/interviews',
+          ],
           // Description of assessment creation builder
           description: 'Compose new examinations, configure rules, and set grading rubrics',
         // Conclude instructor-create item definition

@@ -24,7 +24,7 @@ import Button from '../../components/ui/Button';
  *   - Both selectable with clear highlight
  *   - One "Launch" button inside the same card
  * - Interview Options:
- *   - AI Mock Interview & Faculty Interview separately as "Coming Soon"
+ *   - AI Mock Interview ("Coming Soon") & Faculty Interview (links to /instructor/interviews)
  */
 export default function CreateTest() {
   const navigate = useNavigate();
@@ -172,13 +172,12 @@ export default function CreateTest() {
         </div>
       </div>
 
-      {/* Interview Options (Coming Soon) */}
+      {/* Interview Assessments */}
       <div className="space-y-3">
         <div className="flex items-center justify-between">
           <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
             Interview Assessments
           </h3>
-          <span className="text-[11px] text-slate-400">Phase 2 Preview</span>
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -206,27 +205,33 @@ export default function CreateTest() {
           </div>
 
           {/* Card: Faculty Interview */}
-          <div
+          <button
+            type="button"
             data-testid="card-interview-faculty"
-            className="rounded-2xl border border-dashed border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/20 p-5 flex items-start gap-3.5 opacity-80"
+            onClick={() => navigate('/instructor/interviews')}
+            className="group text-left w-full cursor-pointer rounded-2xl border border-surface-light-border dark:border-surface-dark-border bg-white dark:bg-surface-dark p-5 shadow-warm-xs transition-all flex items-start gap-3.5 hover:border-brand-primary/60 dark:hover:border-brand-primary/60 hover:ring-2 hover:ring-brand-primary/15 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary"
           >
             <div className="w-10 h-10 rounded-xl bg-blue-50 dark:bg-blue-950/40 text-blue-600 dark:text-blue-400 flex items-center justify-center shrink-0">
               <Users className="w-5 h-5" />
             </div>
             <div className="flex-1 min-w-0">
               <div className="flex items-center justify-between gap-2 mb-1">
-                <h4 className="text-sm font-bold text-slate-800 dark:text-slate-200">
+                <h4 className="text-sm font-bold text-slate-900 dark:text-slate-100">
                   Faculty Interview
                 </h4>
-                <Badge variant="neutral" size="sm">
-                  Coming Soon
+                <Badge variant="secondary" size="sm">
+                  Available
                 </Badge>
               </div>
-              <p className="text-xs text-slate-500 dark:text-slate-400">
+              <p className="text-xs text-slate-600 dark:text-slate-400">
                 Live one-on-one evaluative faculty interviews with structured assessment rubrics.
               </p>
+              <div className="mt-3 inline-flex items-center gap-1.5 text-xs font-semibold text-brand-primary dark:text-brand-peach group-hover:translate-x-0.5 transition-transform">
+                <span>Open Faculty Interview Studio</span>
+                <ArrowRight className="w-3.5 h-3.5" />
+              </div>
             </div>
-          </div>
+          </button>
         </div>
       </div>
     </div>

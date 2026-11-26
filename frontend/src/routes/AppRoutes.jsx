@@ -52,6 +52,12 @@ import StudentProfile from '../pages/student/Profile';
 import StudentCertifications from '../pages/student/Certifications';
 // Import the shared individual exam performance report page (Student & Faculty)
 import ExamPerformanceReport from '../pages/common/ExamPerformanceReport';
+// Import Faculty-to-Student Interview & Proctoring pages
+import FacultyInterviews from '../pages/instructor/FacultyInterviews';
+import FacultyInterviewSession from '../pages/instructor/FacultyInterviewSession';
+import StudentInterviews from '../pages/student/StudentInterviews';
+import StudentInterviewRoom from '../pages/student/StudentInterviewRoom';
+import InterviewReport from '../pages/common/InterviewReport';
 // Import the instructor main dashboard page component
 import InstructorDashboard from '../pages/instructor/Dashboard';
 // Import the dedicated multi-paradigm test creation hub
@@ -192,6 +198,10 @@ const AppRoutes = () => {
             <Route path="results/:id" element={<StudentDashboard />} />
             <Route path="progress" element={<StudentDashboard />} />
             <Route path="reports/:attemptType/:attemptId" element={<ExamPerformanceReport />} />
+            {/* Student assigned interviews, room, and performance report */}
+            <Route path="interviews" element={<StudentInterviews />} />
+            <Route path="interviews/:id" element={<StudentInterviewRoom />} />
+            <Route path="interviews/:id/report" element={<InterviewReport />} />
             {/* Student personal profile, credentials, and MFA settings */}
             <Route path="profile" element={<StudentProfile />} />
             {/* Default student index redirecting root /student path to /student/dashboard */}
@@ -231,6 +241,10 @@ const AppRoutes = () => {
             <Route path="mock-tests/evaluate/:attemptId" element={<MockTestEvaluationStudio />} />
             {/* Individual student exam performance report */}
             <Route path="reports/:attemptType/:attemptId" element={<ExamPerformanceReport />} />
+            {/* Faculty interview studio, live session, and complete reports */}
+            <Route path="interviews" element={<FacultyInterviews />} />
+            <Route path="interviews/:id/session" element={<FacultyInterviewSession />} />
+            <Route path="interviews/:id/report" element={<InterviewReport />} />
             {/* Assessment metrics and cohort analytics breakdown by assessment ID */}
             <Route path="analytics/:id" element={<AssessmentAnalytics />} />
             {/* Centralized Question Bank Hub & Studio */}

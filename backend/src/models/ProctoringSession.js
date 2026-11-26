@@ -4,14 +4,22 @@ const mongoose = require('mongoose');
 // Schema representing an active or completed automated proctoring monitoring session
 const proctoringSessionSchema = new mongoose.Schema(
   {
-    // Foreign key reference to the monitored student Submission attempt
+    // Context type distinguishing exam submission vs faculty-student interview
+    contextType: {
+      type: String,
+      enum: ['assessment', 'interview'],
+      default: 'assessment',
+      index: true,
+    },
+    // Foreign key reference to the monitored student Submission attempt (assessment context)
     submissionId: {
       // MongoDB ObjectId type
       type: mongoose.Schema.Types.ObjectId,
       // Target referenced model
       ref: 'Submission',
-      // Mandatory relationship
-      required: true,
+      // Optional when monitoring an interview session
+      required: false,
+      default: null,
       // Index for querying proctoring session by submission
       index: true,
     },
@@ -26,15 +34,30 @@ const proctoringSessionSchema = new mongoose.Schema(
       // Index for querying proctoring sessions by student
       index: true,
     },
-    // Foreign key reference to the Assessment being monitored
+    // Foreign key reference to the Assessment being monitored (assessment context)
     assessmentId: {
       // MongoDB ObjectId type
       type: mongoose.Schema.Types.ObjectId,
       // Target referenced Assessment model
       ref: 'Assessment',
-      // Mandatory assessment association
-      required: true,
+      // Optional when monitoring an interview session
+      required: false,
+      default: null,
       // Index for querying proctoring sessions by assessment
+      index: true,
+    },
+    // Foreign key reference to Interview (interview context)
+    interviewId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Interview',
+      default: null,
+      index: true,
+    },
+    // Foreign key reference to InterviewSession (interview context)
+    interviewSessionId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'InterviewSession',
+      default: null,
       index: true,
     },
     // Exact timestamp when proctoring telemetry monitoring commenced
@@ -56,10 +79,26 @@ const proctoringSessionSchema = new mongoose.Schema(
       // String status enum
       type: String,
       // Permitted camera status values
-      enum: ['not_required', 'prompted', 'granted', 'denied', 'disconnected'],
+      enum: ['not_required', 'prompted', 'granted', 'denied', 'disconnected', 'reconnected', 'unavailable'],
       // Default status
       default: 'not_required',
     },
+    // Proctoring configuration snapshot at session start
+    configSnapshot: {
+      cameraProctoringEnabled: { type: Boolean, default: false },
+      aiProctoringEnabled: { type: Boolean, default: false },
+      liveMonitoringEnabled: { type: Boolean, default: false },
+      cameraPermissionRequired: { type: Boolean, default: false },
+      disclosureText: { type: String, default: '' },
+    },
+    // Camera disconnect/reconnect history timestamps
+    disconnectEvents: [
+      {
+        disconnectedAt: { type: Date, default: Date.now },
+        reconnectedAt: { type: Date, default: null },
+        reason: { type: String, default: '' },
+      },
+    ],
     // Proctoring session operational state ('active', 'completed', 'terminated')
     status: {
       // String state enum

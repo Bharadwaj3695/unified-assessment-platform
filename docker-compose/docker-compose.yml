@@ -198,6 +198,30 @@ services:
     networks:
       - uap-public-net
 
+  # Independent AI Processing Worker Container (separate from backend & code executor; zero model downloads by default)
+  uap-ai-worker:
+    image: uap-ai-worker:latest
+    build:
+      context: ../backend
+      dockerfile: docker/Dockerfile.ai-worker
+    container_name: uap-ai-worker
+    restart: unless-stopped
+    profiles:
+      - ai-worker
+    environment:
+      PORT: 5060
+      AI_PROVIDER: ${AI_PROVIDER:-deterministic_stub}
+      AI_WORKER_API_KEY: ${AI_WORKER_API_KEY:-dev_uap_ai_worker_secret_key}
+    volumes:
+      - ../backend/src/ai-worker:/app/src:ro
+    networks:
+      - uap-exec-net
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:5060/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
 networks:
   uap-public-net:
     name: uap-public-net

@@ -184,6 +184,31 @@ const assessmentSchema = new mongoose.Schema(
       // Default to false
       default: false,
     },
+    // Separated proctoring configuration (camera preview vs AI analysis vs live monitoring)
+    proctoringConfig: {
+      cameraProctoringEnabled: {
+        type: Boolean,
+        default: false,
+      },
+      aiProctoringEnabled: {
+        type: Boolean,
+        default: false,
+      },
+      liveMonitoringEnabled: {
+        type: Boolean,
+        default: false,
+      },
+      cameraPermissionRequired: {
+        type: Boolean,
+        default: false,
+      },
+      disclosureText: {
+        type: String,
+        default:
+          'Camera preview is used for identity presence verification during this assessment. Video is not recorded or transmitted unless explicitly configured by institutional policy.',
+        trim: true,
+      },
+    },
     // Question randomization and subset pooling settings
     randomization: {
       // Enable question order shuffling or question pooling

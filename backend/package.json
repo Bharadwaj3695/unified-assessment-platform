@@ -5,6 +5,7 @@
   "main": "src/server.js",
   "scripts": {
     "start": "node src/server.js",
+    "start:ai-worker": "node src/ai-worker/server.js",
     "dev": "nodemon src/server.js",
     "seed": "node src/config/seed.js",
     "provision:admin": "node src/scripts/provisionAdmin.js",

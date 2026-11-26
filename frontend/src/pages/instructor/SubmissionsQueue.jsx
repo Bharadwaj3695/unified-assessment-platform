@@ -224,6 +224,16 @@ const SubmissionsQueue = () => {
                 ? 'No student attempts match your selected search or filter criteria.'
                 : 'No student submissions are currently queued for evaluation.'
             }
+            actionLabel={searchTerm || statusFilter !== 'all' ? 'Clear Filters' : undefined}
+            onAction={
+              searchTerm || statusFilter !== 'all'
+                ? () => {
+                    setSearchTerm('');
+                    setStatusFilter('all');
+                    setPage(1);
+                  }
+                : undefined
+            }
           />
         ) : (
           <Table>

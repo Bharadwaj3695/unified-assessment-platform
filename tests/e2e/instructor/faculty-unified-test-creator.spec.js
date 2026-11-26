@@ -63,13 +63,14 @@ test.describe.serial('Faculty Unified Test Creator & Question Authoring E2E', ()
     await expect(launchBtn).toBeVisible();
     await expect(launchBtn).toHaveText(/Launch/);
 
-    // Verify Interview Options (Coming Soon)
+    // Verify Interview Options (AI Mock remains Coming Soon; Faculty Interview is enabled)
     const aiInterviewCard = page.locator('[data-testid="card-interview-ai"]');
     const facultyInterviewCard = page.locator('[data-testid="card-interview-faculty"]');
     await expect(aiInterviewCard).toBeVisible();
     await expect(facultyInterviewCard).toBeVisible();
     await expect(aiInterviewCard.getByText('Coming Soon')).toBeVisible();
-    await expect(facultyInterviewCard.getByText('Coming Soon')).toBeVisible();
+    await expect(facultyInterviewCard.getByText('Coming Soon')).toHaveCount(0);
+    await expect(facultyInterviewCard).toBeEnabled();
 
     // Capture Hub screenshot
     await page.screenshot({

@@ -13,6 +13,7 @@ const logger = require('./utils/logger');
 // Import the centralized EmailService to verify outbound SMTP mailer transport
 const emailService = require('./services/email.service');
 const { validateSessionEncryptionKey } = require('./utils/sessionCrypto');
+const { attachInterviewSignaling, interviewSignaling } = require('./realtime/interviewSignaling');
 
 // Define an asynchronous function to initialize database connections and start the HTTP server
 const startServer = async () => {
@@ -62,6 +63,9 @@ const startServer = async () => {
     // Close the app.listen listener callback
     });
 
+    // Attach authenticated WebSocket signaling for 1:1 faculty-student video interviews
+    attachInterviewSignaling(server);
+
     // Attach an error event listener to the HTTP server to handle listen errors
     server.on('error', (err) => {
       // Check if the error is due to the port already being in use
@@ -107,6 +111,7 @@ const startServer = async () => {
 
       // Begin try block to handle graceful connection closing
       try {
+        interviewSignaling.closeAll();
         // Check if the server object supports closing idle keep-alive connections
         if (typeof server.closeIdleConnections === 'function') {
           // Immediately close all idle HTTP keep-alive connections

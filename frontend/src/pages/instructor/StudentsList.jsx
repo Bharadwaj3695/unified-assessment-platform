@@ -164,6 +164,15 @@ const StudentsList = () => {
                 ? `No students match your query "${searchTerm}".`
                 : 'There are currently no active students registered on the platform.'
             }
+            actionLabel={searchTerm ? 'Clear Search' : undefined}
+            onAction={
+              searchTerm
+                ? () => {
+                    setSearchTerm('');
+                    setPage(1);
+                  }
+                : undefined
+            }
           />
         ) : (
           <Table>

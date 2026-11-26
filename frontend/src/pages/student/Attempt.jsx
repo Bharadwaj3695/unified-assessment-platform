@@ -17,6 +17,7 @@ import EmptyState from '../../components/ui/EmptyState';
 import ProgressBar from '../../components/ui/ProgressBar';
 import CodeEditor from '../../components/common/CodeEditor';
 import StudentCodeIDE from '../../components/student/StudentCodeIDE';
+import FloatingCameraPreview from '../../components/proctoring/FloatingCameraPreview';
 import {
   Clock,
   CheckCircle,
@@ -216,44 +217,8 @@ const Attempt = () => {
           const procData = await proctoringService.getSessionBySubmission(subId);
           if (procData?.session) {
             const currentSession = procData.session;
-            const sessId = currentSession._id || currentSession.id;
             setProctoringSession(currentSession);
             setCameraStatus(currentSession.cameraStatus || 'not_required');
-
-            // Request camera access if required
-            if (assessmentData.cameraRequired && typeof navigator !== 'undefined' && navigator.mediaDevices?.getUserMedia) {
-              try {
-                const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
-                streamRef.current = stream;
-                if (videoRef.current) {
-                  videoRef.current.srcObject = stream;
-                }
-                setCameraStatus('granted');
-                await proctoringService.recordEvent(sessId, {
-                  eventType: 'camera_permission_granted',
-                  severity: 'info',
-                });
-
-                // Monitor track disconnection
-                stream.getVideoTracks().forEach((track) => {
-                  track.onended = () => {
-                    setCameraStatus('disconnected');
-                    proctoringService.recordEvent(sessId, {
-                      eventType: 'camera_disconnected',
-                      severity: 'medium',
-                    }).catch(() => {});
-                  };
-                });
-              } catch (camErr) {
-                setCameraStatus('denied');
-                await proctoringService.recordEvent(sessId, {
-                  eventType: 'camera_permission_denied',
-                  severity: 'medium',
-                  metadata: { errorName: camErr.name, errorMessage: camErr.message },
-                });
-                toast.warning('Camera verification required: Please allow camera access for exam proctoring.');
-              }
-            }
           }
         } catch (procErr) {
           console.warn('[Attempt] Proctoring telemetry initialization notice:', procErr.message);
@@ -886,27 +851,34 @@ const Attempt = () => {
                   Proctored Exam
                 </span>
               )}
-              {assessment?.cameraRequired && (
+              {(assessment?.cameraRequired || assessment?.proctoringConfig?.cameraProctoringEnabled) && (
                 <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium ${
-                  cameraStatus === 'granted'
+                  cameraStatus === 'granted' || cameraStatus === 'reconnected'
                     ? 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800'
-                    : cameraStatus === 'denied'
+                    : cameraStatus === 'denied' || cameraStatus === 'unavailable' || cameraStatus === 'unsupported'
                     ? 'bg-rose-50 dark:bg-rose-950/40 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-800'
                     : 'bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800'
                 }`}>
-                  {cameraStatus === 'granted' ? (
+                  {cameraStatus === 'granted' || cameraStatus === 'reconnected' ? (
                     <Camera className="w-3 h-3 text-emerald-500" />
                   ) : (
                     <VideoOff className="w-3 h-3 text-rose-500" />
                   )}
-                  {cameraStatus === 'granted' ? 'Camera Live' : cameraStatus === 'denied' ? 'Camera Denied' : 'Camera Disconnected'}
+                  {cameraStatus === 'granted' || cameraStatus === 'reconnected'
+                    ? 'Camera Live'
+                    : cameraStatus === 'denied'
+                    ? 'Camera Denied'
+                    : cameraStatus === 'unavailable'
+                    ? 'Camera Unavailable'
+                    : cameraStatus === 'disconnected'
+                    ? 'Camera Disconnected'
+                    : 'Camera Required'}
                 </span>
               )}
               <span className="text-xs text-[#64748B] dark:text-[#94A3B8]">
                 Passing: {assessment?.passingScore}%
               </span>
             </div>
-            <video ref={videoRef} className="hidden" autoPlay playsInline muted />
             <h1 className="text-base sm:text-xl font-bold tracking-tight text-[#1F2937] dark:text-[#F9FAFB] line-clamp-1 mt-0.5">
               {assessment?.title}
             </h1>
@@ -990,7 +962,38 @@ const Attempt = () => {
         </div>
       </div>
 
+      {/* Camera Proctoring Permission Gate & Floating Live Preview */}
+      <FloatingCameraPreview
+        enabled={Boolean(
+          assessment?.proctoringConfig?.cameraProctoringEnabled || assessment?.cameraRequired
+        )}
+        required={Boolean(
+          assessment?.proctoringConfig?.cameraPermissionRequired || assessment?.cameraRequired
+        )}
+        disclosureText={assessment?.proctoringConfig?.disclosureText}
+        sessionActive={!isSubmitting && Boolean(submission)}
+        onStatusChange={(nextStatus) => setCameraStatus(nextStatus)}
+        onCameraEvent={({ eventType, detail }) => {
+          const sessId = proctoringSession?._id || proctoringSession?.id || submission?.proctoringSessionId;
+          if (!sessId) return;
+          proctoringService
+            .recordEvent(sessId, {
+              eventType,
+              severity: ['camera_permission_granted', 'camera_reconnected'].includes(eventType)
+                ? 'info'
+                : 'medium',
+              metadata: { reason: detail },
+            })
+            .catch(() => {});
+        }}
+      />
+
       {/* Main Attempt Grid: Question Engine + Navigation Palette */}
+      {(
+        Boolean(assessment?.proctoringConfig?.cameraPermissionRequired || assessment?.cameraRequired) &&
+        cameraStatus !== 'granted' &&
+        cameraStatus !== 'reconnected'
+      ) ? null : (
       <div className={`grid grid-cols-1 ${isCodingQuestion ? 'xl:grid-cols-12' : 'lg:grid-cols-12'} gap-6`}>
         {/* Active Question Workspace */}
         <div className={`${isCodingQuestion ? 'xl:col-span-9 lg:col-span-8' : 'lg:col-span-8'} space-y-6`}>
@@ -1612,6 +1615,7 @@ const Attempt = () => {
           </Card>
         </div>
       </div>
+      )}
 
       {/* Confirmation Modal Before Submission */}
       <Modal

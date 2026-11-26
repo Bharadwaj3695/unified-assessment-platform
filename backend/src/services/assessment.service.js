@@ -50,9 +50,40 @@ class AssessmentService {
       status = 'draft',
       proctoringEnabled = false,
       cameraRequired = false,
+      proctoringConfig,
       randomization = { enabled: false },
       certification,
     } = assessmentData;
+
+    const normalizedProctoringConfig = {
+      cameraProctoringEnabled: Boolean(
+        proctoringConfig?.cameraProctoringEnabled !== undefined
+          ? proctoringConfig.cameraProctoringEnabled
+          : cameraRequired || proctoringEnabled
+      ),
+      // Strictly keep AI proctoring independent — never auto-enable merely because camera proctoring is enabled
+      aiProctoringEnabled: Boolean(proctoringConfig?.aiProctoringEnabled),
+      liveMonitoringEnabled: Boolean(proctoringConfig?.liveMonitoringEnabled),
+      cameraPermissionRequired: Boolean(
+        proctoringConfig?.cameraPermissionRequired !== undefined
+          ? proctoringConfig.cameraPermissionRequired
+          : cameraRequired
+      ),
+      disclosureText:
+        typeof proctoringConfig?.disclosureText === 'string' && proctoringConfig.disclosureText.trim()
+          ? proctoringConfig.disclosureText.trim()
+          : 'Camera preview is used for identity presence verification during this assessment. Video is not recorded or transmitted unless explicitly configured by institutional policy.',
+    };
+    const effectiveCameraRequired = Boolean(
+      cameraRequired || normalizedProctoringConfig.cameraPermissionRequired
+    );
+    const effectiveProctoringEnabled = Boolean(
+      proctoringEnabled ||
+        normalizedProctoringConfig.cameraProctoringEnabled ||
+        normalizedProctoringConfig.aiProctoringEnabled ||
+        normalizedProctoringConfig.liveMonitoringEnabled ||
+        effectiveCameraRequired
+    );
 
     let validatedCertification = { enabled: false };
     if (certification && typeof certification === 'object') {
@@ -131,8 +162,9 @@ class AssessmentService {
       allowReview: allowReview !== undefined ? allowReview : true,
       accessType: accessType === 'restricted' ? 'restricted' : 'public',
       assignedStudents: validatedStudents,
-      proctoringEnabled: Boolean(proctoringEnabled),
-      cameraRequired: Boolean(cameraRequired),
+      proctoringEnabled: effectiveProctoringEnabled,
+      cameraRequired: effectiveCameraRequired,
+      proctoringConfig: normalizedProctoringConfig,
       randomization: randomization || { enabled: false },
       certification: validatedCertification,
     });
@@ -195,7 +227,7 @@ class AssessmentService {
       throw error;
     }
 
-    const { questions, instructorId: ignoredInstructorId, assignedStudents, accessType, certification, ...fields } = updateData;
+    const { questions, instructorId: ignoredInstructorId, assignedStudents, accessType, certification, proctoringConfig, ...fields } = updateData;
     
     const effectiveScheduled = fields.scheduledAt !== undefined ? fields.scheduledAt : assessment.scheduledAt;
     const effectiveDeadline = fields.deadlineAt !== undefined ? fields.deadlineAt : assessment.deadlineAt;
@@ -256,6 +288,62 @@ class AssessmentService {
     }
 
     Object.assign(assessment, fields);
+
+    if (proctoringConfig && typeof proctoringConfig === 'object') {
+      const prev = assessment.proctoringConfig || {};
+      const nextCameraProc =
+        proctoringConfig.cameraProctoringEnabled !== undefined
+          ? Boolean(proctoringConfig.cameraProctoringEnabled)
+          : Boolean(prev.cameraProctoringEnabled);
+      const nextAiProc =
+        proctoringConfig.aiProctoringEnabled !== undefined
+          ? Boolean(proctoringConfig.aiProctoringEnabled)
+          : Boolean(prev.aiProctoringEnabled);
+      const nextLive =
+        proctoringConfig.liveMonitoringEnabled !== undefined
+          ? Boolean(proctoringConfig.liveMonitoringEnabled)
+          : Boolean(prev.liveMonitoringEnabled);
+      const nextCamPerm =
+        proctoringConfig.cameraPermissionRequired !== undefined
+          ? Boolean(proctoringConfig.cameraPermissionRequired)
+          : Boolean(prev.cameraPermissionRequired);
+      const nextDisclosure =
+        proctoringConfig.disclosureText !== undefined
+          ? String(proctoringConfig.disclosureText).trim()
+          : prev.disclosureText ||
+            'Camera preview is used for identity presence verification during this assessment. Video is not recorded or transmitted unless explicitly configured by institutional policy.';
+
+      assessment.proctoringConfig = {
+        cameraProctoringEnabled: nextCameraProc,
+        aiProctoringEnabled: nextAiProc,
+        liveMonitoringEnabled: nextLive,
+        cameraPermissionRequired: nextCamPerm,
+        disclosureText: nextDisclosure,
+      };
+      if (fields.cameraRequired === undefined) {
+        assessment.cameraRequired = nextCamPerm || nextCameraProc;
+      }
+      if (fields.proctoringEnabled === undefined) {
+        assessment.proctoringEnabled = Boolean(
+          nextCameraProc || nextAiProc || nextLive || assessment.cameraRequired
+        );
+      }
+    } else if (fields.proctoringEnabled !== undefined || fields.cameraRequired !== undefined) {
+      const prev = assessment.proctoringConfig || {};
+      assessment.proctoringConfig = {
+        cameraProctoringEnabled: Boolean(
+          fields.cameraRequired !== undefined ? fields.cameraRequired : prev.cameraProctoringEnabled
+        ),
+        aiProctoringEnabled: Boolean(prev.aiProctoringEnabled),
+        liveMonitoringEnabled: Boolean(prev.liveMonitoringEnabled),
+        cameraPermissionRequired: Boolean(
+          fields.cameraRequired !== undefined ? fields.cameraRequired : prev.cameraPermissionRequired
+        ),
+        disclosureText:
+          prev.disclosureText ||
+          'Camera preview is used for identity presence verification during this assessment. Video is not recorded or transmitted unless explicitly configured by institutional policy.',
+      };
+    }
 
     if (accessType !== undefined) {
       assessment.accessType = accessType === 'restricted' ? 'restricted' : 'public';

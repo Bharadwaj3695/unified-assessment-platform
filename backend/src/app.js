@@ -51,8 +51,10 @@ const subjectTopicRoutes = require('./routes/subjectTopic.routes');
 const topicsRoutes = require('./routes/topics.routes');
 const questionBanksRoutes = require('./routes/questionBanks.routes');
 const questionGenerationRoutes = require('./routes/questionGeneration.routes');
+// Faculty-to-Student Interview & Proctoring subsystem routes
+const interviewRoutes = require('./routes/interview.routes');
 // Centralized rate limiting middleware to prevent brute-force attacks and throttle excessive API traffic
-const { apiRateLimiter, authRateLimiter } = require('./middleware/rateLimit.middleware');
+const { apiRateLimiter } = require('./middleware/rateLimit.middleware');
 
 // Initialize the root Express application instance
 const app = express();
@@ -177,6 +179,7 @@ app.get('/', (req, res) => {
       questionImport: '/api/question-import',
       notifications: '/api/notifications',
       proctoring: '/api/proctoring',
+      interviews: '/api/interviews',
       announcements: '/api/announcements',
     },
   });
@@ -215,8 +218,8 @@ app.use('/api', (req, res, next) => {
   return checkDbReady(req, res, next);
 });
 
-// Mount authentication routes with dedicated brute-force rate limiter to protect login and registration
-app.use('/api/auth', authRateLimiter, authRoutes);
+// Mount authentication routes (authRateLimiter is applied specifically to credential, MFA, and recovery endpoints in auth.routes.js)
+app.use('/api/auth', authRoutes);
 // Mount assessment authoring, scheduling, and catalog management routes
 app.use('/api/assessments', assessmentRoutes);
 // Mount student credential awards and certificate verification routes
@@ -252,6 +255,7 @@ app.use('/api/subjects', subjectTopicRoutes);
 app.use('/api/topics', topicsRoutes);
 app.use('/api/question-banks', questionBanksRoutes);
 app.use('/api/question-generation', questionGenerationRoutes);
+app.use('/api/interviews', interviewRoutes);
 
 // Register centralized error handling middleware as the terminal handler in the Express pipeline
 app.use(errorHandler);

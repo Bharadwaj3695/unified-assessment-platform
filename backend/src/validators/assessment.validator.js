@@ -59,6 +59,13 @@ const createAssessmentValidator = [
   body('proctoringEnabled').optional().isBoolean().withMessage('proctoringEnabled must be a boolean'),
   // Validate that cameraRequired is boolean
   body('cameraRequired').optional().isBoolean().withMessage('cameraRequired must be a boolean'),
+  // Validate separated proctoringConfig object
+  body('proctoringConfig').optional().isObject().withMessage('proctoringConfig must be an object'),
+  body('proctoringConfig.cameraProctoringEnabled').optional().isBoolean(),
+  body('proctoringConfig.aiProctoringEnabled').optional().isBoolean(),
+  body('proctoringConfig.liveMonitoringEnabled').optional().isBoolean(),
+  body('proctoringConfig.cameraPermissionRequired').optional().isBoolean(),
+  body('proctoringConfig.disclosureText').optional().isString().trim(),
   // Validate certification configuration
   body('certification').optional().isObject().withMessage('certification must be an object'),
   body('certification.enabled').optional().isBoolean().withMessage('certification.enabled must be a boolean'),
@@ -142,6 +149,13 @@ const updateAssessmentValidator = [
   body('proctoringEnabled').optional().isBoolean().withMessage('proctoringEnabled must be a boolean'),
   // Validate that cameraRequired is boolean
   body('cameraRequired').optional().isBoolean().withMessage('cameraRequired must be a boolean'),
+  // Validate separated proctoringConfig object
+  body('proctoringConfig').optional().isObject().withMessage('proctoringConfig must be an object'),
+  body('proctoringConfig.cameraProctoringEnabled').optional().isBoolean(),
+  body('proctoringConfig.aiProctoringEnabled').optional().isBoolean(),
+  body('proctoringConfig.liveMonitoringEnabled').optional().isBoolean(),
+  body('proctoringConfig.cameraPermissionRequired').optional().isBoolean(),
+  body('proctoringConfig.disclosureText').optional().isString().trim(),
   // Validate certification configuration
   body('certification').optional().isObject().withMessage('certification must be an object'),
   body('certification.enabled').optional().isBoolean().withMessage('certification.enabled must be a boolean'),

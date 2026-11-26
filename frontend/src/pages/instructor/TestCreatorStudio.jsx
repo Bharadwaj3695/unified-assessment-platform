@@ -35,6 +35,7 @@ import CodeEditor from '../../components/common/CodeEditor';
 import FacultyCodeIDE from '../../components/instructor/FacultyCodeIDE';
 import StudentCodeIDE from '../../components/student/StudentCodeIDE';
 import QuestionBankPickerModal from '../../components/modals/QuestionBankPickerModal';
+import CameraProctoringPanel from '../../components/proctoring/CameraProctoringPanel';
 import uapQuestionBankService from '../../services/uapQuestionBank.service';
 import { assessmentService } from '../../services/assessment.service';
 import instructorService from '../../services/instructor.service';
@@ -183,6 +184,14 @@ export default function TestCreatorStudio() {
   const [deadlineAt, setDeadlineAt] = useState('');
   const [proctoringEnabled, setProctoringEnabled] = useState(false);
   const [cameraRequired, setCameraRequired] = useState(false);
+  const [proctoringConfig, setProctoringConfig] = useState({
+    cameraProctoringEnabled: false,
+    aiProctoringEnabled: false,
+    liveMonitoringEnabled: false,
+    cameraPermissionRequired: false,
+    disclosureText:
+      'Camera preview is used for identity presence verification during this assessment. Video is not recorded or transmitted unless explicitly configured by institutional policy.',
+  });
   const [randomization, setRandomization] = useState(false);
 
   // Mock-specific fields
@@ -341,6 +350,22 @@ export default function TestCreatorStudio() {
           setAccessType(asmt.accessType || 'public');
           setProctoringEnabled(Boolean(asmt.proctoringEnabled));
           setCameraRequired(Boolean(asmt.cameraRequired));
+          if (asmt.proctoringConfig) {
+            setProctoringConfig({
+              cameraProctoringEnabled: Boolean(asmt.proctoringConfig.cameraProctoringEnabled),
+              aiProctoringEnabled: Boolean(asmt.proctoringConfig.aiProctoringEnabled),
+              liveMonitoringEnabled: Boolean(asmt.proctoringConfig.liveMonitoringEnabled),
+              cameraPermissionRequired: Boolean(asmt.proctoringConfig.cameraPermissionRequired),
+              disclosureText: asmt.proctoringConfig.disclosureText || '',
+            });
+          } else {
+            setProctoringConfig((prev) => ({
+              ...prev,
+              cameraProctoringEnabled: Boolean(asmt.cameraRequired),
+              cameraPermissionRequired: Boolean(asmt.cameraRequired),
+              aiProctoringEnabled: false,
+            }));
+          }
           if (asmt.certification) {
             setCertificationEnabled(Boolean(asmt.certification.enabled));
             setCertPassingPercentage(asmt.certification.passingPercentage ?? asmt.passingScore ?? 60);
@@ -1139,8 +1164,15 @@ export default function TestCreatorStudio() {
           accessType,
           scheduledAt: scheduledAt || undefined,
           deadlineAt: deadlineAt || undefined,
-          proctoringEnabled,
-          cameraRequired,
+          proctoringEnabled: Boolean(
+            proctoringEnabled ||
+              proctoringConfig.cameraProctoringEnabled ||
+              proctoringConfig.aiProctoringEnabled ||
+              proctoringConfig.liveMonitoringEnabled ||
+              proctoringConfig.cameraPermissionRequired
+          ),
+          cameraRequired: Boolean(cameraRequired || proctoringConfig.cameraPermissionRequired),
+          proctoringConfig,
           randomization: { enabled: randomization, shuffleOrder: randomization },
           status: 'draft',
           isIncomplete: false,
@@ -1242,8 +1274,15 @@ export default function TestCreatorStudio() {
           accessType,
           scheduledAt: scheduledAt || undefined,
           deadlineAt: deadlineAt || undefined,
-          proctoringEnabled,
-          cameraRequired,
+          proctoringEnabled: Boolean(
+            proctoringEnabled ||
+              proctoringConfig.cameraProctoringEnabled ||
+              proctoringConfig.aiProctoringEnabled ||
+              proctoringConfig.liveMonitoringEnabled ||
+              proctoringConfig.cameraPermissionRequired
+          ),
+          cameraRequired: Boolean(cameraRequired || proctoringConfig.cameraPermissionRequired),
+          proctoringConfig,
           randomization: { enabled: randomization, shuffleOrder: randomization },
           status: 'published',
           isIncomplete: false,
@@ -1578,13 +1617,38 @@ export default function TestCreatorStudio() {
                     <input
                       type="checkbox"
                       checked={cameraRequired}
-                      onChange={(e) => setCameraRequired(e.target.checked)}
+                      onChange={(e) => {
+                        const checked = e.target.checked;
+                        setCameraRequired(checked);
+                        setProctoringConfig((prev) => ({
+                          ...prev,
+                          cameraProctoringEnabled: checked ? true : prev.cameraProctoringEnabled,
+                          cameraPermissionRequired: checked,
+                        }));
+                      }}
                       className="rounded text-brand-primary"
                     />
                     <span>Webcam Required</span>
                   </label>
                 </div>
               </div>
+
+              <CameraProctoringPanel
+                config={proctoringConfig}
+                onChange={(nextCfg) => {
+                  setProctoringConfig(nextCfg);
+                  setCameraRequired(Boolean(nextCfg.cameraPermissionRequired));
+                  setProctoringEnabled(
+                    Boolean(
+                      proctoringEnabled ||
+                        nextCfg.cameraProctoringEnabled ||
+                        nextCfg.aiProctoringEnabled ||
+                        nextCfg.liveMonitoringEnabled ||
+                        nextCfg.cameraPermissionRequired
+                    )
+                  );
+                }}
+              />
 
               {/* Certification Configuration */}
               <div className="pt-4 border-t border-slate-100 dark:border-slate-800 space-y-3.5" data-testid="section-certification">

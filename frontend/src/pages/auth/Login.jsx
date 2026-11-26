@@ -1,5 +1,5 @@
-// Import React core library and state hook for tracking local UI states
-import { useState } from 'react';
+// Import React core library and state/ref hooks for tracking local UI states
+import { useState, useRef } from 'react';
 // Import routing components: Link for client-side transitions, useNavigate for redirection, useLocation for capturing destination
 import { Link, useNavigate, useLocation } from 'react-router-dom';
 // Import Formik form management library components
@@ -58,6 +58,8 @@ const Login = () => {
   const [authError, setAuthError] = useState(null);
   // Loading state flag tracking active Google SSO initiation
   const [isGoogleLoading, setIsGoogleLoading] = useState(false);
+  // Synchronous submission lock preventing duplicate login requests from rapid double-clicks/Enter presses
+  const isSubmittingRef = useRef(false);
   // State tracking designated post-login branded transition
   const [postLoginTransition, setPostLoginTransition] = useState({
     active: false,
@@ -110,6 +112,10 @@ const Login = () => {
 
   // Formik submit handler validating credentials against backend and navigating to appropriate workspace or MFA challenge
   const handleLoginSubmit = async (values, { setSubmitting }) => {
+    if (isSubmittingRef.current) {
+      return;
+    }
+    isSubmittingRef.current = true;
     // Clear any previous error alerts
     setAuthError(null);
     // Begin credential authentication try block
@@ -190,7 +196,8 @@ const Login = () => {
       setAuthError(err.message || 'Authentication failed. Please check your credentials.');
     // Reset Formik submission state
     } finally {
-      // Mark submission complete
+      // Release synchronous submission lock and mark submission complete
+      isSubmittingRef.current = false;
       setSubmitting(false);
     }
   };

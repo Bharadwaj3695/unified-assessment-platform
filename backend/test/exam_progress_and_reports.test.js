@@ -17,7 +17,7 @@ const {
 } = require('../src/models');
 const { generateAccessToken } = require('../src/utils/jwt');
 const examReportService = require('../src/services/examReport.service');
-const aiPredictorService = require('../src/services/Predictor.service');
+const aiPredictorService = require('../src/services/aiPredictor.service');
 const certificateService = require('../src/services/certificate.service');
 const pdfGenerator = require('../src/utils/pdfGenerator');
 

@@ -1,0 +1,14 @@
+FROM node:24-alpine
+
+WORKDIR /app
+
+RUN apk add --no-cache curl
+
+COPY src/ai-worker ./src
+
+EXPOSE 5060
+
+HEALTHCHECK --interval=15s --timeout=5s --retries=3 \
+  CMD curl -sf http://localhost:5060/health || exit 1
+
+CMD ["node", "src/server.js"]
