@@ -32,6 +32,27 @@ const FacultyRegistry = require('./FacultyRegistry');
 const PasswordResetToken = require('./PasswordResetToken');
 // Import the Session Mongoose model representing authoritative server-side refresh sessions
 const Session = require('./Session');
+// Import the ReassignmentRequest Mongoose model representing student reassignment requests
+const ReassignmentRequest = require('./ReassignmentRequest');
+// Import the CertificateTemplate Mongoose model representing customizable certificate layouts
+const CertificateTemplate = require('./CertificateTemplate');
+// Import the Certificate Mongoose model representing issued student credential awards
+const Certificate = require('./Certificate');
+// Import the Announcement Mongoose model representing system-wide broadcast banners
+const Announcement = require('./Announcement');
+// Recovered models required by the mock test and question lifecycle
+const MockTest = require('./MockTest');
+const MockTestAttempt = require('./MockTestAttempt');
+const QuestionVersion = require('./QuestionVersion');
+const Subject = require('./Subject');
+const Topic = require('./Topic');
+const QuestionBank = require('./QuestionBank');
+const QuestionGenerationJob = require('./QuestionGenerationJob');
+const Interview = require('./Interview');
+const InterviewSession = require('./InterviewSession');
+const InterviewTranscriptSegment = require('./InterviewTranscriptSegment');
+const BehavioralReport = require('./BehavioralReport');
+
 
 // Export an aggregated object containing all Mongoose models for unified access across the platform
 module.exports = {
@@ -69,5 +90,24 @@ module.exports = {
   PasswordResetToken,
   // Export Session model
   Session,
+  // Export ReassignmentRequest model
+  ReassignmentRequest,
+  // Export CertificateTemplate model
+  CertificateTemplate,
+  // Export Certificate model
+  Certificate,
+  // Export Announcement model
+  Announcement,
+  MockTest,
+  MockTestAttempt,
+  QuestionVersion,
+  Subject,
+  Topic,
+  QuestionBank,
+  QuestionGenerationJob,
+  Interview,
+  InterviewSession,
+  InterviewTranscriptSegment,
+  BehavioralReport,
 // Close the exported models dictionary
 };

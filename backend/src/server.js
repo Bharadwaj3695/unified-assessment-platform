@@ -4,6 +4,8 @@ const env = require('./config/env');
 const app = require('./app');
 // Destructure database connection and disconnection helper functions from the db configuration
 const { connectDB, disconnectDB } = require('./config/db');
+// Mongoose ODM for connection state inspection
+const mongoose = require('mongoose');
 // Import the database seeder function to initialize essential accounts and demo data fixtures
 const seedDatabase = require('./config/seed');
 // Import the centralized Winston logger utility for structured application logging
@@ -11,6 +13,7 @@ const logger = require('./utils/logger');
 // Import the centralized EmailService to verify outbound SMTP mailer transport
 const emailService = require('./services/email.service');
 const { validateSessionEncryptionKey } = require('./utils/sessionCrypto');
+const { attachInterviewSignaling, interviewSignaling } = require('./realtime/interviewSignaling');
 
 // Define an asynchronous function to initialize database connections and start the HTTP server
 const startServer = async () => {
@@ -21,15 +24,20 @@ const startServer = async () => {
 
     // Await the establishment of the MongoDB database connection
     await connectDB();
-    // Check if the current environment is not production or if demo data seeding is explicitly enabled
-    if (env.NODE_ENV !== 'production' || process.env.SEED_DEMO_DATA === 'true') {
-      // Execute the database seeder function to populate initial demo data
-      await seedDatabase();
-    // Branch executed when running in production mode without explicit demo data seeding
+    // Check if database is active before running seeder
+    if (mongoose.connection.readyState === 1) {
+      // Check if the current environment is not production or if demo data seeding is explicitly enabled
+      if (env.NODE_ENV !== 'production' || process.env.SEED_DEMO_DATA === 'true') {
+        // Execute the database seeder function to populate initial demo data
+        await seedDatabase();
+      // Branch executed when running in production mode without explicit demo data seeding
+      } else {
+        // Log an informational message indicating automated seeding is disabled in production
+        logger.info('[Seed] Production mode: Automated demo data seeding disabled.');
+      // Close the if-else block for seeding
+      }
     } else {
-      // Log an informational message indicating automated seeding is disabled in production
-      logger.info('[Seed] Production mode: Automated demo data seeding disabled.');
-    // Close the if-else block for seeding
+      logger.warn('[Database] Database is not connected. API requests will return HTTP 503 until connection is restored.');
     }
 
     // Start the Express HTTP server listening on the configured port and define the callback
@@ -54,6 +62,9 @@ const startServer = async () => {
         });
     // Close the app.listen listener callback
     });
+
+    // Attach authenticated WebSocket signaling for 1:1 faculty-student video interviews
+    attachInterviewSignaling(server);
 
     // Attach an error event listener to the HTTP server to handle listen errors
     server.on('error', (err) => {
@@ -100,6 +111,7 @@ const startServer = async () => {
 
       // Begin try block to handle graceful connection closing
       try {
+        interviewSignaling.closeAll();
         // Check if the server object supports closing idle keep-alive connections
         if (typeof server.closeIdleConnections === 'function') {
           // Immediately close all idle HTTP keep-alive connections

@@ -10,6 +10,7 @@ Features
 How It Works
 Architecture
 Project Structure
+Docker Infrastructure & Container Architecture
 Technology Stack
 Getting Started
 Environment Configuration
@@ -194,6 +195,8 @@ unified-assessment-platform/
 │       └── ci.yml
 │
 ├── backend/
+│   ├── docker/
+│   │   └── Dockerfile
 │   ├── src/
 │   │   ├── config/
 │   │   ├── controllers/
@@ -205,17 +208,18 @@ unified-assessment-platform/
 │   │   ├── validators/
 │   │   ├── app.js
 │   │   └── server.js
-│   │
 │   ├── storage/
 │   │   └── documents/
-│   │
 │   ├── uploads/
 │   ├── test/
+│   ├── .dockerignore
 │   ├── .env.example
 │   ├── package.json
 │   └── package-lock.json
 │
 ├── frontend/
+│   ├── docker/
+│   │   └── Dockerfile
 │   ├── public/
 │   ├── src/
 │   │   ├── assets/
@@ -231,15 +235,54 @@ unified-assessment-platform/
 │   │   ├── utils/
 │   │   ├── App.jsx
 │   │   └── main.jsx
-│   │
-│   ├── public/
 │   ├── index.html
 │   ├── vite.config.js
 │   ├── tailwind.config.js
 │   ├── vercel.json
+│   ├── .dockerignore
 │   ├── .env.example
 │   ├── package.json
 │   └── package-lock.json
+│
+├── code-IDE-service/
+│   ├── docker/
+│   │   ├── Dockerfile.api
+│   │   ├── Dockerfile.worker
+│   │   ├── Dockerfile
+│   │   └── runners/
+│   │       ├── python/
+│   │       │   └── Dockerfile
+│   │       ├── javascript/
+│   │       │   └── Dockerfile
+│   │       └── sqlite/
+│   │           └── Dockerfile
+│   ├── init-scripts/
+│   │   └── mysql-init.sql
+│   ├── src/
+│   │   ├── config/
+│   │   ├── controllers/
+│   │   ├── middleware/
+│   │   ├── queue/
+│   │   ├── routes/
+│   │   ├── services/
+│   │   ├── utils/
+│   │   ├── validators/
+│   │   ├── workers/
+│   │   ├── app.js
+│   │   └── server.js
+│   ├── test/
+│   ├── .dockerignore
+│   ├── .env.example
+│   ├── package.json
+│   └── package-lock.json
+│
+├── docker-compose/
+│   ├── docker-compose.yml
+│   ├── docker-compose.backend.yml
+│   ├── docker-compose.frontend.yml
+│   ├── docker-compose.code-executor.yml
+│   ├── docker-compose.infra.yml
+│   └── docker-compose.dev.yml
 │
 ├── tests/
 │   ├── e2e/
@@ -255,6 +298,142 @@ unified-assessment-platform/
 ├── package.json
 ├── package-lock.json
 └── README.md
+
+Docker Infrastructure & Container Architecture
+
+The Unified Assessment Platform utilizes a modular, multi-tier containerized architecture designed for clean separation of concerns, high scalability, air-gapped security, and ephemeral sandbox execution.
+
+Architecture Overview
+
+Container	Role / Responsibility	Base Image / Context	Port(s)	Network(s)
+uap-frontend	React + Vite Client Application	frontend/docker/Dockerfile	5173:5173	uap-public-net
+uap-backend	Node.js + Express REST API Gateway	backend/docker/Dockerfile	5000:5000	uap-public-net, uap-db-net, uap-exec-net
+uap-mongodb	Primary Document Database	mongo:7.0-jammy	27017 (internal)	uap-db-net
+uap-code-executor	Isolated Code Execution REST API	code-IDE-service/docker/Dockerfile.api	127.0.0.1:5050:5050	uap-exec-net, uap-queue-net
+uap-execution-worker	Job Queue Consumer & Runner Coordinator	code-IDE-service/docker/Dockerfile.worker	None (Background Worker)	uap-queue-net, uap-sql-net
+uap-redis	In-Memory Job Queue Broker & Cache	redis:7.2-alpine	6379 (internal)	uap-queue-net
+uap-postgres-engine	Relational Sandbox (sql-legacy profile)	postgres:16.2-alpine3.19	5432 (internal)	uap-sql-net
+uap-mysql-engine	Relational Sandbox (sql-legacy profile)	mysql:8.3.0-oracle	3306 (internal)	uap-sql-net
+
+Ephemeral Runtime Sandboxes (Air-Gapped, Non-Root UID 10001, Disposable):
+- Python Runner: uap-runner-python:3.11-alpine (code-IDE-service/docker/runners/python/Dockerfile)
+- JavaScript Runner: uap-runner-node:20-alpine (code-IDE-service/docker/runners/javascript/Dockerfile)
+- SQLite Runner: uap-runner-sqlite:3.45-alpine (code-IDE-service/docker/runners/sqlite/Dockerfile)
+
+Directory Organization
+
+backend/
+  docker/
+    Dockerfile               # Backend Express application image
+  .dockerignore
+
+frontend/
+  docker/
+    Dockerfile               # Frontend Vite/React application image
+  .dockerignore
+
+code-IDE-service/
+  docker/
+    Dockerfile.api           # Isolated execution REST API (no Docker socket)
+    Dockerfile.worker        # Execution worker with container orchestration
+    Dockerfile               # Unified orchestrator (legacy reference)
+    runners/
+      python/
+        Dockerfile           # Ephemeral Python 3.11 hardened sandbox
+      javascript/
+        Dockerfile           # Ephemeral Node.js 20 hardened sandbox
+      sqlite/
+        Dockerfile           # Ephemeral SQLite 3.45 hardened sandbox
+      sql -> sqlite          # Backward-compatibility symlink
+  .dockerignore
+
+docker-compose/
+  docker-compose.yml               # Master full UAP platform orchestration
+  docker-compose.backend.yml       # Backend and MongoDB services
+  docker-compose.frontend.yml      # Frontend Nginx (prod) & Vite dev (--profile dev)
+  docker-compose.code-executor.yml # Execution API, Worker, Redis queue & SQL
+  docker-compose.infra.yml         # Shared core infrastructure (MongoDB, Redis)
+  docker-compose.dev.yml           # Full-stack live bind-mount development override
+
+Startup and Orchestration Commands
+
+Full-Stack Startup (All Services):
+```bash
+# Development mode (default): Vite dev server with live source bind mounts & HMR on port 5173
+docker compose -f docker-compose/docker-compose.yml up -d --build
+# Or with explicit dev override
+docker compose -f docker-compose/docker-compose.yml -f docker-compose/docker-compose.dev.yml up -d --build
+
+# Production Nginx frontend mode: Multi-stage Vite build served by Nginx on ports 80 & 5173
+FRONTEND_DOCKERFILE=docker/Dockerfile FRONTEND_NODE_ENV=production docker compose -f docker-compose/docker-compose.yml up -d --build
+
+# Or using root npm convenience scripts
+npm run docker:up
+npm run docker:dev
+npm run docker:prod
+```
+
+Modular Startup (Independent Subsystems):
+```bash
+# Core infrastructure only (MongoDB + Redis)
+docker compose -f docker-compose/docker-compose.infra.yml up -d
+
+# Backend and database only
+docker compose -f docker-compose/docker-compose.backend.yml up -d
+
+# Frontend production Nginx only
+docker compose -f docker-compose/docker-compose.frontend.yml up -d
+
+# Frontend development Vite HMR only
+docker compose -f docker-compose/docker-compose.frontend.yml --profile dev up -d uap-frontend-dev
+
+# Code execution microservice only (API + Worker)
+docker compose -f docker-compose/docker-compose.code-executor.yml up -d
+
+# Code execution microservice with legacy relational SQL engines (Postgres & MySQL)
+docker compose -f docker-compose/docker-compose.code-executor.yml --profile sql-legacy up -d
+```
+
+Shutdown Commands:
+```bash
+# Graceful stop of full platform
+docker compose -f docker-compose/docker-compose.yml down
+
+# Or using root npm script
+npm run docker:down
+
+# Stop individual modular components
+docker compose -f docker-compose/docker-compose.backend.yml down
+docker compose -f docker-compose/docker-compose.frontend.yml down
+docker compose -f docker-compose/docker-compose.code-executor.yml down
+docker compose -f docker-compose/docker-compose.infra.yml down
+```
+
+Build and Image Management Commands:
+```bash
+# Build all service containers
+docker compose -f docker-compose/docker-compose.yml build
+
+# Or using root npm script
+npm run docker:build
+
+# Build disposable runtime sandbox images
+docker build -t uap-runner-python:3.11-alpine code-IDE-service/docker/runners/python
+docker build -t uap-runner-node:20-alpine code-IDE-service/docker/runners/javascript
+docker build -t uap-runner-sqlite:3.45-alpine code-IDE-service/docker/runners/sqlite
+```
+
+Validation Commands:
+```bash
+# Validate Compose configuration syntax and build context resolution
+docker compose -f docker-compose/docker-compose.yml config
+docker compose -f docker-compose/docker-compose.yml -f docker-compose/docker-compose.dev.yml config
+docker compose -f docker-compose/docker-compose.backend.yml config
+docker compose -f docker-compose/docker-compose.frontend.yml config
+docker compose -f docker-compose/docker-compose.code-executor.yml config
+docker compose -f docker-compose/docker-compose.infra.yml config
+```
+
 Technology Stack
 Frontend
 React
@@ -489,10 +668,17 @@ All backend APIs are exposed under:
 
 Major API groups:
 
-/api/auth
+/api/tests (Unified Test API Facade)
 /api/assessments
+/api/mock-tests
 /api/submissions
 /api/evaluations
+/api/certificates
+/api/question-banks
+/api/questions
+/api/subjects
+/api/topics
+/api/auth
 /api/users
 /api/admin
 /api/analytics
@@ -505,9 +691,11 @@ Examples:
 
 POST /api/auth/login
 
-GET /api/assessments
+GET /api/tests/assessments
 
-POST /api/assessments
+POST /api/tests/assessments
+
+GET /api/tests/mock-tests
 
 POST /api/submissions/:id/submit
 
@@ -926,7 +1114,7 @@ Backend      Node.js + Express
 Database     MongoDB Atlas
 Auth         JWT + Google OAuth + TOTP MFA
 Testing      Node Tests + Playwright
-Deployment   Vercel + Render
+Deployment   Vercel + Render + cloudeflared
 API          REST + OpenAPI
 One thing I would change before you put this on GitHub
 

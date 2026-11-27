@@ -101,6 +101,14 @@ async function migrateUserAcademicIds() {
     await instructor.save();
   }
 
+  // 3. Synchronize existing active/inactive faculty into FacultyRegistry
+  try {
+    const adminRegistryService = require('../services/adminRegistry.service');
+    await adminRegistryService.syncExistingFacultyToRegistry();
+  } catch (syncErr) {
+    // Non-fatal sync fallback during standalone test environments
+  }
+
   return {
     migratedStudentsCount: studentsWithoutId.length,
     migratedInstructorsCount: instructorsWithoutId.length,

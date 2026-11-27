@@ -6,6 +6,11 @@ export const instructorService = {
     return res.data || res || [];
   },
 
+  getStudentsPaginated: async (params = {}) => {
+    const res = await api.get('/users/students', { params });
+    return res;
+  },
+
   getInstructorSubmissions: async (params = {}) => {
     const res = await api.get('/evaluations/instructor/submissions', { params });
     return res;
@@ -50,6 +55,16 @@ export const instructorService = {
 
   sendStudentEmail: async (submissionId, emailData) => {
     const res = await api.post(`/evaluations/submission/${submissionId}/email`, emailData);
+    return res.data || res;
+  },
+
+  testCode: async (payload) => {
+    const res = await api.post('/assessments/test-code', payload);
+    return res.data || res;
+  },
+
+  validateQuestion: async (payload) => {
+    const res = await api.post('/assessments/validate-question', payload);
     return res.data || res;
   },
 };

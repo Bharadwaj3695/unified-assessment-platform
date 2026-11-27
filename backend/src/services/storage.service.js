@@ -7,6 +7,14 @@ class StorageService {
     // Dedicated private folder outside public static routes
     this.documentsDir = path.resolve(__dirname, '../../storage/documents');
     this.ensureDirectoryExists(this.documentsDir);
+
+    // Dedicated secure private folder for immutable certificate PDF credentials
+    this.certificatesDir = path.resolve(__dirname, '../../storage/certificates');
+    this.ensureDirectoryExists(this.certificatesDir);
+
+    // Dedicated protected folder for time-bounded proctoring evidence snapshots
+    this.proctoringEvidenceDir = path.resolve(__dirname, '../../storage/proctoring-evidence');
+    this.ensureDirectoryExists(this.proctoringEvidenceDir);
   }
 
   ensureDirectoryExists(dir) {
@@ -62,11 +70,43 @@ class StorageService {
   }
 
   /**
+   * Validate file magic bytes against extension signature to prevent executable spoofing.
+   */
+  validateFileSignature(buffer, ext) {
+    if (!buffer || !Buffer.isBuffer(buffer)) {
+      const err = new Error('Invalid or missing file buffer');
+      err.statusCode = 400;
+      throw err;
+    }
+
+    if (ext === 'pdf') {
+      if (buffer.length < 4 || buffer.toString('utf8', 0, 4) !== '%PDF') {
+        const err = new Error('File signature does not match PDF format');
+        err.statusCode = 400;
+        throw err;
+      }
+    } else if (ext === 'docx') {
+      if (buffer.length < 2 || buffer[0] !== 0x50 || buffer[1] !== 0x4b) {
+        const err = new Error('File signature does not match DOCX format');
+        err.statusCode = 400;
+        throw err;
+      }
+    } else if (ext === 'doc') {
+      if (buffer.length < 2 || (buffer[0] !== 0xd0 && buffer[0] !== 0x50)) {
+        const err = new Error('File signature does not match DOC format');
+        err.statusCode = 400;
+        throw err;
+      }
+    }
+  }
+
+  /**
    * Save an uploaded document buffer to disk using a cryptographically random, collision-safe key.
    */
   async saveDocumentFile({ buffer, originalname, mimetype, size, submissionId, questionId, allowedExtensions }) {
     const ext = this.validateExtension(originalname, allowedExtensions);
     this.validateMimeType(mimetype, ext);
+    this.validateFileSignature(buffer, ext);
 
     const randomSuffix = crypto.randomBytes(8).toString('hex');
     const safeKey = `doc-${submissionId}-${questionId}-${Date.now()}-${randomSuffix}.${ext}`;
@@ -115,6 +155,85 @@ class StorageService {
     }
 
     return resolvedPath;
+  }
+
+  /**
+   * Save an issued certificate PDF buffer to dedicated secure storage.
+   */
+  async saveCertificatePdf({ certificateId, buffer }) {
+    if (!buffer || !Buffer.isBuffer(buffer)) {
+      const err = new Error('Valid PDF buffer is required for certificate storage');
+      err.statusCode = 400;
+      throw err;
+    }
+
+    const sanitizedId = String(certificateId || 'cert')
+      .toLowerCase()
+      .replace(/[^a-z0-9_-]/g, '-');
+    const randomSuffix = crypto.randomBytes(6).toString('hex');
+    const safeKey = `cert-${sanitizedId}-${Date.now()}-${randomSuffix}.pdf`;
+    const targetPath = path.join(this.certificatesDir, safeKey);
+
+    await fs.promises.writeFile(targetPath, buffer);
+
+    return {
+      fileKey: safeKey,
+      filePath: targetPath,
+      fileSize: buffer.length,
+      generatedAt: new Date(),
+    };
+  }
+
+  /**
+   * Resolve safe certificate PDF file path and ensure it strictly resides within certificates directory.
+   */
+  getCertificateFilePath(fileKey) {
+    if (!fileKey || typeof fileKey !== 'string') {
+      const err = new Error('Invalid certificate file identifier');
+      err.statusCode = 400;
+      throw err;
+    }
+
+    const safeKey = path.basename(fileKey);
+    const resolvedPath = path.resolve(this.certificatesDir, safeKey);
+
+    if (!resolvedPath.startsWith(this.certificatesDir)) {
+      const err = new Error('Access denied. Path traversal detected.');
+      err.statusCode = 403;
+      throw err;
+    }
+
+    if (!fs.existsSync(resolvedPath)) {
+      const err = new Error('The requested certificate file could not be found in storage.');
+      err.statusCode = 404;
+      throw err;
+    }
+
+    return resolvedPath;
+  }
+
+  /**
+   * Retrieve certificate PDF file buffer directly from storage.
+   */
+  async getCertificatePdfBuffer(fileKey) {
+    const filePath = this.getCertificateFilePath(fileKey);
+    return await fs.promises.readFile(filePath);
+  }
+
+  /**
+   * Delete a certificate PDF file safely from storage.
+   */
+  async deleteCertificateFile(fileKey) {
+    if (!fileKey || typeof fileKey !== 'string') return;
+    try {
+      const safeKey = path.basename(fileKey);
+      const filePath = path.resolve(this.certificatesDir, safeKey);
+      if (filePath.startsWith(this.certificatesDir) && fs.existsSync(filePath)) {
+        await fs.promises.unlink(filePath);
+      }
+    } catch (err) {
+      console.warn('[StorageService] Non-fatal error deleting certificate PDF file:', err.message);
+    }
   }
 
   /**
@@ -192,6 +311,75 @@ class StorageService {
       googleDocsUrl: parsed.toString(),
       submittedAt: new Date(),
     };
+  }
+
+  /**
+   * Save protected proctoring evidence snapshot outside public /uploads.
+   * Returns an opaque storage key (never a public URL).
+   */
+  async saveProctoringEvidence({ buffer, mimeType = 'image/jpeg', sessionId, eventId }) {
+    if (!buffer || !Buffer.isBuffer(buffer)) {
+      const err = new Error('Invalid evidence buffer');
+      err.statusCode = 400;
+      throw err;
+    }
+
+    const allowedMimes = {
+      'image/jpeg': 'jpg',
+      'image/png': 'png',
+      'image/webp': 'webp',
+      'application/json': 'json',
+    };
+    const ext = allowedMimes[String(mimeType).toLowerCase()];
+    if (!ext) {
+      const err = new Error('Unsupported evidence MIME type');
+      err.statusCode = 400;
+      throw err;
+    }
+
+    const randomSuffix = crypto.randomBytes(8).toString('hex');
+    const storageKey = `ev-${sessionId}-${eventId || 'evt'}-${Date.now()}-${randomSuffix}.${ext}`;
+    const targetPath = path.join(this.proctoringEvidenceDir, storageKey);
+    await fs.promises.writeFile(targetPath, buffer);
+
+    return {
+      storageKey,
+      mimeType,
+    };
+  }
+
+  getProctoringEvidencePath(storageKey) {
+    if (!storageKey || typeof storageKey !== 'string') {
+      const err = new Error('Invalid evidence storage key');
+      err.statusCode = 400;
+      throw err;
+    }
+    const safeKey = path.basename(storageKey);
+    const resolvedPath = path.resolve(this.proctoringEvidenceDir, safeKey);
+    if (!resolvedPath.startsWith(this.proctoringEvidenceDir)) {
+      const err = new Error('Access denied. Invalid storage path traversal.');
+      err.statusCode = 403;
+      throw err;
+    }
+    if (!fs.existsSync(resolvedPath)) {
+      const err = new Error('Evidence artifact not found or already purged.');
+      err.statusCode = 404;
+      throw err;
+    }
+    return resolvedPath;
+  }
+
+  async deleteProctoringEvidence(storageKey) {
+    if (!storageKey || typeof storageKey !== 'string') return;
+    try {
+      const safeKey = path.basename(storageKey);
+      const resolvedPath = path.resolve(this.proctoringEvidenceDir, safeKey);
+      if (resolvedPath.startsWith(this.proctoringEvidenceDir) && fs.existsSync(resolvedPath)) {
+        await fs.promises.unlink(resolvedPath);
+      }
+    } catch (err) {
+      console.warn('[StorageService] Non-fatal error deleting proctoring evidence:', err.message);
+    }
   }
 }
 

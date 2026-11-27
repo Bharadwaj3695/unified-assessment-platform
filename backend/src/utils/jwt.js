@@ -26,7 +26,7 @@ const generateRefreshToken = (payload) => {
     { ...payload, type: 'refresh', jti: payload.jti || crypto.randomUUID() },
     // Sign using isolated refresh secret to ensure compromise of access secret does not compromise refresh
     env.JWT_REFRESH_SECRET,
-    // Set refresh token expiration window, defaulting to 30 days
+    // Set refresh token expiration window, defaulting to 30 Day
     { expiresIn: env.JWT_REFRESH_EXPIRES_IN || '30d' }
   );
 };

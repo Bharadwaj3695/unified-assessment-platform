@@ -19,6 +19,7 @@ const Badge = ({
   size = 'md',
   dot = false,
   className = '',
+  ...rest
 }) => {
   const sizeClasses = size === 'sm' ? 'px-2 py-0.5 text-xs' : 'px-2.5 py-1 text-xs';
 
@@ -27,6 +28,7 @@ const Badge = ({
       className={`inline-flex items-center font-medium rounded-full border ${sizeClasses} ${
         variantMap[variant] || variantMap.neutral
       } ${className}`}
+      {...rest}
     >
       {dot && (
         <span

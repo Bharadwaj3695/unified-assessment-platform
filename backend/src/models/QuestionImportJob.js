@@ -178,7 +178,7 @@ const questionImportJobSchema = new mongoose.Schema(
       // String source enum
       type: String,
       // Allowed ingestion sources
-      enum: ['PDF', 'DOCX', 'DOC', 'GOOGLE_FORMS'],
+      enum: ['PDF', 'DOCX', 'DOC', 'GOOGLE_FORMS', 'CSV', 'XLSX', 'JSON'],
       // Mandatory source type
       required: true,
       // Index for source filtering

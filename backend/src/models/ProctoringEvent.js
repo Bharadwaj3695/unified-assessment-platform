@@ -27,10 +27,19 @@ const proctoringEventSchema = new mongoose.Schema(
         'camera_permission_granted',
         'camera_permission_denied',
         'camera_disconnected',
+        'camera_reconnected',
+        'camera_unavailable',
+        'camera_stream_stopped',
         'session_ended',
         'copy_blocked',
         'paste_blocked',
         'cut_blocked',
+        'face_not_detected',
+        'multiple_faces_detected',
+        'session_interrupted',
+        'page_visibility_left',
+        'faculty_review_required',
+        'suspicious_activity',
       ],
       // Index for filtering specific integrity violation types
       index: true,
@@ -50,6 +59,42 @@ const proctoringEventSchema = new mongoose.Schema(
       enum: ['info', 'low', 'medium', 'high', 'critical', 'warn', 'warning'],
       // Default initial severity
       default: 'info',
+    },
+    // Source of event ('client', 'ai_proctoring', 'faculty', 'system')
+    source: {
+      type: String,
+      enum: ['client', 'ai_proctoring', 'faculty', 'system'],
+      default: 'client',
+    },
+    // Faculty review status for observable / AI-detected flags (flags never auto-fail students)
+    reviewStatus: {
+      type: String,
+      enum: ['not_applicable', 'pending', 'accepted', 'rejected'],
+      default: 'not_applicable',
+      index: true,
+    },
+    reviewedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+      default: null,
+    },
+    reviewedAt: {
+      type: Date,
+      default: null,
+    },
+    reviewNotes: {
+      type: String,
+      default: '',
+      trim: true,
+    },
+    // Protected evidence metadata (never public URLs; subject to retention policy)
+    evidence: {
+      retained: { type: Boolean, default: false },
+      storageKey: { type: String, default: null },
+      mimeType: { type: String, default: null },
+      retentionDays: { type: Number, default: 30 },
+      retentionExpiresAt: { type: Date, default: null },
+      deletedAt: { type: Date, default: null },
     },
     // Contextual metadata object capturing event parameters (e.g. keycode, window coordinates, tab blur duration)
     metadata: {

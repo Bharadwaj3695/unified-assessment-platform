@@ -1,0 +1,43 @@
+# ==============================================================================
+# UAP Development Docker Compose Override Configuration
+# Enables live source code bind mounts, development environment, and hot-reload.
+#
+# Usage for full-stack development:
+#   docker compose -f docker-compose/docker-compose.yml -f docker-compose/docker-compose.dev.yml up -d
+# ==============================================================================
+
+name: unifiedassessmentplatformoriginal
+
+services:
+  uap-frontend:
+    build:
+      context: ../frontend
+      dockerfile: docker/Dockerfile.dev
+    command: ["npm", "run", "dev", "--", "--host", "0.0.0.0"]
+    environment:
+      NODE_ENV: development
+      VITE_API_URL: /api
+      VITE_API_TARGET: http://uap-backend:5000
+    volumes:
+      - ../frontend:/app
+      - /app/node_modules
+
+  uap-backend:
+    environment:
+      NODE_ENV: development
+    command: ["node", "--watch", "src/server.js"]
+    volumes:
+      - ../backend:/app
+      - /app/node_modules
+
+  uap-code-executor:
+    environment:
+      NODE_ENV: development
+    volumes:
+      - ../code-IDE-service/src:/app/src
+
+  uap-execution-worker:
+    environment:
+      NODE_ENV: development
+    volumes:
+      - ../code-IDE-service/src:/app/src

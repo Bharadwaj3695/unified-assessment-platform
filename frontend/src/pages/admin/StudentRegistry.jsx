@@ -1,27 +1,16 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import useDebounce from '../../hooks/useDebounce';
+import { useRefresh } from '../../hooks/useRefresh';
 // Import UI icons from lucide-react used across the registry table, action toolbars, and modal dialogs
 import {
   // Database icon representing authoritative student master registry
   Database,
   // Plus icon indicating record creation
   Plus,
-  // Search icon for the search filter input
-  Search,
-  // Filter icon for the status filter dropdown
-  Filter,
-  // Checkmark circle indicating active registry status
-  CheckCircle2,
-  // X circle indicating inactive or suspended status
-  XCircle,
-  // Eye icon for inspecting record details
-  Eye,
   // Animated circular refresh icon for reloading list data
   RefreshCw,
-  // User plus icon for provisioning authentication account from registry
-  UserPlus,
-  // Trash bin icon for deleting master records
-  Trash2,
+  // Icon for presenting alert and error messages
+  AlertCircle,
 // End of icon imports from lucide-react
 } from 'lucide-react';
 // Import toast notification utility for displaying alerts to the user
@@ -39,6 +28,8 @@ const StudentRegistryPage = () => {
   const [pagination, setPagination] = useState({ page: 1, limit: 10, total: 0, pages: 1 });
   // State flag indicating whether data fetching is currently in progress
   const [loading, setLoading] = useState(true);
+  // State storing error message if data fetching fails
+  const [error, setError] = useState(null);
   // State storing the search query string entered by the administrator
   const [search, setSearch] = useState('');
   const debouncedSearch = useDebounce(search, 300);
@@ -72,12 +63,15 @@ const StudentRegistryPage = () => {
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   // Memoized callback function to fetch student registry records with query parameters
-  const fetchRecords = useCallback(async () => {
+  const fetchRecords = useCallback(async (isManual = false) => {
     const requestId = ++activeRequestIdRef.current;
     // Wrap API request in try-catch-finally block
     try {
-      // Set loading state to true while fetching records
-      setLoading(true);
+      // Set loading state to true only on initial/filter load
+      if (!isManual) {
+        setLoading(true);
+      }
+      setError(null);
       // Dispatch GET request to admin service with pagination, search, and status filter
       const res = await adminService.getStudentRegistry({
         // Current active page number
@@ -95,18 +89,26 @@ const StudentRegistryPage = () => {
         // Update records state with fetched list
         setRecords(list);
         // Extract pagination metadata from response
-        const pag = res?.pagination || res?.data?.pagination;
+        const rawPag = res?.pagination || res?.data?.pagination;
         // If pagination metadata exists in response, update the pagination state
-        if (pag) {
+        if (rawPag) {
           // Update pagination state with backend values
-          setPagination(pag);
+          setPagination({
+            page: rawPag.currentPage || rawPag.page || 1,
+            limit: rawPag.perPage || rawPag.limit || 10,
+            total: rawPag.totalCount !== undefined ? rawPag.totalCount : (rawPag.total !== undefined ? rawPag.total : 0),
+            pages: rawPag.totalPages || rawPag.pages || 1,
+          });
         }
       }
     } catch (err) {
       if (requestId === activeRequestIdRef.current) {
         // Display error notification toast with backend message or fallback text
-        toast.error(err.response?.data?.message || 'Failed to load Student Registry');
+        const errMsg = err.response?.data?.message || 'Failed to load Student Registry';
+        setError(errMsg);
+        toast.error(errMsg);
       }
+      throw err;
     } finally {
       if (requestId === activeRequestIdRef.current) {
         // Reset loading flag to false once network request completes
@@ -116,10 +118,15 @@ const StudentRegistryPage = () => {
   // Memoize dependency array ensuring callback refreshes only when query parameters change
   }, [pagination.page, pagination.limit, debouncedSearch, statusFilter]);
 
+  const { isRefreshing, refresh: handleRefresh } = useRefresh(
+    () => fetchRecords(true),
+    { successMessage: 'Student registry refreshed!' }
+  );
+
   // Effect hook that triggers record fetching when fetchRecords callback updates
   useEffect(() => {
     // Execute record fetch on initial component mount and upon query filter changes
-    fetchRecords();
+    fetchRecords(false).catch(() => {});
   }, [fetchRecords]);
 
   // Form submit handler for executing a search query
@@ -178,22 +185,6 @@ const StudentRegistryPage = () => {
     }
   };
 
-  // Handler for automatically provisioning an authentication user account from a student registry record
-  const handleCreateUserAccount = async (record) => {
-    // Wrap API call in try-catch block
-    try {
-      // Call service to provision user account using registry record ID
-      await adminService.createAccountForStudentRegistry(record.id || record._id);
-      // Show success notification informing administrator that account was provisioned
-      toast.success(`User account provisioned for ${record.studentId} (${record.email})`);
-      // Refresh registry list to update UI state
-      fetchRecords();
-    } catch (err) {
-      // Show error toast notification on failure
-      toast.error(err.response?.data?.message || 'Failed to create user account from registry');
-    }
-  };
-
   // Handler for toggling student record active/inactive status
   const handleToggleStatus = async (record) => {
     // Invert the status between active and inactive
@@ -246,7 +237,7 @@ const StudentRegistryPage = () => {
             {/* Database icon */}
             <Database className="w-7 h-7 text-brand-primary" />
             {/* Header text */}
-            Student Registry (Master Data)
+            Student Registry
           </h1>
           {/* Subtitle guidance text */}
           <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
@@ -267,31 +258,14 @@ const StudentRegistryPage = () => {
         </button>
       </div>
 
-      {/* Filter and Search Bar Section */}
+      {/* Filter Section */}
       <div className="p-4 rounded-2xl border border-surface-light-border dark:border-surface-dark-border bg-white dark:bg-surface-dark shadow-xs flex flex-col md:flex-row items-center justify-between gap-3">
-        {/* Search query form */}
-        <form onSubmit={handleSearchSubmit} className="relative w-full md:w-80">
-          {/* Search icon inside input */}
-          <Search className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
-          {/* Search input field */}
-          <input
-            type="text"
-            placeholder="Search by ID, name, or email..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="w-full pl-9 pr-4 py-1.5 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-900/40 text-slate-900 dark:text-slate-100 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-brand-primary"
-          />
-        </form>
+        <div className="text-xs font-semibold text-slate-500 dark:text-slate-400">
+          Showing {pagination.total} institutional student record{pagination.total !== 1 ? 's' : ''}
+        </div>
 
         {/* Status filter controls and refresh button container */}
         <div className="flex items-center gap-3 w-full md:w-auto">
-          {/* Filter icon and label wrapper */}
-          <div className="flex items-center gap-1.5 text-xs text-slate-500">
-            {/* Filter icon */}
-            <Filter className="w-3.5 h-3.5" />
-            {/* Filter title */}
-            <span>Status:</span>
-          </div>
           {/* Status filter dropdown */}
           <select
             value={statusFilter}
@@ -301,10 +275,11 @@ const StudentRegistryPage = () => {
               // Reset pagination to first page
               setPagination((prev) => ({ ...prev, page: 1 }));
             }}
+            aria-label="Filter by status"
             className="px-3 py-1.5 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-900/40 text-slate-700 dark:text-slate-300 focus:outline-none focus:ring-2 focus:ring-brand-primary"
           >
             {/* Dropdown options */}
-            <option value="">All Statuses</option>
+            <option value="">All Status</option>
             <option value="active">Active</option>
             <option value="inactive">Inactive</option>
             <option value="suspended">Suspended</option>
@@ -314,12 +289,15 @@ const StudentRegistryPage = () => {
           {/* Refresh list button */}
           <button
             type="button"
-            onClick={fetchRecords}
-            title="Refresh List"
-            className="p-2 rounded-xl text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+            onClick={handleRefresh}
+            disabled={isRefreshing}
+            aria-busy={isRefreshing}
+            aria-label={isRefreshing ? 'Refreshing student registry' : 'Refresh list'}
+            title={isRefreshing ? 'Refreshing...' : 'Refresh List'}
+            className="p-2 rounded-xl text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
           >
             {/* Refresh icon with conditional spin animation */}
-            <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
+            <RefreshCw className={`w-3.5 h-3.5 ${isRefreshing ? 'animate-spin' : ''}`} />
           </button>
         </div>
       </div>
@@ -344,7 +322,7 @@ const StudentRegistryPage = () => {
                 {/* Column header: Status */}
                 <th className="py-3 px-4">Status</th>
                 {/* Column header: Actions */}
-                <th className="py-3 px-4 text-right">Actions</th>
+                <th className="py-3 px-4 text-right min-w-[220px]">Actions</th>
               </tr>
             </thead>
             {/* Table body */}
@@ -358,9 +336,32 @@ const StudentRegistryPage = () => {
                     <td className="py-3.5 px-4"><div className="h-4 w-24 bg-slate-200 dark:bg-slate-700 rounded" /></td>
                     <td className="py-3.5 px-4"><div className="h-4 w-40 bg-slate-200 dark:bg-slate-700 rounded" /></td>
                     <td className="py-3.5 px-4"><div className="h-4 w-16 bg-slate-200 dark:bg-slate-700 rounded-full" /></td>
-                    <td className="py-3.5 px-4 text-right"><div className="h-7 w-16 bg-slate-200 dark:bg-slate-700 rounded ml-auto" /></td>
+                    <td className="py-3.5 px-4 text-right">
+                      <div className="flex items-center justify-end gap-1.5">
+                        <div className="h-6 w-12 bg-slate-200 dark:bg-slate-700 rounded-lg" />
+                        <div className="h-6 w-18 bg-slate-200 dark:bg-slate-700 rounded-lg" />
+                        <div className="h-6 w-14 bg-slate-200 dark:bg-slate-700 rounded-lg" />
+                      </div>
+                    </td>
                   </tr>
                 ))
+              // Conditional rendering: error state
+              ) : error ? (
+                <tr>
+                  <td colSpan="6" className="py-12 text-center text-rose-500">
+                    <AlertCircle className="w-10 h-10 mx-auto mb-2 text-rose-400 dark:text-rose-500" />
+                    <p className="font-semibold text-rose-600 dark:text-rose-400">{error}</p>
+                    <p className="text-xs text-slate-400 mt-1">An error occurred while loading student records</p>
+                    <button
+                      type="button"
+                      onClick={fetchRecords}
+                      className="mt-3 px-3 py-1.5 rounded-lg text-xs font-semibold bg-rose-50 hover:bg-rose-100 text-rose-700 dark:bg-rose-900/30 dark:hover:bg-rose-900/50 dark:text-rose-300 transition-colors inline-flex items-center gap-1.5"
+                    >
+                      <RefreshCw className="w-3.5 h-3.5" />
+                      Retry
+                    </button>
+                  </td>
+                </tr>
               // Conditional rendering: empty state
               ) : records.length === 0 ? (
                 <tr>
@@ -399,17 +400,8 @@ const StudentRegistryPage = () => {
                       </span>
                     </td>
                     {/* Action buttons cell */}
-                    <td className="py-3 px-4 text-right">
+                    <td className="py-3 px-4 text-right whitespace-nowrap">
                       <div className="flex items-center justify-end gap-1.5">
-                        {/* Provision user account button */}
-                        <button
-                          type="button"
-                          onClick={() => handleCreateUserAccount(r)}
-                          title="Provision User Account"
-                          className="p-1.5 rounded-lg text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-950/30 transition-colors"
-                        >
-                          <UserPlus className="w-4 h-4" />
-                        </button>
                         {/* View record details button */}
                         <button
                           type="button"
@@ -419,32 +411,31 @@ const StudentRegistryPage = () => {
                             // Open details modal dialog
                             setIsDetailsModalOpen(true);
                           }}
-                          title="View Details"
-                          className="p-1.5 rounded-lg text-slate-400 hover:text-brand-primary hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+                          className="px-2.5 py-1 rounded-lg text-xs font-semibold border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700/60 hover:text-brand-primary dark:hover:text-brand-primary transition-colors cursor-pointer shadow-xs focus:outline-none focus:ring-2 focus:ring-brand-primary/20"
                         >
-                          <Eye className="w-4 h-4" />
+                          View
                         </button>
-                        {/* Toggle active status button */}
+
+                        {/* Toggle active/inactive status button */}
                         <button
                           type="button"
                           onClick={() => handleToggleStatus(r)}
-                          title={r.status === 'active' ? 'Mark Inactive' : 'Mark Active'}
-                          className={`p-1.5 rounded-lg transition-colors ${
+                          className={`px-2.5 py-1 rounded-lg text-xs font-semibold border transition-colors cursor-pointer shadow-xs focus:outline-none focus:ring-2 ${
                             r.status === 'active'
-                              ? 'text-amber-500 hover:bg-amber-50 dark:hover:bg-amber-950/30'
-                              : 'text-emerald-500 hover:bg-emerald-50 dark:hover:bg-emerald-950/30'
+                              ? 'border-amber-200 dark:border-amber-800/60 bg-amber-50/60 dark:bg-amber-950/20 text-amber-700 dark:text-amber-400 hover:bg-amber-100/80 dark:hover:bg-amber-900/40 focus:ring-amber-500/20'
+                              : 'border-emerald-200 dark:border-emerald-800/60 bg-emerald-50/60 dark:bg-emerald-950/20 text-emerald-700 dark:text-emerald-400 hover:bg-emerald-100/80 dark:hover:bg-emerald-900/40 focus:ring-emerald-500/20'
                           }`}
                         >
-                          {r.status === 'active' ? <XCircle className="w-4 h-4" /> : <CheckCircle2 className="w-4 h-4" />}
+                          {r.status === 'active' ? 'Deactivate' : 'Activate'}
                         </button>
+
                         {/* Delete record button */}
                         <button
                           type="button"
                           onClick={() => handleDelete(r)}
-                          title="Delete Record"
-                          className="p-1.5 rounded-lg text-red-500 hover:bg-red-50 dark:hover:bg-red-950/30 transition-colors"
+                          className="px-2.5 py-1 rounded-lg text-xs font-semibold border border-red-200 dark:border-red-800/60 bg-red-50/60 dark:bg-red-950/20 text-red-600 dark:text-red-400 hover:bg-red-100/80 dark:hover:bg-red-900/40 transition-colors cursor-pointer shadow-xs focus:outline-none focus:ring-2 focus:ring-red-500/20"
                         >
-                          <Trash2 className="w-4 h-4" />
+                          Delete
                         </button>
                       </div>
                     </td>

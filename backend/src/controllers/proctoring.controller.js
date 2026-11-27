@@ -30,7 +30,7 @@ class ProctoringController {
 
   async recordEvent(req, res, next) {
     try {
-      const { eventType, severity, metadata } = req.body;
+      const { eventType, severity, metadata, source } = req.body;
       if (!eventType) {
         return errorResponse(res, 'eventType is required', 400);
       }
@@ -38,9 +38,37 @@ class ProctoringController {
       const event = await proctoringService.recordEvent(
         req.params.sessionId,
         req.user._id,
-        { eventType, severity, metadata }
+        { eventType, severity, metadata, source }
       );
       return successResponse(res, 'Proctoring event recorded', event, 201);
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  async reviewEvent(req, res, next) {
+    try {
+      const { decision, reviewNotes } = req.body;
+      const event = await proctoringService.reviewEvent(
+        req.params.eventId,
+        req.user,
+        { decision, reviewNotes }
+      );
+      return successResponse(res, 'Proctoring event review recorded', event);
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  async getEventEvidence(req, res, next) {
+    try {
+      const evidence = await proctoringService.getEventEvidence(
+        req.params.eventId,
+        req.user
+      );
+      res.setHeader('Content-Type', evidence.mimeType);
+      res.setHeader('Cache-Control', 'no-store, private');
+      return res.sendFile(evidence.filePath);
     } catch (err) {
       next(err);
     }

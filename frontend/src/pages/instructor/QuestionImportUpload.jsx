@@ -156,7 +156,7 @@ const QuestionImportUpload = () => {
   };
 
   return (
-    <div className="max-w-6xl mx-auto px-4 sm:px-6 py-6 space-y-8">
+    <div className="max-w-6xl mx-auto space-y-6 sm:space-y-8">
       {/* Header */}
       <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
         <div>
@@ -303,17 +303,17 @@ const QuestionImportUpload = () => {
 
             <div>
               <label className="block text-xs font-semibold text-slate-700 mb-1">
-                OAuth Access Token (Optional)
+                Google OAuth 2 Access Token
               </label>
               <input
                 type="text"
                 value={formsToken}
                 onChange={(e) => setFormsToken(e.target.value)}
-                placeholder="Bearer token (leave blank if platform Google OAuth is configured or form is public)"
+                placeholder="ya29... (Google OAuth Access Token with forms.body.readonly scope)"
                 className="w-full p-2.5 border border-slate-300 rounded-md text-sm font-mono text-xs"
               />
               <p className="text-xs text-slate-400 mt-1">
-                Optional: If your institution requires restricted-domain Google Workspace authentication.
+                Required for Google Forms API access. Google requires an authorized OAuth 2 Access Token with &apos;https://www.googleapis.com/auth/forms.body.readonly&apos; scope.
               </p>
             </div>
 
@@ -368,8 +368,8 @@ const QuestionImportUpload = () => {
             No question import jobs yet. Upload a document or import a Google Form above to get started.
           </Card>
         ) : (
-          <div className="border border-slate-200 rounded-xl overflow-hidden bg-white shadow-sm">
-            <table className="w-full text-left text-xs">
+          <div className="border border-slate-200 dark:border-slate-800 rounded-xl overflow-x-auto bg-white dark:bg-surface-dark shadow-sm">
+            <table className="w-full min-w-[560px] text-left text-xs">
               <thead className="bg-slate-50 text-slate-600 border-b border-slate-200 font-semibold uppercase tracking-wider">
                 <tr>
                   <th className="p-3.5">Source</th>

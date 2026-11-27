@@ -1,5 +1,5 @@
 const submissionService = require('../services/submission.service');
-const { successResponse } = require('../utils/response');
+const { successResponse, paginatedResponse } = require('../utils/response');
 
 class SubmissionController {
   async startAttempt(req, res, next) {
@@ -23,6 +23,21 @@ class SubmissionController {
         answer
       );
       return successResponse(res, 'Answer autosaved successfully', result);
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  async runCode(req, res, next) {
+    try {
+      const { submissionId } = req.params;
+      const { questionId, code, language, customStdin } = req.body;
+      const result = await submissionService.runCode(
+        submissionId,
+        req.user.id,
+        { questionId, code, language, customStdin }
+      );
+      return successResponse(res, 'Code executed successfully', result);
     } catch (err) {
       next(err);
     }
@@ -59,6 +74,27 @@ class SubmissionController {
 
   async getStudentSubmissions(req, res, next) {
     try {
+      const { page, limit, status, view, search, sortBy, sortOrder } = req.query;
+      if (page !== undefined || limit !== undefined) {
+        const result = await submissionService.getStudentSubmissionsPaginated(req.user.id, {
+          page,
+          limit,
+          status,
+          view,
+          search,
+          sortBy,
+          sortOrder,
+        });
+        return paginatedResponse(
+          res,
+          'Submissions retrieved successfully',
+          result.submissions,
+          result.page,
+          result.limit,
+          result.total,
+          { counts: result.counts }
+        );
+      }
       const submissions = await submissionService.getStudentSubmissions(req.user.id);
       return successResponse(res, 'Submissions retrieved successfully', submissions);
     } catch (err) {

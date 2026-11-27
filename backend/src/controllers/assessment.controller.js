@@ -54,9 +54,20 @@ class AssessmentController {
     // Begin try block
     try {
       // Destructure query parameters with fallback defaults (page 1, limit 200)
-      const { status, category, search, page = 1, limit = 200, dateFilter } = req.query;
+      const {
+        status,
+        category,
+        accessType,
+        search,
+        page = 1,
+        limit = 200,
+        dateFilter,
+        sortBy,
+        sortOrder,
+        includePast,
+      } = req.query;
       // Query assessments through service applying role-specific visibility rules
-      const { total, assessments } = await assessmentService.getAssessments({
+      const result = await assessmentService.getAssessments({
         // User role (student, instructor, or admin)
         role: req.user.role,
         // Authenticated user ID
@@ -65,6 +76,8 @@ class AssessmentController {
         status,
         // Academic category or subject filter
         category,
+        // Access type filter (public, restricted)
+        accessType,
         // Free text search keyword
         search,
         // Requested page number
@@ -73,9 +86,21 @@ class AssessmentController {
         limit,
         // Date range filter option
         dateFilter,
+        // Deterministic sorting options
+        sortBy,
+        sortOrder,
+        // Flag to include assessments whose deadlines have passed (for student viewing missed assessments)
+        includePast: includePast === 'true' || includePast === true,
       });
       // Return paginated response envelope with assessments array and paging metadata
-      return paginatedResponse(res, 'Assessments retrieved successfully', assessments, page, limit, total);
+      return paginatedResponse(
+        res,
+        'Assessments retrieved successfully',
+        result.assessments,
+        result.page,
+        result.limit,
+        result.total
+      );
     // Forward errors
     } catch (err) {
       // Pass error to centralized error middleware
@@ -111,6 +136,52 @@ class AssessmentController {
     // Forward errors
     } catch (err) {
       // Pass error to centralized error middleware
+      next(err);
+    }
+  }
+
+  // Retrieves published / approved certificate templates for assessment configuration
+  async getCertificateTemplates(req, res, next) {
+    try {
+      const templates = await assessmentService.getApprovedTemplates();
+      return successResponse(res, 'Certificate templates retrieved successfully', templates);
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  // Executes code or test suite for faculty IDE question authoring
+  async testFacultyCode(req, res, next) {
+    try {
+      const result = await assessmentService.testFacultyCode(req.user, req.body);
+      return successResponse(res, 'Code executed successfully', result);
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  // Validates a coding question against authoring criteria before publish
+  async validateQuestion(req, res, next) {
+    try {
+      const result = await assessmentService.validateQuestion(req.user, req.body);
+      return successResponse(res, 'Question validation completed', result);
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  // Attaches existing questions from Question Bank to an assessment
+  async addQuestionsFromBank(req, res, next) {
+    try {
+      const isAdmin = req.user.role === 'admin';
+      const result = await assessmentService.addQuestionsFromBank(
+        req.params.id,
+        req.user.id,
+        req.body.questionIds || [],
+        isAdmin
+      );
+      return successResponse(res, result.message, result);
+    } catch (err) {
       next(err);
     }
   }

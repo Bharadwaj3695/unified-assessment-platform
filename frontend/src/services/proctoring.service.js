@@ -16,6 +16,11 @@ export const proctoringService = {
     return res.data;
   },
 
+  reviewEvent: async (eventId, reviewData) => {
+    const res = await api.patch(`/proctoring/events/${eventId}/review`, reviewData);
+    return res.data;
+  },
+
   endSession: async (sessionId, reason = 'NORMAL_COMPLETION') => {
     const res = await api.post(`/proctoring/sessions/${sessionId}/end`, { reason });
     return res.data;

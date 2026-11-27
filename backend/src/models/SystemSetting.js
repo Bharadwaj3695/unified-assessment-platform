@@ -79,6 +79,73 @@ const systemSettingSchema = new mongoose.Schema(
       // Default enabled
       default: true,
     },
+    // Institutional security policy: permits or forbids Email OTP as an authorized MFA method/fallback
+    mfaEmailOtpEnabled: {
+      type: Boolean,
+      default: true,
+    },
+    // Institutional security policy: expiration window in minutes for email OTP codes
+    mfaEmailOtpExpiryMinutes: {
+      type: Number,
+      default: 5,
+      min: 1,
+      max: 15,
+    },
+    // Institutional security policy: resend cooldown in seconds between email OTP requests
+    mfaEmailOtpResendCooldownSeconds: {
+      type: Number,
+      default: 60,
+      min: 10,
+      max: 300,
+    },
+    // Institutional security policy: maximum permitted email OTP resends per login challenge
+    mfaEmailOtpMaxResends: {
+      type: Number,
+      default: 3,
+      min: 1,
+      max: 10,
+    },
+    // Institutional certification policy and default credential branding settings
+    certification: {
+      institutionName: {
+        type: String,
+        default: 'Unified Assessment Platform',
+        trim: true,
+      },
+      institutionLogoUrl: {
+        type: String,
+        default: '',
+        trim: true,
+      },
+      institutionSealUrl: {
+        type: String,
+        default: '',
+        trim: true,
+      },
+      defaultSignatoryName: {
+        type: String,
+        default: 'Dr. Jane Smith',
+        trim: true,
+      },
+      defaultSignatoryTitle: {
+        type: String,
+        default: 'Dean of Academic Affairs',
+        trim: true,
+      },
+      defaultSignatorySignatureUrl: {
+        type: String,
+        default: '',
+        trim: true,
+      },
+      autoEmailCertificates: {
+        type: Boolean,
+        default: true,
+      },
+      includePdfAttachment: {
+        type: Boolean,
+        default: true,
+      },
+    },
     // Reference to the administrator User who last modified platform settings
     updatedBy: {
       // MongoDB ObjectId type

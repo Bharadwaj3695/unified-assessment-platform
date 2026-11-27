@@ -72,20 +72,6 @@ const PerformanceDonutChart = ({
           </span>
         </div>
       </div>
-
-      {/* Legend list */}
-      <div className="w-full flex flex-wrap justify-center gap-x-4 gap-y-2 mt-3 pt-3 border-t border-surface-light-border dark:border-surface-dark-border text-xs">
-        {data.map((item, idx) => (
-          <div key={idx} className="flex items-center space-x-1.5">
-            <span
-              className="w-2.5 h-2.5 rounded-full flex-shrink-0"
-              style={{ backgroundColor: item.color }}
-            />
-            <span className="text-slate-600 dark:text-slate-400">{item.name}</span>
-            <span className="font-semibold text-slate-800 dark:text-slate-200">({item.value})</span>
-          </div>
-        ))}
-      </div>
     </div>
   );
 };

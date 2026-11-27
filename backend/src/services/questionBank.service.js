@@ -58,6 +58,7 @@ class QuestionBankService {
       classificationConfidence = null,
       classificationSource = 'MANUAL',
       allowDuplicate = false,
+      codingConfig = undefined,
     } = questionData;
 
     if (!questionText || !questionText.trim()) {
@@ -89,6 +90,7 @@ class QuestionBankService {
       options: Array.isArray(choices) ? choices : [],
       correctAnswer: correctAnswer ? String(correctAnswer).trim() : null,
       explanation: explanation ? String(explanation).trim() : null,
+      codingConfig: codingConfig || undefined,
       points: parseInt(points, 10) || 5,
       difficulty: difficulty.toUpperCase(),
       bloomLevel: bloomLevel.toUpperCase(),
@@ -152,7 +154,14 @@ class QuestionBankService {
     }
 
     if (type && type !== 'All') {
-      query.type = type.toLowerCase();
+      const typeLower = type.toLowerCase();
+      if (typeLower === 'sql') {
+        query.$or = [{ type: 'sql' }, { type: 'code', 'codingConfig.executionCategory': 'sql' }];
+      } else if (typeLower === 'code') {
+        query.$or = [{ type: 'code', 'codingConfig.executionCategory': { $ne: 'sql' } }];
+      } else {
+        query.type = typeLower;
+      }
     }
     if (difficulty && difficulty !== 'All') {
       query.difficulty = difficulty.toUpperCase();
@@ -290,6 +299,7 @@ class QuestionBankService {
           updateData.correctAnswer !== undefined ? updateData.correctAnswer : existing.correctAnswer,
         explanation:
           updateData.explanation !== undefined ? updateData.explanation : existing.explanation,
+        codingConfig: updateData.codingConfig !== undefined ? updateData.codingConfig : existing.codingConfig,
         points: updateData.points !== undefined ? updateData.points : existing.points,
         difficulty: updateData.difficulty ? updateData.difficulty.toUpperCase() : existing.difficulty,
         bloomLevel: updateData.bloomLevel ? updateData.bloomLevel.toUpperCase() : existing.bloomLevel,
@@ -331,6 +341,7 @@ class QuestionBankService {
     if (updateData.tags !== undefined) existing.tags = updateData.tags;
     if (updateData.category) existing.category = updateData.category;
     if (updateData.status) existing.status = updateData.status;
+    if (updateData.codingConfig !== undefined) existing.codingConfig = updateData.codingConfig;
 
     await existing.save();
     return existing;

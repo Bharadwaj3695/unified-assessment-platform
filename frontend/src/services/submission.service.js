@@ -9,6 +9,15 @@ export const submissionService = {
     const res = await api.patch(`/submissions/${submissionId}/answers/${questionId}`, { answer });
     return res.data;
   },
+  runCode: async (submissionId, { questionId, code, language, customStdin }) => {
+    const res = await api.post(`/submissions/${submissionId}/run-code`, {
+      questionId,
+      code,
+      language,
+      customStdin,
+    });
+    return res.data;
+  },
   saveProgress: async (submissionId, answers) => {
     const res = await api.put(`/submissions/${submissionId}/progress`, { answers });
     return res.data;
@@ -20,6 +29,10 @@ export const submissionService = {
   getStudentSubmissions: async () => {
     const res = await api.get('/submissions/student');
     return res.data;
+  },
+  getStudentSubmissionsPaginated: async (params = {}) => {
+    const res = await api.get('/submissions/student', { params });
+    return res;
   },
   getSubmissionById: async (submissionId) => {
     const res = await api.get(`/submissions/${submissionId}`);

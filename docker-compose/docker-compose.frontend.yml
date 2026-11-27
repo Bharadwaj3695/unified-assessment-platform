@@ -1,0 +1,59 @@
+# UAP Frontend Modular Docker Compose Configuration
+# Production Nginx: docker compose -f docker-compose/docker-compose.frontend.yml up -d
+# Dev Hot-Reload:   docker compose -f docker-compose/docker-compose.frontend.yml --profile dev up -d uap-frontend-dev
+
+name: unifiedassessmentplatformoriginal
+
+services:
+  uap-frontend:
+    image: uap-frontend:latest
+    build:
+      context: ../frontend
+      dockerfile: docker/Dockerfile
+    container_name: uap-frontend
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "5173:80"
+    environment:
+      VITE_API_URL: /api
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:80/health && curl -sf -o /dev/null http://localhost:80/ || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    networks:
+      - uap-public-net
+
+  uap-frontend-dev:
+    image: uap-frontend-dev:latest
+    build:
+      context: ../frontend
+      dockerfile: docker/Dockerfile.dev
+    container_name: uap-frontend-dev
+    profiles:
+      - dev
+    working_dir: /app
+    command: ["npm", "run", "dev", "--", "--host", "0.0.0.0"]
+    environment:
+      NODE_ENV: development
+      VITE_API_URL: /api
+      VITE_API_TARGET: http://uap-backend:5000
+    volumes:
+      - ../frontend:/app
+      - /app/node_modules
+    ports:
+      - "5173:5173"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:5173/ || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - uap-public-net
+
+networks:
+  uap-public-net:
+    name: uap-public-net
+    driver: bridge

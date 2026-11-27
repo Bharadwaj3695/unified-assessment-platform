@@ -13,16 +13,23 @@ class EvaluationController {
     // Begin request processing in try-catch block
     try {
       // Destructure query parameters with fallback defaults (page 1, limit 10)
-      const { assessmentId, status, search, page = 1, limit = 10 } = req.query;
+      const { assessmentId, status, search, sortBy, sortOrder, page = 1, limit = 10 } = req.query;
       // Fetch matching submissions and total count through evaluation service
-      const { total, submissions } = await evaluationService.getSubmissionsForInstructor(
+      const result = await evaluationService.getSubmissionsForInstructor(
         // Authenticated instructor ID to restrict results to their authored exams
         req.user.id,
         // Query filters and pagination settings
-        { assessmentId, status, search, page, limit }
+        { assessmentId, status, search, sortBy, sortOrder, page, limit }
       );
       // Return paginated response envelope with submissions list and metadata
-      return paginatedResponse(res, 'Submissions retrieved successfully', submissions, page, limit, total);
+      return paginatedResponse(
+        res,
+        'Submissions retrieved successfully',
+        result.submissions,
+        result.page,
+        result.limit,
+        result.total
+      );
     // Forward errors to centralized error handling middleware
     } catch (err) {
       // Pass error to Express error middleware

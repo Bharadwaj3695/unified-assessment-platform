@@ -8,6 +8,9 @@ import { authService } from '../services/auth.service';
 // React Context providing global user authentication state and session methods across the component tree
 export const AuthContext = createContext(null);
 
+// Deduplicate concurrent initial silent-refresh requests (e.g. React StrictMode double-mount in dev)
+let inflightInitRefresh = null;
+
 // Context Provider component encapsulating authentication lifecycle, token persistence, and login flows
 export const AuthProvider = ({ children }) => {
   // Initialize user profile state lazily from browser local storage
@@ -19,15 +22,22 @@ export const AuthProvider = ({ children }) => {
 
   // Mount effect re-hydrating authentication session via silent cookie refresh on initial app load
   useEffect(() => {
+    let isMounted = true;
     // Asynchronous bootstrap function validating session cookie against backend refresh endpoint
     const initializeAuth = async () => {
       try {
-        // Check for legacy migration token in localStorage if cookie is not yet established
-        const legacyRefreshToken = storage.getRefreshToken();
-        const refreshPayload = legacyRefreshToken ? { refreshToken: legacyRefreshToken } : {};
+        if (!inflightInitRefresh) {
+          // Check for legacy migration token in localStorage if cookie is not yet established
+          const legacyRefreshToken = storage.getRefreshToken();
+          const refreshPayload = legacyRefreshToken ? { refreshToken: legacyRefreshToken } : {};
+          inflightInitRefresh = authService.refreshToken(refreshPayload).finally(() => {
+            inflightInitRefresh = null;
+          });
+        }
         // Attempt silent refresh via /auth/refresh with credentials
-        const res = await authService.refreshToken(refreshPayload);
+        const res = await inflightInitRefresh;
         const data = res?.data || res;
+        if (!isMounted) return;
         if (data?.accessToken) {
           // Store access token in memory
           storage.setToken(data.accessToken);
@@ -38,6 +48,7 @@ export const AuthProvider = ({ children }) => {
             storage.setUser(data.user);
           } else {
             const profile = await authService.getProfile();
+            if (!isMounted) return;
             setUser(profile);
             storage.setUser(profile);
           }
@@ -47,18 +58,24 @@ export const AuthProvider = ({ children }) => {
           setToken(null);
         }
       } catch (err) {
+        if (!isMounted) return;
         // Unauthenticated or expired session on initial boot
         storage.removeToken();
         setUser(null);
         setToken(null);
       } finally {
-        // Mark session re-hydration as complete to unblock protected routes
-        setIsLoading(false);
+        if (isMounted) {
+          // Mark session re-hydration as complete to unblock protected routes
+          setIsLoading(false);
+        }
       }
     };
 
     // Trigger auth initialization
     initializeAuth();
+    return () => {
+      isMounted = false;
+    };
   }, []);
 
   // Executes standard password credential login against backend endpoint

@@ -6,6 +6,7 @@ const router = express.Router();
 const proctoringController = require('../controllers/proctoring.controller');
 // Authentication middleware enforcing valid access JWT and active account status
 const { authenticate } = require('../middleware/auth.middleware');
+const { authorize } = require('../middleware/role.middleware');
 
 // Protect all proctoring endpoints with bearer token authentication
 router.use(authenticate);
@@ -18,6 +19,10 @@ router.get('/submissions/:submissionId', proctoringController.getBySubmission);
 router.post('/sessions/:sessionId/events', proctoringController.recordEvent);
 // Terminate an active proctoring session upon assessment completion (POST /api/proctoring/sessions/:sessionId/end)
 router.post('/sessions/:sessionId/end', proctoringController.endSession);
+// Faculty / Admin review of a proctoring event (PATCH /api/proctoring/events/:eventId/review)
+router.patch('/events/:eventId/review', authorize('instructor', 'admin'), proctoringController.reviewEvent);
+// Protected faculty/admin evidence download (GET /api/proctoring/events/:eventId/evidence)
+router.get('/events/:eventId/evidence', authorize('instructor', 'admin'), proctoringController.getEventEvidence);
 
 // Export configured proctoring router
 module.exports = router;

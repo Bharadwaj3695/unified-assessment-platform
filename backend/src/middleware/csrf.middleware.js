@@ -2,12 +2,7 @@
 const env = require('../config/env');
 const { validateCsrfToken } = require('../utils/cookie');
 const { errorResponse } = require('../utils/response');
-
-// Parse allowed client origins
-const allowedOrigins = (env.CLIENT_URL || 'http://localhost:5173')
-  .split(',')
-  .map((origin) => origin.trim().replace(/\/+$/, ''))
-  .filter(Boolean);
+const { isOriginAllowed, normalizeOrigin } = require('../utils/origin');
 
 /**
  * Middleware enforcing exact Origin validation and CSRF token verification
@@ -23,18 +18,11 @@ function csrfProtection(req, res, next) {
   // Exact Origin / Referer validation if present
   let originHeader = req.headers.origin;
   if (!originHeader && req.headers.referer) {
-    try {
-      originHeader = new URL(req.headers.referer).origin;
-    } catch {
-      originHeader = null;
-    }
+    originHeader = normalizeOrigin(req.headers.referer);
   }
 
   if (originHeader) {
-    const normalizedOrigin = originHeader.replace(/\/+$/, '');
-    const isAllowed =
-      allowedOrigins.includes(normalizedOrigin) ||
-      (env.NODE_ENV !== 'production' && normalizedOrigin.includes('localhost'));
+    const isAllowed = isOriginAllowed(originHeader, env.NODE_ENV);
     if (!isAllowed) {
       return errorResponse(res, `CSRF origin validation failed: origin not permitted`, 403);
     }
