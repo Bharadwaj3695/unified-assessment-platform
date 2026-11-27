@@ -43,7 +43,7 @@ services:
     environment:
       PORT: 5050
       NODE_ENV: development
-      INTERNAL_API_KEY: ${EXECUTION_SERVICE_API_KEY:-dev_uap_exec_internal_secret_key_32bytes!!}
+      INTERNAL_API_KEY: ${EXECUTION_SERVICE_API_KEY:-${INTERNAL_API_KEY:-dev_uap_exec_internal_secret_key_32bytes!!}}
       REDIS_HOST: uap-redis
       REDIS_PORT: 6379
       USE_REDIS_QUEUE: "true"
@@ -154,7 +154,9 @@ services:
     environment:
       PORT: 5000
       NODE_ENV: development
-      CLIENT_URL: http://localhost:5173
+      CLIENT_URL: ${CLIENT_URL:-http://localhost:5173}
+      CLOUDFLARE_TUNNEL_URL: ${CLOUDFLARE_TUNNEL_URL:-https://developments-ribbon-june-crew.trycloudflare.com}
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:5173,https://developments-ribbon-june-crew.trycloudflare.com}
       MONGODB_URI: mongodb://uap-mongodb:27017/unified_assessment
       EXECUTION_SERVICE_URL: http://uap-code-executor:5050
       EXECUTION_SERVICE_API_KEY: ${EXECUTION_SERVICE_API_KEY:-dev_uap_exec_internal_secret_key_32bytes!!}
@@ -179,48 +181,29 @@ services:
     image: uap-frontend:latest
     build:
       context: ../frontend
-      dockerfile: docker/Dockerfile
+      dockerfile: ${FRONTEND_DOCKERFILE:-docker/Dockerfile.dev}
     container_name: uap-frontend
     restart: unless-stopped
     ports:
       - "80:80"
-      - "5173:80"
+      - "5173:5173"
     environment:
+      NODE_ENV: ${FRONTEND_NODE_ENV:-development}
       VITE_API_URL: /api
+      VITE_API_TARGET: http://uap-backend:5000
+    volumes:
+      - ../frontend:/app
+      - /app/node_modules
     depends_on:
       uap-backend:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "curl -sf http://localhost:80/health && curl -sf -o /dev/null http://localhost:80/ || exit 1"]
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:5173/ || curl -sf http://127.0.0.1:5173/ >/dev/null || exit 1"]
       interval: 10s
       timeout: 5s
-      retries: 3
+      retries: 5
     networks:
       - uap-public-net
-
-  # Independent AI Processing Worker Container (separate from backend & code executor; zero model downloads by default)
-  uap-ai-worker:
-    image: uap-ai-worker:latest
-    build:
-      context: ../backend
-      dockerfile: docker/Dockerfile.ai-worker
-    container_name: uap-ai-worker
-    restart: unless-stopped
-    profiles:
-      - ai-worker
-    environment:
-      PORT: 5060
-      AI_PROVIDER: ${AI_PROVIDER:-deterministic_stub}
-      AI_WORKER_API_KEY: ${AI_WORKER_API_KEY:-dev_uap_ai_worker_secret_key}
-    volumes:
-      - ../backend/src/ai-worker:/app/src:ro
-    networks:
-      - uap-exec-net
-    healthcheck:
-      test: ["CMD", "curl", "-sf", "http://localhost:5060/health"]
-      interval: 15s
-      timeout: 5s
-      retries: 3
 
 networks:
   uap-public-net:

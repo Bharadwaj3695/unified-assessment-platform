@@ -33,7 +33,9 @@ services:
     environment:
       PORT: 5000
       NODE_ENV: development
-      CLIENT_URL: http://localhost:5173
+      CLIENT_URL: ${CLIENT_URL:-http://localhost:5173}
+      CLOUDFLARE_TUNNEL_URL: ${CLOUDFLARE_TUNNEL_URL:-https://developments-ribbon-june-crew.trycloudflare.com}
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:5173,https://developments-ribbon-june-crew.trycloudflare.com}
       MONGODB_URI: mongodb://uap-mongodb:27017/unified_assessment
       EXECUTION_SERVICE_URL: http://uap-code-executor:5050
       EXECUTION_SERVICE_API_KEY: ${EXECUTION_SERVICE_API_KEY:-dev_uap_exec_internal_secret_key_32bytes!!}

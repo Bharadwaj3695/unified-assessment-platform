@@ -193,13 +193,19 @@ describe('Phase 7: Backup and Disaster Recovery Verification', () => {
   // --------------------------------------------------------------------------
   test('6.6: Persistent Storage - Verifies external persistent volumes defined in compose', () => {
     const infraComposePath = path.resolve(__dirname, '../../docker-compose/docker-compose.infra.yml');
+    const mainComposePath = path.resolve(__dirname, '../../docker-compose/docker-compose.yml');
     assert.ok(fs.existsSync(infraComposePath), 'Infrastructure docker-compose file must exist');
+    assert.ok(fs.existsSync(mainComposePath), 'Master docker-compose file must exist');
 
-    const content = fs.readFileSync(infraComposePath, 'utf8');
-    assert.match(content, /uap_mongodb_data:/, 'Must define uap_mongodb_data volume');
-    assert.match(content, /uap_uploads_data:/, 'Must define uap_uploads_data volume');
-    assert.match(content, /external:\s*true/, 'Volumes must be declared external to prevent accidental deletion');
-    assert.match(content, /- uap_mongodb_data:\/data\/db/, 'MongoDB container must mount volume to /data/db');
+    const infraContent = fs.readFileSync(infraComposePath, 'utf8');
+    assert.match(infraContent, /uap_mongodb_data:/, 'Must define uap_mongodb_data volume');
+    assert.match(infraContent, /uap_uploads_data:/, 'Must define uap_uploads_data volume');
+    assert.match(infraContent, /external:\s*true/, 'Volumes must be declared external in modular infra compose to prevent accidental deletion');
+    assert.match(infraContent, /- uap_mongodb_data:\/data\/db/, 'MongoDB container must mount volume to /data/db');
+
+    const mainContent = fs.readFileSync(mainComposePath, 'utf8');
+    assert.match(mainContent, /uap_mongodb_data:/, 'Master compose must define uap_mongodb_data volume');
+    assert.match(mainContent, /uap_uploads_data:/, 'Master compose must define uap_uploads_data volume');
   });
 
   // --------------------------------------------------------------------------

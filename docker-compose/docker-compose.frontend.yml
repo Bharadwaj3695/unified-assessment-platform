@@ -16,7 +16,7 @@ services:
       - "80:80"
       - "5173:80"
     environment:
-      VITE_API_URL: http://localhost:5000/api
+      VITE_API_URL: /api
     healthcheck:
       test: ["CMD-SHELL", "curl -sf http://localhost:80/health && curl -sf -o /dev/null http://localhost:80/ || exit 1"]
       interval: 10s

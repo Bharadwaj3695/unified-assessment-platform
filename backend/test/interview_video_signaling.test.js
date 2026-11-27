@@ -338,8 +338,15 @@ describe('UAP Two-Way Video WebRTC Signaling & Faculty Media Control', () => {
 
       const delivered = await studentClient.nextMessage((m) => m.type === 'MEDIA_CONTROL_COMMAND');
       assert.strictEqual(delivered.command, cmd);
+      assert.strictEqual(delivered.issuedByRole, 'faculty');
+      assert.strictEqual(delivered.interviewId, interviewId);
       assert.deepStrictEqual(delivered.studentMediaControl, expected);
     }
+
+    // Invalid media-control command from faculty is rejected cleanly
+    facultyClient.sendJson({ type: 'MEDIA_CONTROL', command: 'INVALID_MEDIA_CMD' });
+    const invalidCmdErr = await facultyClient.nextMessage((m) => m.type === 'SIGNAL_ERROR');
+    assert.strictEqual(invalidCmdErr.code, 'INVALID_COMMAND');
 
     // Student media status & failure notification reaches faculty
     studentClient.sendJson({

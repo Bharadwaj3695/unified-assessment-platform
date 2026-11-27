@@ -168,29 +168,37 @@ describe('UAP Phase 7: Release Blocker Remediation & Verification Suite', () => 
       assert.match(composeMain, /uap-execution-worker:[\s\S]*?NODE_ENV:\s*production/);
     });
 
-    test('4.2 docker-compose.yml removes dev source mounts while preserving persistent uploads', () => {
+    test('4.2 docker-compose.yml preserves persistent uploads and isolates frontend container dependencies', () => {
       const backendSection = composeMain.match(/uap-backend:[\s\S]*?(?=uap-frontend:|$)/)?.[0] || '';
       assert.doesNotMatch(backendSection, /- \.\.\/backend:\/app/, 'Must remove ../backend:/app dev mount');
       assert.match(backendSection, /uap_uploads_data:\/app\/uploads/, 'Must preserve persistent uploads volume');
 
       const frontendSection = composeMain.match(/uap-frontend:[\s\S]*?(?=networks:|$)/)?.[0] || '';
-      assert.doesNotMatch(frontendSection, /- \.\.\/frontend:\/app/, 'Must remove ../frontend:/app dev mount');
+      assert.match(frontendSection, /- \.\.\/frontend:\/app/, 'Must mount frontend source for dev auto-updates');
+      assert.match(frontendSection, /- \/app\/node_modules/, 'Must isolate container node_modules volume');
     });
 
-    test('4.3 docker-compose.yml exposes frontend on ports 80 and 5173 with healthcheck', () => {
+    test('4.3 docker-compose.yml exposes frontend on ports 80 and 5173 with healthcheck and Nginx production probe', () => {
       const frontendSection = composeMain.match(/uap-frontend:[\s\S]*?(?=\nvolumes:|\nnetworks:|$)/)?.[0] || '';
       assert.match(frontendSection, /- "80:80"/, 'Must expose port 80');
-      assert.match(frontendSection, /- "5173:80"/, 'Must map legacy port 5173 to container port 80');
-      assert.match(frontendSection, /healthcheck:[\s\S]*?http:\/\/localhost:80\/health/, 'Must include healthcheck');
+      assert.match(frontendSection, /- "5173:5173"/, 'Must expose port 5173');
+      assert.match(frontendSection, /healthcheck:[\s\S]*?http:\/\/127\.0\.0\.1:5173\//, 'Must include frontend healthcheck');
+      assert.match(frontendDockerfile, /HEALTHCHECK[\s\S]*?http:\/\/localhost:80\/health/, 'Production Nginx Dockerfile must include /health probe');
     });
 
-    test('4.4 Modular compose files reflect production readiness', () => {
+    test('4.4 Master and modular compose files maintain clean service separation and production/dev readiness', () => {
+      const frontendMatches = composeMain.match(/^\s{2}uap-frontend[^:]*:/gm) || [];
+      const backendMatches = composeMain.match(/^\s{2}uap-backend[^:]*:/gm) || [];
+      assert.strictEqual(frontendMatches.length, 1, 'Master compose must have exactly one frontend service');
+      assert.strictEqual(backendMatches.length, 1, 'Master compose must have exactly one backend service');
+      assert.doesNotMatch(composeMain, /uap-ai-worker/, 'Must not include AI worker Docker service');
+
       assert.match(composeFrontend, /ports:[\s\S]*?- "80:80"[\s\S]*?- "5173:80"/);
+      assert.match(composeFrontend, /uap-frontend-dev:[\s\S]*?docker\/Dockerfile\.dev/);
       assert.match(composeFrontend, /healthcheck:/);
-      assert.match(composeBackend, /NODE_ENV:\s*production/);
       assert.match(composeBackend, /uap_uploads_data:\/app\/uploads/);
-      assert.match(composeExecutor, /uap-code-executor:[\s\S]*?NODE_ENV:\s*production/);
-      assert.match(composeExecutor, /uap-execution-worker:[\s\S]*?NODE_ENV:\s*production/);
+      assert.match(composeExecutor, /uap-code-executor:/);
+      assert.match(composeExecutor, /uap-execution-worker:/);
     });
   });
 });

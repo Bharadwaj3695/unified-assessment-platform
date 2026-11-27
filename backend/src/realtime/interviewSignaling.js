@@ -660,6 +660,9 @@ class InterviewSignalingManager {
   }
 
   sendMediaControlToStudent(interviewId, command, studentMediaControl) {
+    if (!MEDIA_CONTROL_COMMANDS.has(command)) {
+      return false;
+    }
     const room = this.rooms.get(String(interviewId));
     const studentConn = room?.student;
     if (!studentConn || studentConn.closed) {
@@ -667,6 +670,8 @@ class InterviewSignalingManager {
     }
     return sendWsJson(studentConn.socket, {
       type: 'MEDIA_CONTROL_COMMAND',
+      interviewId: String(interviewId),
+      issuedByRole: 'faculty',
       command,
       studentMediaControl,
       timestamp: new Date().toISOString(),

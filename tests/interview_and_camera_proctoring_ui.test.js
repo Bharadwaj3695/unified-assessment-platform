@@ -94,6 +94,8 @@ describe('UAP Interview & Camera Proctoring Frontend Contract Verification', () 
     // Student sees locked faculty-controlled status and no interactive toggles
     assert.match(videoRoomSrc, /student-locked-media-status/);
     assert.match(videoRoomSrc, /student-media-disclosure/);
+    assert.match(videoRoomSrc, /VALID_MEDIA_CONTROL_COMMANDS/);
+    assert.match(videoRoomSrc, /issuedByRole === 'faculty'/);
 
     // Handles connection lifecycle states & stream cleanup
     assert.match(videoRoomSrc, /connecting/);

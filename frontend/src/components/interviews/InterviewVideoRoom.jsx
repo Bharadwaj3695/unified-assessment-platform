@@ -37,6 +37,13 @@ const CONNECTION_BADGE = {
   ended: { variant: 'neutral', label: 'Ended' },
 };
 
+const VALID_MEDIA_CONTROL_COMMANDS = new Set([
+  'STUDENT_CAMERA_ENABLE',
+  'STUDENT_CAMERA_DISABLE',
+  'STUDENT_MIC_ENABLE',
+  'STUDENT_MIC_DISABLE',
+]);
+
 /**
  * Shared two-way WebRTC video & audio interview room used inside existing Faculty and Student views.
  * - Faculty view: Student is main video, Faculty is self-view; Faculty controls own & student's media.
@@ -222,8 +229,8 @@ export default function InterviewVideoRoom({
   }, []);
 
   const closePeerConnection = useCallback(() => {
-    pendingIceRef.current = [];
     if (pcRef.current) {
+      pendingIceRef.current = [];
       try {
         pcRef.current.onicecandidate = null;
         pcRef.current.ontrack = null;
@@ -349,13 +356,15 @@ export default function InterviewVideoRoom({
   );
 
   const startOfferAsFaculty = useCallback(
-    async ({ iceRestart = false } = {}) => {
+    async ({ iceRestart = false, forceNew = false } = {}) => {
       if (!isFaculty || endedRef.current) return;
       try {
-        const pc =
-          iceRestart && pcRef.current && pcRef.current.signalingState !== 'closed'
-            ? pcRef.current
-            : createPeerConnection(true);
+        const canReusePc =
+          !forceNew &&
+          pcRef.current &&
+          pcRef.current.signalingState !== 'closed' &&
+          (iceRestart || pcRef.current.signalingState === 'stable');
+        const pc = canReusePc ? pcRef.current : createPeerConnection(true);
         attachLocalTracksToPc(pc);
         const offer = await pc.createOffer({ iceRestart });
         await pc.setLocalDescription(offer);
@@ -628,7 +637,7 @@ export default function InterviewVideoRoom({
 
           syncLocalStateToPeer();
           if (isFaculty && msg.peerOnline) {
-            await startOfferAsFaculty();
+            await startOfferAsFaculty({ forceNew: true });
           }
           return;
         }
@@ -641,7 +650,7 @@ export default function InterviewVideoRoom({
           setStatusMessage('Participant joined. Connecting video & audio...');
           syncLocalStateToPeer();
           if (isFaculty) {
-            await startOfferAsFaculty();
+            await startOfferAsFaculty({ forceNew: true });
           }
           return;
         }
@@ -672,7 +681,25 @@ export default function InterviewVideoRoom({
         }
 
         if (msg.type === 'MEDIA_CONTROL_COMMAND' && !isFaculty) {
-          const nextPolicy = msg.studentMediaControl || {};
+          const isValidCommand = VALID_MEDIA_CONTROL_COMMANDS.has(msg.command);
+          const isAuthorizedIssuer = msg.issuedByRole === 'faculty';
+          const isMatchingInterview =
+            !msg.interviewId || String(msg.interviewId) === String(interviewId);
+          if (
+            !isValidCommand ||
+            !isAuthorizedIssuer ||
+            !isMatchingInterview ||
+            !msg.studentMediaControl ||
+            typeof msg.studentMediaControl !== 'object'
+          ) {
+            console.warn('[InterviewVideoRoom] Rejected unauthorized or invalid media command:', msg);
+            return;
+          }
+
+          const nextPolicy = {
+            cameraEnabled: msg.studentMediaControl.cameraEnabled !== false,
+            micEnabled: msg.studentMediaControl.micEnabled !== false,
+          };
           setStudentMediaControl(nextPolicy);
           studentControlRef.current = nextPolicy;
 
@@ -744,7 +771,10 @@ export default function InterviewVideoRoom({
 
         if (msg.type === 'WEBRTC_OFFER' && !isFaculty && msg.sdp) {
           try {
-            const pc = createPeerConnection(false);
+            const pc =
+              pcRef.current && pcRef.current.signalingState !== 'closed'
+                ? pcRef.current
+                : createPeerConnection(false);
             await pc.setRemoteDescription(new RTCSessionDescription(msg.sdp));
             attachLocalTracksToPc(pc);
             const answer = await pc.createAnswer();

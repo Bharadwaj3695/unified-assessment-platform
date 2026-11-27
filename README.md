@@ -281,7 +281,8 @@ unified-assessment-platform/
 │   ├── docker-compose.backend.yml
 │   ├── docker-compose.frontend.yml
 │   ├── docker-compose.code-executor.yml
-│   └── docker-compose.infra.yml
+│   ├── docker-compose.infra.yml
+│   └── docker-compose.dev.yml
 │
 ├── tests/
 │   ├── e2e/
@@ -347,21 +348,29 @@ code-IDE-service/
   .dockerignore
 
 docker-compose/
-  docker-compose.yml               # Full UAP platform orchestration
+  docker-compose.yml               # Master full UAP platform orchestration
   docker-compose.backend.yml       # Backend and MongoDB services
-  docker-compose.frontend.yml      # Frontend application service
+  docker-compose.frontend.yml      # Frontend Nginx (prod) & Vite dev (--profile dev)
   docker-compose.code-executor.yml # Execution API, Worker, Redis queue & SQL
   docker-compose.infra.yml         # Shared core infrastructure (MongoDB, Redis)
+  docker-compose.dev.yml           # Full-stack live bind-mount development override
 
 Startup and Orchestration Commands
 
 Full-Stack Startup (All Services):
 ```bash
-# Using Docker Compose directly from repository root
-docker compose -f docker-compose/docker-compose.yml up -d
+# Development mode (default): Vite dev server with live source bind mounts & HMR on port 5173
+docker compose -f docker-compose/docker-compose.yml up -d --build
+# Or with explicit dev override
+docker compose -f docker-compose/docker-compose.yml -f docker-compose/docker-compose.dev.yml up -d --build
 
-# Or using the root npm convenience script
+# Production Nginx frontend mode: Multi-stage Vite build served by Nginx on ports 80 & 5173
+FRONTEND_DOCKERFILE=docker/Dockerfile FRONTEND_NODE_ENV=production docker compose -f docker-compose/docker-compose.yml up -d --build
+
+# Or using root npm convenience scripts
 npm run docker:up
+npm run docker:dev
+npm run docker:prod
 ```
 
 Modular Startup (Independent Subsystems):
@@ -372,8 +381,11 @@ docker compose -f docker-compose/docker-compose.infra.yml up -d
 # Backend and database only
 docker compose -f docker-compose/docker-compose.backend.yml up -d
 
-# Frontend only
+# Frontend production Nginx only
 docker compose -f docker-compose/docker-compose.frontend.yml up -d
+
+# Frontend development Vite HMR only
+docker compose -f docker-compose/docker-compose.frontend.yml --profile dev up -d uap-frontend-dev
 
 # Code execution microservice only (API + Worker)
 docker compose -f docker-compose/docker-compose.code-executor.yml up -d
@@ -415,6 +427,7 @@ Validation Commands:
 ```bash
 # Validate Compose configuration syntax and build context resolution
 docker compose -f docker-compose/docker-compose.yml config
+docker compose -f docker-compose/docker-compose.yml -f docker-compose/docker-compose.dev.yml config
 docker compose -f docker-compose/docker-compose.backend.yml config
 docker compose -f docker-compose/docker-compose.frontend.yml config
 docker compose -f docker-compose/docker-compose.code-executor.yml config
